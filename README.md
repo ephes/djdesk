@@ -30,7 +30,7 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 
 - `uv run python manage.py runserver` – start the Django development server.
 - `just install` – install/update dependencies via `uv sync`.
-- `just test` – run the unit test suite via `uv run python -m unittest …`.
+- `just test` – run Django's test suite (`manage.py test tests`) with `DJANGO_ENV=test`.
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
 - `just hooks` – run every pre-commit hook against the full codebase.
 

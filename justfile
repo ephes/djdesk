@@ -16,14 +16,18 @@ lint:
 hooks:
     uv run pre-commit run --all-files
 
-# Run the project's unit tests via `uv` and the unittest test discovery.
+# Run Django's test suite via manage.py with the test settings.
 test:
-    uv run python -m unittest discover -s tests -t .
+    DJANGO_ENV=test uv run python manage.py test tests
 
 # Install Electron dependencies under ./electron (once per clone or after package upgrades).
 electron-install:
     cd electron && npm install
 
-# Launch the Phase 1 Electron shell (spawns Django via system Python).
+# Build the bundled Django payload used by the Electron shell.
+electron-bundle:
+    cd electron && npm run bundle
+
+# Launch the Electron shell (prefers the bundled Python when available).
 electron-start:
     cd electron && npm start

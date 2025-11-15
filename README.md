@@ -9,7 +9,8 @@
 ### Initial setup
 
 ```bash
-# Install runtime + dev dependencies into .venv using the lockfile
+# Install runtime + dev dependencies into .venv using the lockfile.
+# uv installs the djdesk package itself in editable mode, so imports work without PYTHONPATH tweaks.
 uv sync --extra dev
 
 # Activate the environment (or rely on `uv run …` for ad-hoc execution)
@@ -18,6 +19,9 @@ source .venv/bin/activate
 # Install git hooks so Ruff + hygiene checks run before each commit
 uv run pre-commit install
 ```
+
+> Using a different workflow? Run `pip install --editable .` (or the equivalent `uv pip install -e .`)
+> inside your virtualenv so `djdesk` is importable without modifying `sys.path`.
 
 ### Everyday commands
 

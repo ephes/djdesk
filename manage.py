@@ -2,13 +2,6 @@
 """Django's command-line utility for administrative tasks."""
 import os
 import sys
-from pathlib import Path
-
-
-PROJECT_ROOT = Path(__file__).resolve().parent
-
-# Ensure the src/ directory is available on sys.path so djdesk can be imported.
-sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 
 def main():

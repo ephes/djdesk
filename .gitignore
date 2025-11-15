@@ -1,0 +1,31 @@
+# specifications for LLMs
+specs/
+
+# macOS stuff
+.DS_Store
+
+# Python / Django
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+*.sqlite3
+db.sqlite3
+
+# Django artifacts
+/static/
+/staticfiles/
+/media/
+
+# Environments & tooling
+.env
+.env.*
+.venv/
+venv/
+.python-version
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.idea/
+.vscode/

@@ -1,0 +1,35 @@
+[project]
+name = "djdesk"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "django>=5.2.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=3.8.0",
+    "ruff>=0.6.8",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort
+    "DJ", # Django-specific rules
+]
+ignore = [
+    "E203", # whitespace before ':', conflicts with formatter
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true

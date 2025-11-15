@@ -28,7 +28,7 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 
 ### Everyday commands
 
-- `uv run python manage.py runserver` – start the Django development server.
+- `just dev` – start the Django development server (`manage.py runserver`).
 - `just install` – install/update dependencies via `uv sync`.
 - `just test` – run Django's test suite (`manage.py test tests`) with `DJANGO_ENV=test`.
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.

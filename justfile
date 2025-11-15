@@ -12,6 +12,10 @@ install:
 lint:
     uv run ruff check .
 
+# Run the Django development server.
+dev:
+    uv run python manage.py runserver
+
 # Run the project's pre-commit hooks against all files.
 hooks:
     uv run pre-commit run --all-files

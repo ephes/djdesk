@@ -12,6 +12,14 @@ const bundleSrcDir = path.join(bundleRoot, 'src');
 const djangoSourceDir = path.join(projectRoot, 'src', 'djdesk');
 const managePy = path.join(projectRoot, 'manage.py');
 
+function buildPythonPath(...paths) {
+  const entries = [...paths];
+  if (process.env.PYTHONPATH) {
+    entries.push(process.env.PYTHONPATH);
+  }
+  return entries.filter(Boolean).join(path.delimiter);
+}
+
 async function main() {
   console.log('Building Django bundle (Phase 2)...');
   await recreateBundle();
@@ -26,6 +34,7 @@ async function main() {
   await collectStatic(bundlePython);
   await writeLauncherScript();
   await writeVersionFile();
+  await verifyBundle(bundlePython);
 
   console.log('django-bundle ready.');
 }
@@ -113,8 +122,8 @@ async function collectStatic(pythonExecutable) {
   const env = {
     ...process.env,
     DJANGO_STATIC_ROOT: staticRoot,
-    DJANGO_ENV: process.env.DJANGO_ENV || 'local',
-    PYTHONPATH: pythonPathEntries.join(path.delimiter)
+    DJANGO_SETTINGS_MODULE: process.env.DJANGO_SETTINGS_MODULE || 'djdesk.settings.local',
+    PYTHONPATH: buildPythonPath(path.join(projectRoot, 'src'))
   };
   await runCommand(pythonExecutable, [
     managePy,
@@ -199,6 +208,33 @@ async function writeVersionFile() {
 
   const payload = `${version}\nBuilt: ${new Date().toISOString()}\n`;
   await fsp.writeFile(versionPath, payload, 'utf8');
+}
+
+async function verifyBundle(pythonExecutable) {
+  console.log('Verifying bundle Python environment...');
+  const env = {
+    ...process.env,
+    PYTHONPATH: buildPythonPath(path.join(bundleRoot, 'src'))
+  };
+  const result = spawnSync(pythonExecutable, [
+    '-c',
+    'import django, sys; sys.stdout.write(django.get_version())'
+  ], {
+    cwd: bundleRoot,
+    env,
+    encoding: 'utf8',
+    stdio: 'pipe'
+  });
+
+  if (result.status !== 0) {
+    const stderr = result.stderr ? result.stderr.trim() : '';
+    const stdout = result.stdout ? result.stdout.trim() : '';
+    throw new Error(
+      `Django verification failed (status ${result.status}): ${stderr || stdout}`
+    );
+  }
+
+  console.log(`Verified Django ${result.stdout.trim()} inside bundle.`);
 }
 
 function runCommand(command, args, options = {}) {

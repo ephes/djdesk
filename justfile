@@ -35,3 +35,13 @@ electron-bundle:
 # Launch the Electron shell (prefers the bundled Python when available).
 electron-start:
     cd electron && npm start
+
+# Build production assets for each OS (must run on matching host OS).
+electron-build-macos:
+    cd electron && npm run build -- --mac
+
+electron-build-windows:
+    cd electron && npm run build -- --win
+
+electron-build-linux:
+    cd electron && npm run build -- --linux

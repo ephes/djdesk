@@ -42,6 +42,7 @@ cd electron && npm run bundle
 4. Copies `manage.py` and `src/djdesk` into `django-bundle/src/`.
 5. Runs `collectstatic --clear` with `DJANGO_STATIC_ROOT` pointed at `django-bundle/staticfiles`.
 6. Writes `run_django.py` (the launcher Electron calls) and a `VERSION` file with the current Git SHA.
+7. Verifies the bundled interpreter by importing Django before exiting.
 
 The bundle is ignored by Git and may be regenerated at any time.
 
@@ -61,6 +62,27 @@ You can still override the interpreter with `PYTHON=/path/to/python npm start`, 
 ## Packaging (experimental)
 
 `npm run build` runs `npm run bundle` and then calls `electron-builder` using `electron/electron-builder.json`. The builder copies `django-bundle/` via `extraResources`, so future installers automatically include the Python virtualenv. Cross-platform CI is deferred to Phase 3.
+
+### Local OS-specific builds
+
+The `just` file contains helpers that mirror the commands we run in CI. Execute them on the matching host OS:
+
+```bash
+just electron-build-macos
+just electron-build-linux
+just electron-build-windows
+```
+
+Under the hood these commands run `npm run build -- --<platform>` to produce assets under `electron/dist/`.
+
+### GitHub Actions workflow
+
+`.github/workflows/electron-desktop.yml` builds macOS, Windows, and Linux artifacts in parallel. Each job:
+
+1. Runs `npm ci` inside `electron/`.
+2. Executes `npm run bundle` to generate the Django payload.
+3. Calls `npm run build -- --<platform>` so Electron Builder packages the bundle.
+4. Uploads the resulting `dist/` directory as a workflow artifact.
 
 ## Bundle Layout
 

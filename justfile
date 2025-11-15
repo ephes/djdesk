@@ -19,3 +19,11 @@ hooks:
 # Run the project's unit tests via `uv` and the unittest test discovery.
 test:
     uv run python -m unittest discover -s tests -t .
+
+# Install Electron dependencies under ./electron (once per clone or after package upgrades).
+electron-install:
+    cd electron && npm install
+
+# Launch the Phase 1 Electron shell (spawns Django via system Python).
+electron-start:
+    cd electron && npm start

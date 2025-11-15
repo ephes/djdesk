@@ -50,3 +50,21 @@ export DJANGO_SECRET_KEY="super-secret"
 export DJANGO_ALLOWED_HOSTS="example.com"
 uv run python manage.py migrate
 ```
+
+### Electron desktop shell (Phase 1)
+
+You can exercise the minimal Electron wrapper that spawns the Django dev server with your local interpreter:
+
+```bash
+# 1. Ensure backend deps are installed (from repo root)
+uv pip install -e .
+
+# 2. Install the Electron dependencies
+cd electron
+npm install
+
+# 3. Launch the shell (optionally pin a Python binary)
+PYTHON=$(command -v python3.14 || command -v python3) npm start
+```
+
+`npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.

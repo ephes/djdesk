@@ -1,0 +1,17 @@
+{
+  "name": "djdesk-electron",
+  "version": "0.1.0",
+  "description": "DJDesk Electron Desktop Application",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^33.0.0"
+  },
+  "dependencies": {
+    "get-port": "^7.1.0"
+  }
+}

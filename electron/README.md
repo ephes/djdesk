@@ -15,7 +15,7 @@ Phase 3 (fully relocatable python-build-standalone interpreters) will build on t
 
 1. **Node.js v18+**.
 2. **[uv](https://github.com/astral-sh/uv)** installed on your PATH (needed for dependency installs).
-3. **Tar** available in your shell (needed to extract python-build-standalone archives).
+3. **tar** available in your shell. (This is mandatory—`build-django.js` shells out to `tar` to unpack python-build-standalone archives. Windows 10+ ships `tar` by default; older versions need an external install.)
 
 > The Phase 3 bundle **downloads its own Python 3.14 interpreter** via
 > [`python-build-standalone`](https://github.com/indygreg/python-build-standalone). You only need a system Python when running
@@ -40,12 +40,14 @@ cd electron && npm run bundle
 `build-django.js` performs the following steps:
 
 1. Creates a fresh `django-bundle/` directory.
-2. Downloads the appropriate **python-build-standalone 3.14.0+20251031** archive for your platform and unpacks it into `django-bundle/python/`.
+2. Downloads the appropriate **python-build-standalone Python 3.14.0+20251031 interpreter** for your platform and unpacks it into `django-bundle/python/` (verifying SHA256 checksums before extraction).
 3. Installs Django dependencies into that interpreter via `pip install` using the dependencies declared in `pyproject.toml`.
 4. Copies `manage.py` and `src/djdesk` into `django-bundle/src/`.
 5. Runs `collectstatic --clear` with `DJANGO_STATIC_ROOT` pointed at `django-bundle/staticfiles`.
 6. Writes `run_django.py` (the launcher Electron calls) and a `VERSION` file with the current Git SHA.
 7. Verifies the bundled interpreter by importing Django before exiting.
+
+> Only the packages listed under `[project].dependencies` in `pyproject.toml` are installed. Optional extras/dev dependencies are ignored.
 
 The bundle is ignored by Git and may be regenerated at any time.
 
@@ -97,7 +99,7 @@ electron/django-bundle/
 ├── run_django.py
 ├── src/djdesk/...           # copied Django project
 ├── staticfiles/             # output of collectstatic
-├── python/                  # python-build-standalone runtime with Django deps
+├── python/                  # python-build-standalone Python 3.14 interpreter with Django deps
 └── VERSION                  # git SHA + timestamp for cache busting
 ```
 

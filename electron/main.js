@@ -108,8 +108,7 @@ async function startDjango() {
     const djangoEnv = {
       ...process.env,
       DJANGO_ENV: process.env.DJANGO_ENV || 'local',
-      DJANGO_SETTINGS_MODULE: process.env.DJANGO_SETTINGS_MODULE || 'djdesk.settings.local',
-      PYTHONHOME: isBundled ? path.join(DJANGO_BUNDLE_DIR, 'python') : process.env.PYTHONHOME
+      DJANGO_SETTINGS_MODULE: process.env.DJANGO_SETTINGS_MODULE || 'djdesk.settings.local'
     };
 
     // Spawn Django dev server

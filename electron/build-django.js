@@ -5,6 +5,7 @@ const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 const toml = require('toml');
 const { spawn, spawnSync, execSync } = require('child_process');
 
@@ -18,6 +19,20 @@ const managePy = path.join(projectRoot, 'manage.py');
 const PYTHON_VERSION = '3.14.0';
 const PYTHON_BUILD_RELEASE = '20251031';
 const PYTHON_DOWNLOAD_BASE = 'https://github.com/indygreg/python-build-standalone/releases/download';
+const PYTHON_SHA256 = {
+  'cpython-3.14.0+20251031-aarch64-apple-darwin-install_only.tar.gz':
+    'b4bcd3c6c24cab32ae99e1b05c89312b783b4d69431d702e5012fe1fdcad4087',
+  'cpython-3.14.0+20251031-x86_64-apple-darwin-install_only.tar.gz':
+    '4e71a3ce973be377ef18637826648bb936e2f9490f64a9e4f33a49bcc431d344',
+  'cpython-3.14.0+20251031-x86_64-unknown-linux-gnu-install_only.tar.gz':
+    '3dec1ab70758a3467ac3313bbcdabf7a9b3016db5c072c4537e3cf0a9e6290f6',
+  'cpython-3.14.0+20251031-aarch64-unknown-linux-gnu-install_only.tar.gz':
+    '128a9cbfb9645d5237ec01704d9d1d2ac5f084464cc43c37a4cd96aa9c3b1ad5',
+  'cpython-3.14.0+20251031-x86_64-pc-windows-msvc-install_only.tar.gz':
+    '39acfcb3857d83eab054a3de11756ffc16b3d49c31393b9800dd2704d1f07fdf',
+  'cpython-3.14.0+20251031-aarch64-pc-windows-msvc-install_only.tar.gz':
+    '599a8b7e12439cd95a201dbdfe95cf363146b1ff91f379555dafd86b170caab9'
+};
 const PLATFORM_MATRIX = {
   darwin: {
     arch: {
@@ -81,6 +96,7 @@ function resolveStandaloneSpec() {
 
 async function prepareStandalonePython({ assetName, pythonRelative }) {
   console.log('Preparing python-build-standalone interpreter...');
+  ensureTarAvailable();
   const downloadDir = path.join(__dirname, '.python-downloads');
   await fsp.mkdir(downloadDir, { recursive: true });
   const archivePath = path.join(downloadDir, assetName);
@@ -94,22 +110,28 @@ async function prepareStandalonePython({ assetName, pythonRelative }) {
   }
 
   const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'djdesk-python-'));
-  await extractArchive(archivePath, tempDir);
+  await verifyChecksum(archivePath, assetName);
 
-  const extractedPythonDir = path.join(tempDir, 'python');
-  if (!fs.existsSync(extractedPythonDir)) {
-    throw new Error('python-build-standalone archive missing python directory');
-  }
-
-  await fsp.rm(pythonDir, { recursive: true, force: true });
-  await fsp.mkdir(path.dirname(pythonDir), { recursive: true });
   try {
-    await fsp.rename(extractedPythonDir, pythonDir);
-  } catch (error) {
-    if (error.code !== 'EXDEV') {
-      throw error;
+    await extractArchive(archivePath, tempDir);
+
+    const extractedPythonDir = path.join(tempDir, 'python');
+    if (!fs.existsSync(extractedPythonDir)) {
+      throw new Error('python-build-standalone archive missing python directory');
     }
-    await fsp.cp(extractedPythonDir, pythonDir, { recursive: true, dereference: false });
+
+    await fsp.rm(pythonDir, { recursive: true, force: true });
+    await fsp.mkdir(path.dirname(pythonDir), { recursive: true });
+    try {
+      await fsp.rename(extractedPythonDir, pythonDir);
+    } catch (error) {
+      if (error.code !== 'EXDEV') {
+        throw error;
+      }
+      await fsp.cp(extractedPythonDir, pythonDir, { recursive: true, dereference: false });
+    }
+  } finally {
+    await fsp.rm(tempDir, { recursive: true, force: true });
   }
 
   const pythonExecutable = path.join(pythonDir, ...pythonRelative);
@@ -121,7 +143,7 @@ async function prepareStandalonePython({ assetName, pythonRelative }) {
     await fsp.chmod(pythonExecutable, 0o755);
   }
 
-  await fsp.rm(tempDir, { recursive: true, force: true });
+  ensurePythonVersion(pythonExecutable);
   console.log(`Standalone interpreter ready at ${pythonExecutable}`);
   return pythonExecutable;
 }
@@ -160,6 +182,44 @@ async function extractArchive(archivePath, destination) {
     args.splice(1, 0, '--force-local');
   }
   await runCommand('tar', args);
+}
+
+function ensureTarAvailable() {
+  try {
+    execSync('tar --version', { stdio: 'ignore' });
+  } catch (error) {
+    throw new Error('tar command not found. Please install tar (available on modern macOS/Linux and Windows 10+) before bundling.');
+  }
+}
+
+async function verifyChecksum(filePath, assetName) {
+  const expected = PYTHON_SHA256[assetName];
+  if (!expected) {
+    throw new Error(`No checksum registered for ${assetName}`);
+  }
+
+  const hash = crypto.createHash('sha256');
+  await new Promise((resolve, reject) => {
+    const stream = fs.createReadStream(filePath);
+    stream.on('data', (chunk) => hash.update(chunk));
+    stream.on('end', resolve);
+    stream.on('error', reject);
+  });
+  const actual = hash.digest('hex');
+  if (actual !== expected) {
+    throw new Error(`Checksum mismatch for ${assetName}. Expected ${expected}, got ${actual}`);
+  }
+}
+
+function ensurePythonVersion(pythonExecutable) {
+  const result = spawnSync(pythonExecutable, ['--version'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe']
+  });
+  const output = `${result.stdout}${result.stderr}`.trim();
+  if (!output.includes(PYTHON_VERSION)) {
+    throw new Error(`Unexpected Python version (${output}); expected ${PYTHON_VERSION}`);
+  }
 }
 
 function buildPythonPath(...paths) {
@@ -219,7 +279,6 @@ async function collectStatic(pythonExecutable) {
     DJANGO_STATIC_ROOT: staticRoot,
     DJANGO_ENV: process.env.DJANGO_ENV || 'local',
     DJANGO_SETTINGS_MODULE: process.env.DJANGO_SETTINGS_MODULE || 'djdesk.settings.local',
-    PYTHONHOME: pythonDir,
     PYTHONPATH: buildPythonPath(path.join(projectRoot, 'src'))
   };
   await runCommand(pythonExecutable, [
@@ -263,13 +322,11 @@ def main() -> None:
     args = parser.parse_args()
 
     bundle_root = Path(__file__).resolve().parent
-    python_root = bundle_root / "python"
     src_root = bundle_root / "src"
     if src_root.exists():
         _augment_pythonpath(src_root)
         sys.path.insert(0, str(src_root))
 
-    os.environ.setdefault("PYTHONHOME", str(python_root))
     os.environ.setdefault("DJANGO_ENV", "local")
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "djdesk.settings.local")
 
@@ -313,7 +370,6 @@ async function verifyBundle(pythonExecutable) {
   console.log('Verifying bundle Python environment...');
   const env = {
     ...process.env,
-    PYTHONHOME: pythonDir,
     PYTHONPATH: buildPythonPath(path.join(bundleRoot, 'src'))
   };
   const result = spawnSync(pythonExecutable, [

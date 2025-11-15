@@ -11,23 +11,28 @@
 ```bash
 # Install runtime + dev dependencies into .venv using the lockfile.
 # uv installs the djdesk package itself in editable mode, so imports work without PYTHONPATH tweaks.
-uv sync --extra dev
-
-# Activate the environment (or rely on `uv run …` for ad-hoc execution)
-source .venv/bin/activate
+just install
 
 # Install git hooks so Ruff + hygiene checks run before each commit
 uv run pre-commit install
 ```
 
-> Using a different workflow? Run `pip install --editable .` (or the equivalent `uv pip install -e .`)
-> inside your virtualenv so `djdesk` is importable without modifying `sys.path`.
+The `just install` recipe wraps `uv sync` so dependency installs stay consistent across contributors.
+
+> `uv sync` installs dev dependencies by default. Use `uv sync --no-dev` if you intentionally want a
+> leaner environment. Activating `.venv/bin/activate` is optional—`uv run …` automatically executes
+> commands inside the managed environment.
+>
+> Using a different workflow? Run `pip install --editable .` (or `uv pip install -e .`) inside your
+> virtualenv so `djdesk` stays importable without modifying `sys.path`.
 
 ### Everyday commands
 
 - `uv run python manage.py runserver` – start the Django development server.
+- `just install` – install/update dependencies via `uv sync`.
 - `just test` – run the unit test suite via `uv run python -m unittest …`.
-- `uv run ruff check .` / `uv run ruff format .` – lint or auto-format using Ruff.
+- `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
+- `just hooks` – run every pre-commit hook against the full codebase.
 - `uv run pre-commit run --all-files` – dry-run all hooks locally.
 
 ### Settings and environments

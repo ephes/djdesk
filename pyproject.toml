@@ -29,6 +29,12 @@ ignore = [
     "E203", # whitespace before ':', conflicts with formatter
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"src/djdesk/settings/*.py" = [
+    "F403", # star import used, acceptable for layered settings
+    "F405", # names defined via star import
+]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

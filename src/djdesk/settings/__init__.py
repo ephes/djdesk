@@ -6,8 +6,8 @@ settings module based on the ``DJANGO_ENV`` environment variable while still
 supporting explicit imports such as ``djdesk.settings.production``.
 """
 
-from importlib import import_module
 import os
+from importlib import import_module
 
 ENVIRONMENT = os.environ.get("DJANGO_ENV", "local").lower()
 

@@ -45,3 +45,12 @@ electron-build-windows:
 
 electron-build-linux:
     cd electron && npm run build -- --linux
+
+# Build using the current host OS (macOS/Linux/Windows).
+electron-build:
+    case "$(uname | tr '[:upper:]' '[:lower:]')" in \
+        darwin*) cd electron && npm run build -- --mac ;; \
+        linux*) cd electron && npm run build -- --linux ;; \
+        msys*|mingw*|cygwin*) cd electron && npm run build -- --win ;; \
+        *) echo "Unsupported platform"; exit 1 ;; \
+    esac

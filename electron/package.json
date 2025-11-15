@@ -4,12 +4,15 @@
   "description": "DJDesk Electron Desktop Application",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "bundle": "node build-django.js",
+    "build": "npm run bundle && electron-builder"
   },
   "author": "",
   "license": "ISC",
   "devDependencies": {
-    "electron": "^33.0.0"
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
   },
   "dependencies": {
     "get-port": "^7.1.0"

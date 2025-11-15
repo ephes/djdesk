@@ -14,7 +14,7 @@ lint:
 
 # Run the Django development server.
 dev:
-    uv run python manage.py runserver
+    DJANGO_SETTINGS_MODULE=djdesk.settings.local uv run python manage.py runserver
 
 # Run the project's pre-commit hooks against all files.
 hooks:
@@ -22,7 +22,7 @@ hooks:
 
 # Run Django's test suite via manage.py with the test settings.
 test:
-    DJANGO_ENV=test uv run python manage.py test tests
+    DJANGO_SETTINGS_MODULE=djdesk.settings.test uv run python manage.py test tests
 
 # Install Electron dependencies under ./electron (once per clone or after package upgrades).
 electron-install:

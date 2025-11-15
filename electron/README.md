@@ -2,98 +2,93 @@
 
 This directory contains the Electron desktop application wrapper for DJDesk.
 
-## Current Implementation: Phase 1 - Minimal Shell (Option A)
+## Current Implementation
 
-This is a minimal Electron shell that:
-- Spawns the Django dev server using your system Python
-- Displays the Django app in an Electron window
-- Manages the Django process lifecycle (start/stop)
+DJDesk has progressed to **Phase 2 — Option B (bundled virtualenv)**:
 
-### Prerequisites
+- Phase 1 remains available as the fallback: when no bundle exists we spawn your system Python and run `manage.py runserver` exactly as before.
+- Phase 2 adds `electron/django-bundle/`, a self-contained virtual environment that includes Django, collected static files, and the project source code. `npm start` now prefers this bundle so the Electron shell can run even without globally installed dependencies.
 
-1. **Python 3.14+** must be installed and available in your PATH
-2. **DJDesk dependencies** must be installed:
-   ```bash
-   # From project root
-   uv pip install -e .
-   ```
+Phase 3 (fully relocatable python-build-standalone interpreters) will build on top of this structure.
 
-3. **Node.js** (v18 or later) must be installed
+## Prerequisites
 
-### Installation
+1. **Python 3.14+** accessible via `python3.14`, `python3`, or `python`.
+2. **[uv](https://github.com/astral-sh/uv)** installed on your PATH (the bundler relies on `uv pip install`).
+3. **DJDesk dependencies** installed once via `uv sync` (or `uv pip install -e .`).
+4. **Node.js v18+**.
+
+## Installing Node Dependencies
 
 ```bash
 cd electron
 npm install
 ```
 
-### Running the App
+## Building the Django Bundle (Phase 2)
 
 ```bash
-# From the electron/ directory
+# from the repo root
+just electron-bundle
+# or
+cd electron && npm run bundle
+```
+
+`build-django.js` performs the following steps:
+
+1. Creates a fresh `django-bundle/` directory.
+2. Creates a virtualenv inside `django-bundle/python/` using your Python 3.14 interpreter.
+3. Installs Django dependencies via `uv pip install` into that virtualenv.
+4. Copies `manage.py` and `src/djdesk` into `django-bundle/src/`.
+5. Runs `collectstatic --clear` with `DJANGO_STATIC_ROOT` pointed at `django-bundle/staticfiles`.
+6. Writes `run_django.py` (the launcher Electron calls) and a `VERSION` file with the current Git SHA.
+
+The bundle is ignored by Git and may be regenerated at any time.
+
+## Running the App
+
+```bash
+cd electron
 npm start
 ```
 
-This will:
-1. Start the Django dev server on an available port (default: 8000)
-2. Wait for the server to be ready
-3. Open an Electron window showing the Django app
+- If `django-bundle/python` exists, Electron uses it to run `run_django.py --host 127.0.0.1 --port <random>`.
+- If the bundle is missing, we fall back to the Phase 1 behavior and spawn the system Python.
+- Close the window or press `Ctrl+C` to shut down both Django and Electron.
 
-**Using a specific Python interpreter:**
-```bash
-# Use a custom Python (e.g., pyenv shim)
-PYTHON=/path/to/python3.14 npm start
-```
+You can still override the interpreter with `PYTHON=/path/to/python npm start`, but the bundled interpreter wins when present so you rarely need to.
 
-The app will automatically try `python3` first, then `python`. Set `PYTHON` to override this behavior.
+## Packaging (experimental)
 
-### Development
+`npm run build` runs `npm run bundle` and then calls `electron-builder` using `electron/electron-builder.json`. The builder copies `django-bundle/` via `extraResources`, so future installers automatically include the Python virtualenv. Cross-platform CI is deferred to Phase 3.
 
-- The app runs Django with `--noreload` to prevent conflicts
-- Press `Ctrl+C` or close the window to stop both Electron and Django
-- Django logs appear in the terminal where you ran `npm start`
-
-## Limitations (Phase 1)
-
-This is a **development-only** implementation:
-- ✅ Works great for local development (`npm start`)
-- ❌ **Cannot create distributable packages** (requires Phase 2/3)
-- ❌ Requires Python 3.14+ and Django installed on the system
-
-## Next Steps
-
-To create distributable applications, we need to implement:
-
-- **Phase 2**: Bundle Python virtualenv + Django project into the app
-- **Phase 3**: Include fully relocatable Python interpreter (python-build-standalone)
-
-See `../specs/2025-11-15_django_electron.md` for the full roadmap.
-
-## Architecture
+## Bundle Layout
 
 ```
-electron/
-├── main.js         # Main Electron process (spawns Django)
-├── preload.cjs     # Security preload script
-├── package.json    # Node dependencies
-└── README.md       # This file
+electron/django-bundle/
+├── manage.py
+├── run_django.py
+├── src/djdesk/...           # copied Django project
+├── staticfiles/             # output of collectstatic
+├── python/                  # virtualenv with Python 3.14 + deps
+└── VERSION                  # git SHA + timestamp for cache busting
 ```
-
-The Django project lives in `../src/djdesk/` and is run via `../manage.py`.
 
 ## Troubleshooting
 
+**"build-django.js failed"**
+- Ensure `python3.14 --version` works (the script tries `python3.14`, then `python3`, then `python`).
+- Ensure `uv --version` works; install uv if missing.
+- Delete `electron/django-bundle/` and try again if permissions look odd.
+
 **"Django server failed to start"**
-- Ensure Python 3.14+ is installed: `python3 --version` or `python --version`
-- Ensure DJDesk is installed: `python3 -c "import django"`
-- Check that manage.py works: `python3 ../manage.py runserver`
-- Try specifying Python explicitly: `PYTHON=python3.14 npm start`
+- Confirm the bundle exists and contains `python/bin/python` (macOS/Linux) or `python/Scripts/python.exe` (Windows).
+- Check the terminal logs; `run_django.py` bubbles Django errors directly to stdout/stderr.
+- Delete the bundle and rebuild if dependencies look stale.
 
 **Port conflicts**
-- The app automatically finds an available port using `get-port`
-- If you see port errors, ensure no other Django instances are running
+- The app uses `get-port` to find a free port, but another process may still win the race. Re-run `npm start` if the selected port was in use.
 
 **Window doesn't open**
-- Check the terminal for Django errors
-- The app waits up to 15 seconds for Django to respond
-- Try running Django manually first to diagnose issues
+- Review the console output for Django tracebacks.
+- The bootstrapper waits ~15 seconds for the Django HTTP endpoint before giving up; misconfigured settings will surface there.

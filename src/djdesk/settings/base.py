@@ -104,7 +104,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/4.0/howto/static-files/
 
 STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+_STATIC_ROOT_OVERRIDE = os.environ.get("DJANGO_STATIC_ROOT")
+if _STATIC_ROOT_OVERRIDE:
+    STATIC_ROOT = Path(_STATIC_ROOT_OVERRIDE).expanduser().resolve()
+else:
+    STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/4.0/ref/settings/#default-auto-field

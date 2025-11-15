@@ -1,24 +1,34 @@
 const { app, BrowserWindow } = require('electron');
 const { spawn, execSync } = require('child_process');
+const fs = require('fs');
 const path = require('path');
 const http = require('http');
+
+const DJANGO_BUNDLE_DIR = path.join(__dirname, 'django-bundle');
+const BUNDLE_RUNNER = path.join(DJANGO_BUNDLE_DIR, 'run_django.py');
 
 let mainWindow;
 let djangoProcess;
 let djangoPort;
 let getPortModule;
 
-/**
- * Find a suitable Python interpreter
- * Respects PYTHON env var, then tries python3, then python
- */
-function findPython() {
+function getBundledPythonPath() {
+  const bundlePython = process.platform === 'win32'
+    ? path.join(DJANGO_BUNDLE_DIR, 'python', 'Scripts', 'python.exe')
+    : path.join(DJANGO_BUNDLE_DIR, 'python', 'bin', 'python');
+
+  if (fs.existsSync(bundlePython) && fs.existsSync(BUNDLE_RUNNER)) {
+    return bundlePython;
+  }
+  return null;
+}
+
+function findSystemPython() {
   if (process.env.PYTHON) {
     return process.env.PYTHON;
   }
 
-  // Try python3 first (common on macOS/Linux)
-  const candidates = ['python3', 'python'];
+  const candidates = ['python3.14', 'python3', 'python'];
   for (const cmd of candidates) {
     try {
       execSync(`${cmd} --version`, { stdio: 'ignore' });
@@ -31,6 +41,14 @@ function findPython() {
   throw new Error(
     'Python not found. Please install Python 3.14+ or set the PYTHON environment variable.'
   );
+}
+
+function resolvePython() {
+  const bundled = getBundledPythonPath();
+  if (bundled) {
+    return { interpreter: bundled, mode: 'bundled' };
+  }
+  return { interpreter: findSystemPython(), mode: 'system' };
 }
 
 // Ensure single instance
@@ -57,9 +75,12 @@ async function startDjango() {
       ({ default: getPortModule } = await import('get-port'));
     }
 
-    // Find Python interpreter
-    const pythonCmd = findPython();
-    console.log(`Using Python: ${pythonCmd}`);
+    // Find Python interpreter and determine run mode
+    const pythonInfo = resolvePython();
+    const isBundled = pythonInfo.mode === 'bundled';
+    console.log(
+      `Using ${isBundled ? 'bundled' : 'system'} Python: ${pythonInfo.interpreter}`
+    );
 
     // Get an available port
     djangoPort = await getPortModule({ port: 8000 });
@@ -68,15 +89,31 @@ async function startDjango() {
     // Path to manage.py (one level up from electron/)
     const managePyPath = path.join(__dirname, '..', 'manage.py');
 
+    const djangoArgs = isBundled
+      ? [
+          BUNDLE_RUNNER,
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(djangoPort)
+        ]
+      : [
+          managePyPath,
+          'runserver',
+          `127.0.0.1:${djangoPort}`,
+          '--noreload'
+        ];
+
+    const djangoCwd = isBundled ? DJANGO_BUNDLE_DIR : path.join(__dirname, '..');
+    const djangoEnv = {
+      ...process.env,
+      DJANGO_ENV: process.env.DJANGO_ENV || 'local'
+    };
+
     // Spawn Django dev server
-    djangoProcess = spawn(pythonCmd, [
-      managePyPath,
-      'runserver',
-      `127.0.0.1:${djangoPort}`,
-      '--noreload'
-    ], {
-      cwd: path.join(__dirname, '..'),
-      env: { ...process.env, DJANGO_ENV: 'local' }
+    djangoProcess = spawn(pythonInfo.interpreter, djangoArgs, {
+      cwd: djangoCwd,
+      env: djangoEnv
     });
 
     djangoProcess.stdout.on('data', (data) => {

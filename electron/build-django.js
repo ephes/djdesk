@@ -2,7 +2,10 @@
 
 const fs = require('fs');
 const fsp = require('fs/promises');
+const os = require('os');
 const path = require('path');
+const https = require('https');
+const toml = require('toml');
 const { spawn, spawnSync, execSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
@@ -12,23 +15,37 @@ const bundleSrcDir = path.join(bundleRoot, 'src');
 const djangoSourceDir = path.join(projectRoot, 'src', 'djdesk');
 const managePy = path.join(projectRoot, 'manage.py');
 
-function buildPythonPath(...paths) {
-  const entries = [...paths];
-  if (process.env.PYTHONPATH) {
-    entries.push(process.env.PYTHONPATH);
+const PYTHON_VERSION = '3.14.0';
+const PYTHON_BUILD_RELEASE = '20251031';
+const PYTHON_DOWNLOAD_BASE = 'https://github.com/indygreg/python-build-standalone/releases/download';
+const PLATFORM_MATRIX = {
+  darwin: {
+    arch: {
+      arm64: { triple: 'aarch64-apple-darwin', pythonRelative: ['bin', 'python3'] },
+      x64: { triple: 'x86_64-apple-darwin', pythonRelative: ['bin', 'python3'] }
+    }
+  },
+  linux: {
+    arch: {
+      x64: { triple: 'x86_64-unknown-linux-gnu', pythonRelative: ['bin', 'python3'] },
+      arm64: { triple: 'aarch64-unknown-linux-gnu', pythonRelative: ['bin', 'python3'] }
+    }
+  },
+  win32: {
+    arch: {
+      x64: { triple: 'x86_64-pc-windows-msvc', pythonRelative: ['python.exe'] },
+      arm64: { triple: 'aarch64-pc-windows-msvc', pythonRelative: ['python.exe'] }
+    }
   }
-  return entries.filter(Boolean).join(path.delimiter);
-}
+};
 
 async function main() {
-  console.log('Building Django bundle (Phase 2)...');
+  console.log('Building Django bundle (Phase 3)...');
   await recreateBundle();
 
-  const systemPython = findSystemPython();
-  console.log(`Using system Python: ${systemPython}`);
-  await createVirtualEnv(systemPython);
-
-  const bundlePython = getBundlePython();
+  const standaloneSpec = resolveStandaloneSpec();
+  const bundlePython = await prepareStandalonePython(standaloneSpec);
+ 
   await installPythonDeps(bundlePython);
   await copyProjectFiles();
   await collectStatic(bundlePython);
@@ -44,61 +61,143 @@ async function recreateBundle() {
   await fsp.mkdir(bundleRoot, { recursive: true });
 }
 
-function findSystemPython() {
-  const explicit = process.env.PYTHON;
-  if (explicit && commandExists(explicit)) {
-    return explicit;
+function resolveStandaloneSpec() {
+  const platformConfig = PLATFORM_MATRIX[process.platform];
+  if (!platformConfig) {
+    throw new Error(`Unsupported platform: ${process.platform}`);
   }
 
-  const candidates = ['python3.14', 'python3', 'python'];
-  for (const candidate of candidates) {
-    if (commandExists(candidate)) {
-      return candidate;
-    }
+  const archConfig = platformConfig.arch[process.arch];
+  if (!archConfig) {
+    throw new Error(`Unsupported architecture ${process.arch} on ${process.platform}`);
   }
 
-  throw new Error(
-    'Unable to find a Python 3.14+ interpreter. Set PYTHON or adjust your PATH.'
-  );
+  const assetName = `cpython-${PYTHON_VERSION}+${PYTHON_BUILD_RELEASE}-${archConfig.triple}-install_only.tar.gz`;
+  return {
+    assetName,
+    pythonRelative: archConfig.pythonRelative
+  };
 }
 
-function commandExists(command) {
+async function prepareStandalonePython({ assetName, pythonRelative }) {
+  console.log('Preparing python-build-standalone interpreter...');
+  const downloadDir = path.join(__dirname, '.python-downloads');
+  await fsp.mkdir(downloadDir, { recursive: true });
+  const archivePath = path.join(downloadDir, assetName);
+  const downloadUrl = `${PYTHON_DOWNLOAD_BASE}/${PYTHON_BUILD_RELEASE}/${assetName}`;
+
+  if (!fs.existsSync(archivePath)) {
+    console.log(`Downloading ${assetName}...`);
+    await downloadFile(downloadUrl, archivePath);
+  } else {
+    console.log(`Reusing cached interpreter archive ${archivePath}`);
+  }
+
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'djdesk-python-'));
+  await extractArchive(archivePath, tempDir);
+
+  const extractedPythonDir = path.join(tempDir, 'python');
+  if (!fs.existsSync(extractedPythonDir)) {
+    throw new Error('python-build-standalone archive missing python directory');
+  }
+
+  await fsp.rm(pythonDir, { recursive: true, force: true });
+  await fsp.mkdir(path.dirname(pythonDir), { recursive: true });
   try {
-    spawnSync(command, ['--version'], { stdio: 'ignore' });
-    return true;
+    await fsp.rename(extractedPythonDir, pythonDir);
   } catch (error) {
-    return false;
+    if (error.code !== 'EXDEV') {
+      throw error;
+    }
+    await fsp.cp(extractedPythonDir, pythonDir, { recursive: true, dereference: false });
   }
-}
 
-async function createVirtualEnv(pythonCmd) {
-  console.log('Creating virtual environment inside django-bundle...');
-  await runCommand(pythonCmd, ['-m', 'venv', pythonDir]);
-}
-
-function getBundlePython() {
-  const pythonExecutable = process.platform === 'win32'
-    ? path.join(pythonDir, 'Scripts', 'python.exe')
-    : path.join(pythonDir, 'bin', 'python');
-
+  const pythonExecutable = path.join(pythonDir, ...pythonRelative);
   if (!fs.existsSync(pythonExecutable)) {
-    throw new Error(`Virtualenv python missing at ${pythonExecutable}`);
+    throw new Error(`Python executable not found at ${pythonExecutable}`);
   }
 
+  if (process.platform !== 'win32') {
+    await fsp.chmod(pythonExecutable, 0o755);
+  }
+
+  await fsp.rm(tempDir, { recursive: true, force: true });
+  console.log(`Standalone interpreter ready at ${pythonExecutable}`);
   return pythonExecutable;
 }
 
+async function downloadFile(url, destination) {
+  await fsp.mkdir(path.dirname(destination), { recursive: true });
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, (response) => {
+      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+        response.destroy();
+        downloadFile(response.headers.location, destination).then(resolve).catch(reject);
+        return;
+      }
+
+      if (response.statusCode !== 200) {
+        reject(new Error(`Failed to download ${url} (status ${response.statusCode})`));
+        return;
+      }
+
+      const file = fs.createWriteStream(destination);
+      response.pipe(file);
+      file.on('finish', () => {
+        file.close(resolve);
+      });
+      file.on('error', reject);
+    });
+
+    request.on('error', reject);
+  });
+}
+
+async function extractArchive(archivePath, destination) {
+  await fsp.mkdir(destination, { recursive: true });
+  const args = ['-xzf', archivePath, '-C', destination];
+  if (process.platform === 'win32') {
+    args.splice(1, 0, '--force-local');
+  }
+  await runCommand('tar', args);
+}
+
+function buildPythonPath(...paths) {
+  const entries = [...paths];
+  if (process.env.PYTHONPATH) {
+    entries.push(process.env.PYTHONPATH);
+  }
+  return entries.filter(Boolean).join(path.delimiter);
+}
+
+function readProjectDependencies() {
+  const pyprojectPath = path.join(projectRoot, 'pyproject.toml');
+  const tomlContent = fs.readFileSync(pyprojectPath, 'utf8');
+  const data = toml.parse(tomlContent);
+  return data.project?.dependencies ?? [];
+}
+
 async function installPythonDeps(pythonExecutable) {
-  console.log('Installing Django dependencies via uv...');
-  await runCommand('uv', [
+  const dependencies = readProjectDependencies();
+  if (dependencies.length === 0) {
+    console.log('No runtime dependencies declared in pyproject.toml.');
+    return;
+  }
+
+  console.log('Installing Django dependencies via pip...');
+  const pipEnv = {
+    ...process.env,
+    PIP_REQUIRE_VIRTUALENV: '0'
+  };
+  await runCommand(pythonExecutable, [
+    '-m',
     'pip',
     'install',
-    '--python',
-    pythonExecutable,
-    '-r',
-    path.join(projectRoot, 'pyproject.toml')
+    '--no-cache-dir',
+    ...dependencies
   ], {
-    cwd: projectRoot
+    cwd: projectRoot,
+    env: pipEnv
   });
 }
 
@@ -115,14 +214,12 @@ async function copyProjectFiles() {
 async function collectStatic(pythonExecutable) {
   console.log('Running collectstatic targeting the bundle...');
   const staticRoot = path.join(bundleRoot, 'staticfiles');
-  const pythonPathEntries = [path.join(projectRoot, 'src')];
-  if (process.env.PYTHONPATH) {
-    pythonPathEntries.push(process.env.PYTHONPATH);
-  }
   const env = {
     ...process.env,
     DJANGO_STATIC_ROOT: staticRoot,
+    DJANGO_ENV: process.env.DJANGO_ENV || 'local',
     DJANGO_SETTINGS_MODULE: process.env.DJANGO_SETTINGS_MODULE || 'djdesk.settings.local',
+    PYTHONHOME: pythonDir,
     PYTHONPATH: buildPythonPath(path.join(projectRoot, 'src'))
   };
   await runCommand(pythonExecutable, [
@@ -166,11 +263,13 @@ def main() -> None:
     args = parser.parse_args()
 
     bundle_root = Path(__file__).resolve().parent
+    python_root = bundle_root / "python"
     src_root = bundle_root / "src"
     if src_root.exists():
         _augment_pythonpath(src_root)
         sys.path.insert(0, str(src_root))
 
+    os.environ.setdefault("PYTHONHOME", str(python_root))
     os.environ.setdefault("DJANGO_ENV", "local")
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "djdesk.settings.local")
 
@@ -214,6 +313,7 @@ async function verifyBundle(pythonExecutable) {
   console.log('Verifying bundle Python environment...');
   const env = {
     ...process.env,
+    PYTHONHOME: pythonDir,
     PYTHONPATH: buildPythonPath(path.join(bundleRoot, 'src'))
   };
   const result = spawnSync(pythonExecutable, [

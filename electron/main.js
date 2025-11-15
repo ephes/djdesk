@@ -14,8 +14,8 @@ let getPortModule;
 
 function getBundledPythonPath() {
   const bundlePython = process.platform === 'win32'
-    ? path.join(DJANGO_BUNDLE_DIR, 'python', 'Scripts', 'python.exe')
-    : path.join(DJANGO_BUNDLE_DIR, 'python', 'bin', 'python');
+    ? path.join(DJANGO_BUNDLE_DIR, 'python', 'python.exe')
+    : path.join(DJANGO_BUNDLE_DIR, 'python', 'bin', 'python3');
 
   if (fs.existsSync(bundlePython) && fs.existsSync(BUNDLE_RUNNER)) {
     return bundlePython;
@@ -108,7 +108,8 @@ async function startDjango() {
     const djangoEnv = {
       ...process.env,
       DJANGO_ENV: process.env.DJANGO_ENV || 'local',
-      DJANGO_SETTINGS_MODULE: process.env.DJANGO_SETTINGS_MODULE || 'djdesk.settings.local'
+      DJANGO_SETTINGS_MODULE: process.env.DJANGO_SETTINGS_MODULE || 'djdesk.settings.local',
+      PYTHONHOME: isBundled ? path.join(DJANGO_BUNDLE_DIR, 'python') : process.env.PYTHONHOME
     };
 
     // Spawn Django dev server

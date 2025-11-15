@@ -13,10 +13,13 @@ Phase 3 (fully relocatable python-build-standalone interpreters) will build on t
 
 ## Prerequisites
 
-1. **Python 3.14+** accessible via `python3.14`, `python3`, or `python`.
-2. **[uv](https://github.com/astral-sh/uv)** installed on your PATH (the bundler relies on `uv pip install`).
-3. **DJDesk dependencies** installed once via `uv sync` (or `uv pip install -e .`).
-4. **Node.js v18+**.
+1. **Node.js v18+**.
+2. **[uv](https://github.com/astral-sh/uv)** installed on your PATH (needed for dependency installs).
+3. **Tar** available in your shell (needed to extract python-build-standalone archives).
+
+> The Phase 3 bundle **downloads its own Python 3.14 interpreter** via
+> [`python-build-standalone`](https://github.com/indygreg/python-build-standalone). You only need a system Python when running
+> the fallback Phase 1 shell without a bundle.
 
 ## Installing Node Dependencies
 
@@ -25,7 +28,7 @@ cd electron
 npm install
 ```
 
-## Building the Django Bundle (Phase 2)
+## Building the Django Bundle (Phase 3)
 
 ```bash
 # from the repo root
@@ -37,8 +40,8 @@ cd electron && npm run bundle
 `build-django.js` performs the following steps:
 
 1. Creates a fresh `django-bundle/` directory.
-2. Creates a virtualenv inside `django-bundle/python/` using your Python 3.14 interpreter.
-3. Installs Django dependencies via `uv pip install` into that virtualenv.
+2. Downloads the appropriate **python-build-standalone 3.14.0+20251031** archive for your platform and unpacks it into `django-bundle/python/`.
+3. Installs Django dependencies into that interpreter via `pip install` using the dependencies declared in `pyproject.toml`.
 4. Copies `manage.py` and `src/djdesk` into `django-bundle/src/`.
 5. Runs `collectstatic --clear` with `DJANGO_STATIC_ROOT` pointed at `django-bundle/staticfiles`.
 6. Writes `run_django.py` (the launcher Electron calls) and a `VERSION` file with the current Git SHA.
@@ -61,7 +64,7 @@ You can still override the interpreter with `PYTHON=/path/to/python npm start`, 
 
 ## Packaging (experimental)
 
-`npm run build` runs `npm run bundle` and then calls `electron-builder` using `electron/electron-builder.json`. The builder copies `django-bundle/` via `extraResources`, so future installers automatically include the Python virtualenv. Cross-platform CI is deferred to Phase 3.
+`npm run build` runs `npm run bundle` and then calls `electron-builder` using `electron/electron-builder.json`. The builder copies `django-bundle/` (including the python-build-standalone interpreter) via `extraResources`, so installers contain a fully offline runtime. Cross-platform CI is handled by `.github/workflows/electron-desktop.yml`.
 
 ### Local OS-specific builds
 
@@ -71,6 +74,8 @@ The `just` file contains helpers that mirror the commands we run in CI. Execute 
 just electron-build-macos
 just electron-build-linux
 just electron-build-windows
+# or rely on auto-detection
+just electron-build
 ```
 
 Under the hood these commands run `npm run build -- --<platform>` to produce assets under `electron/dist/`.
@@ -92,19 +97,19 @@ electron/django-bundle/
 ├── run_django.py
 ├── src/djdesk/...           # copied Django project
 ├── staticfiles/             # output of collectstatic
-├── python/                  # virtualenv with Python 3.14 + deps
+├── python/                  # python-build-standalone runtime with Django deps
 └── VERSION                  # git SHA + timestamp for cache busting
 ```
 
 ## Troubleshooting
 
 **"build-django.js failed"**
-- Ensure `python3.14 --version` works (the script tries `python3.14`, then `python3`, then `python`).
-- Ensure `uv --version` works; install uv if missing.
+- Ensure your shell can run `tar` (needed to extract python-build-standalone).
+- Confirm you have network access to GitHub to download the interpreter artifacts.
 - Delete `electron/django-bundle/` and try again if permissions look odd.
 
 **"Django server failed to start"**
-- Confirm the bundle exists and contains `python/bin/python` (macOS/Linux) or `python/Scripts/python.exe` (Windows).
+- Confirm the bundle exists and contains `python/bin/python3` (macOS/Linux) or `python/python.exe` (Windows).
 - Check the terminal logs; `run_django.py` bubbles Django errors directly to stdout/stderr.
 - Delete the bundle and rebuild if dependencies look stale.
 

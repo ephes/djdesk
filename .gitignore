@@ -34,3 +34,4 @@ venv/
 electron/node_modules/
 electron/dist/
 electron/django-bundle/
+electron/.python-downloads/

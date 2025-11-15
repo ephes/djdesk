@@ -33,7 +33,6 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 - `just test` – run the unit test suite via `uv run python -m unittest …`.
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
 - `just hooks` – run every pre-commit hook against the full codebase.
-- `uv run pre-commit run --all-files` – dry-run all hooks locally.
 
 ### Settings and environments
 

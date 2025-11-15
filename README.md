@@ -28,24 +28,24 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 
 ### Everyday commands
 
-- `just dev` – start the Django development server (`manage.py runserver`).
+- `just dev` – start the Django development server (`manage.py runserver`) using `djdesk.settings.local`.
 - `just install` – install/update dependencies via `uv sync`.
-- `just test` – run Django's test suite (`manage.py test tests`) with `DJANGO_ENV=test`.
+- `just test` – run Django's test suite (`manage.py test tests`) using `djdesk.settings.test`.
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
 - `just hooks` – run every pre-commit hook against the full codebase.
 
 ### Settings and environments
 
-Settings live in `djdesk/settings/` and are selected via `DJANGO_ENV`:
+Settings live in `djdesk/settings/`; choose the appropriate module via `DJANGO_SETTINGS_MODULE`:
 
-- `local` (default for `manage.py`): debug on, console email backend, localhost hosts.
-- `test`: deterministic key, in-memory SQLite DB, fast password hasher, locmem email.
-- `production`: forces secrets/hosts/DB config via env vars and turns on secure cookies.
+- `djdesk.settings.local` (default for `manage.py` and `just dev`): debug on, console email backend, localhost hosts.
+- `djdesk.settings.test` (used by `just test`): deterministic key, in-memory SQLite DB, fast password hasher, locmem email.
+- `djdesk.settings.production` (default for ASGI/WSGI entry points): expects secrets/hosts/DB config from env vars and enables secure cookies.
 
-Override the environment by exporting `DJANGO_ENV` (and optionally `DJANGO_SETTINGS_MODULE`) before running Django commands, for example:
+Override the module explicitly whenever you need something different, e.g.:
 
 ```bash
-export DJANGO_ENV=production
+export DJANGO_SETTINGS_MODULE=djdesk.settings.production
 export DJANGO_SECRET_KEY="super-secret"
 export DJANGO_ALLOWED_HOSTS="example.com"
 uv run python manage.py migrate

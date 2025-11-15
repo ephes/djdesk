@@ -1,24 +1,10 @@
 """
-Environment-aware settings loader.
+Default settings module for ``DJANGO_SETTINGS_MODULE=djdesk.settings``.
 
-This allows ``DJANGO_SETTINGS_MODULE=djdesk.settings`` to resolve the correct
-settings module based on the ``DJANGO_ENV`` environment variable while still
-supporting explicit imports such as ``djdesk.settings.production``.
+This simply re-exports the local development settings. For alternative
+environments, point ``DJANGO_SETTINGS_MODULE`` directly at
+``djdesk.settings.local``, ``djdesk.settings.test``, or
+``djdesk.settings.production``.
 """
 
-import os
-from importlib import import_module
-
-ENVIRONMENT = os.environ.get("DJANGO_ENV", "local").lower()
-
-MODULE_MAP = {
-    "local": "djdesk.settings.local",
-    "test": "djdesk.settings.test",
-    "production": "djdesk.settings.production",
-}
-
-settings_module = import_module(MODULE_MAP.get(ENVIRONMENT, MODULE_MAP["local"]))
-
-for setting in dir(settings_module):
-    if setting.isupper():
-        globals()[setting] = getattr(settings_module, setting)
+from .local import *  # noqa: F401,F403

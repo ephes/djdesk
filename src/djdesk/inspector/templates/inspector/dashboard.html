@@ -1,0 +1,271 @@
+{% extends "inspector/base.html" %}
+{% load humanize inspector_icons %}
+
+{% block body %}
+    <div class="inspector-page">
+        {% if workspace %}
+    <div class="inspector-shell" data-inspector-shell data-status-endpoint="{{ workspace_status_url }}" data-task-endpoint="{% url 'inspector:task-run-create' %}">
+        <header class="inspector-toolbar">
+            <div class="toolbar-left">
+                <span class="product-lockup">DJDesk · Project Inspector</span>
+                <nav class="toolbar-nav">
+                    <a href="{% url 'inspector:wizard' %}" class="toolbar-btn">
+                        <span data-lucide="folder-open"></span>
+                        <span>Import Project</span>
+                    </a>
+                    <button type="button" class="toolbar-btn" data-docs-toggle>
+                        <span data-lucide="book-open"></span>
+                        <span>Docs</span>
+                    </button>
+                    <button type="button" class="toolbar-btn" data-open-tasks>
+                        <span data-lucide="list-checks"></span>
+                        <span>Task Queue</span>
+                    </button>
+                </nav>
+            </div>
+            <div class="toolbar-right">
+                <div class="flag-badges">
+                    {% for flag, enabled in inspector_flags.items %}
+                        <span class="flag-badge {% if enabled %}is-enabled{% endif %}">{{ flag|cut:"stage_"|upper }}</span>
+                    {% endfor %}
+                </div>
+                <div class="connection-status" data-connection-indicator>Offline</div>
+            </div>
+        </header>
+        <div class="inspector-layout">
+            <aside class="inspector-rail">
+                <div class="rail-section">
+                    <div class="rail-heading">
+                        <span>Workspaces</span>
+                        <a href="{% url 'inspector:wizard' %}">New</a>
+                    </div>
+                    <ul class="workspace-list">
+                        {% for ws in workspaces %}
+                        <li class="workspace-list-item {% if ws.pk == workspace.pk %}is-active{% endif %}">
+                            <a href="?workspace={{ ws.slug }}">
+                                <span class="workspace-name">{{ ws.name }}</span>
+                                <span class="workspace-path">{{ ws.project_path }}</span>
+                            </a>
+                        </li>
+                        {% empty %}
+                        <li class="workspace-list-item is-empty">No workspaces yet.</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                <div class="rail-section">
+                    <div class="workspace-dropzone" data-dropzone>
+                        <p>Drag a Django folder here to register it.</p>
+                        <small>Electron surfaces the real path for native imports.</small>
+                    </div>
+                </div>
+                <div class="rail-section">
+                    <h3 class="rail-heading">Scan queue</h3>
+                    <div id="scan-board" class="scan-board">
+                        {% for scan in workspace.scans.all|slice:":4" %}
+                        <article class="scan-card scan-card--{{ scan.status }}">
+                            <header>
+                                <span class="scan-kind">
+                                    <span data-lucide="{{ scan.kind|scan_icon }}"></span>
+                                    <span>{{ scan.get_kind_display }}</span>
+                                </span>
+                                <span>{{ scan.progress }}%</span>
+                            </header>
+                            <p>{{ scan.summary|default:"Preparing scan" }}</p>
+                        </article>
+                        {% empty %}
+                        <p class="empty-note">No scans queued yet.</p>
+                        {% endfor %}
+                    </div>
+                </div>
+            </aside>
+            <section class="inspector-canvas">
+                <div class="insight-grid">
+                    {% for insight in workspace.insights %}
+                    <article class="insight-card insight-card--{{ insight.severity|default:'info' }}">
+                        <header>
+                            <span>{{ insight.title }}</span>
+                            <small>{{ insight.delta }}</small>
+                        </header>
+                        <div class="insight-value">{{ insight.value }}</div>
+                        <p>{{ insight.caption }}</p>
+                    </article>
+                    {% empty %}
+                    <p class="empty-note">Run a scan to populate insights.</p>
+                    {% endfor %}
+                </div>
+                <div class="inspector-tabs" data-tab-list>
+                    <button type="button" class="inspector-tab is-active" data-tab-target="schema">Schema</button>
+                    <button type="button" class="inspector-tab" data-tab-target="migrations">Migrations</button>
+                    <button type="button" class="inspector-tab" data-tab-target="code">Code</button>
+                    <button type="button" class="inspector-tab" data-tab-target="results">Results</button>
+                </div>
+                <div class="tab-panels">
+                    <section class="tab-panel is-visible" id="tab-schema">
+                        <div class="schema-canvas-wrapper">
+                            <div id="schema-canvas" class="{% if not workspace.schema_graph.nodes %}is-empty{% endif %}">
+                                {% if not workspace.schema_graph.nodes %}
+                                <p class="empty-note">Run a schema scan to visualize relationships.</p>
+                                {% endif %}
+                            </div>
+                        </div>
+                        <div class="schema-grid">
+                            {% for node in workspace.schema_graph.nodes %}
+                            <article class="schema-node">
+                                <header>
+                                    <span>{{ node.name }}</span>
+                                    <small>{{ node.badge }}</small>
+                                </header>
+                                <ul>
+                                    {% for field in node.fields %}
+                                    <li>{{ field }}</li>
+                                    {% endfor %}
+                                </ul>
+                                {% if node.relations %}
+                                <footer>
+                                    {% for rel in node.relations %}
+                                        <span class="relation-pill">{{ rel }}</span>
+                                    {% endfor %}
+                                </footer>
+                                {% endif %}
+                            </article>
+                            {% empty %}
+                            <p class="empty-note">Schema map will appear after the first scan.</p>
+                            {% endfor %}
+                        </div>
+                    </section>
+                    <section class="tab-panel" id="tab-migrations">
+                        <div class="migrations-panel">
+                            <h3>Pending migrations</h3>
+                            <ul>
+                                {% for app in workspace.app_overview %}
+                                <li>
+                                    <span>{{ app.label }}</span>
+                                    <span>{{ app.pending_migrations }} pending</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </section>
+                    <section class="tab-panel" id="tab-code">
+                        <div class="code-panel">
+                            <pre><code># djdesk/features.py
+class SchemaWatcher:
+    def render(self):
+        return "React Flow snapshot exported for Electron"</code></pre>
+                        </div>
+                    </section>
+                    <section class="tab-panel" id="tab-results">
+                        <div class="results-panel">
+                            <h3>Activity</h3>
+                            <ul class="activity-feed" data-activity-feed>
+                                {% for event in workspace.recent_activity %}
+                                <li>
+                                    <span class="activity-time">{{ event.timestamp }}</span>
+                                    <span class="activity-message">{{ event.message }}</span>
+                                    <span class="activity-status activity-status--{{ event.status }}">{{ event.kind }}</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </div>
+                    </section>
+                </div>
+                <section class="log-stream">
+                    <header>Live log tail</header>
+                    <ul data-log-stream>
+                        {% for entry in workspace.log_excerpt %}
+                        <li>
+                            <span>{{ entry.timestamp }}</span>
+                            <span class="log-level log-level--{{ entry.level }}">{{ entry.level|upper }}</span>
+                            <span>{{ entry.message }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </section>
+            </section>
+            <aside class="inspector-assistant">
+                <section class="assistant-panel">
+                    <header>
+                        <h3>Documentation</h3>
+                        <span>Synced with Read the Docs</span>
+                    </header>
+                    <ul class="doc-links">
+                        {% for doc in doc_links %}
+                        <li>
+                            <a href="{{ doc.url }}" target="_blank" rel="noreferrer">
+                                <span class="doc-link-title">
+                                    <span class="doc-link-icon" data-lucide="{{ doc.icon|default:'book-open' }}"></span>
+                                    <span>{{ doc.title }}</span>
+                                </span>
+                                <small>Stage {{ doc.stage }}</small>
+                            </a>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </section>
+                <section class="assistant-panel">
+                    <header>
+                        <h3>Run task</h3>
+                        <span>Uses django-tasks + safe commands</span>
+                    </header>
+                    <form method="post" data-task-form>
+                        {% csrf_token %}
+                        <input type="hidden" name="workspace" value="{{ workspace.slug }}">
+                        <label>
+                            <span>Command</span>
+                            <select name="preset">
+                                {% for preset in task_presets %}
+                                <option value="{{ preset.key }}">{{ preset.label }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <label>
+                            <span>Notes</span>
+                            <textarea name="notes" rows="2" placeholder="Optional message"></textarea>
+                        </label>
+                        <label class="confirm">
+                            <input type="checkbox" name="confirm_safe">
+                            <span>Confirm command (read-only)</span>
+                        </label>
+                        <button type="submit" class="primary-btn">Dispatch task</button>
+                    </form>
+                </section>
+                <section class="assistant-panel">
+                    <header>
+                        <h3>Task history</h3>
+                        <span>Latest runs</span>
+                    </header>
+                    <ul class="task-history" data-task-history>
+                        {% for run in workspace.task_runs.all|slice:":5" %}
+                        <li class="task-history-item task-history-item--{{ run.status }}">
+                            <div>
+                                <strong>{{ run.preset.label }}</strong>
+                                <small>{{ run.get_status_display }}</small>
+                            </div>
+                            <div class="task-progress">
+                                <span style="width: {{ run.progress }}%"></span>
+                            </div>
+                        </li>
+                        {% empty %}
+                        <li class="task-history-item is-empty">No tasks have been executed yet.</li>
+                        {% endfor %}
+                    </ul>
+                </section>
+            </aside>
+        </div>
+        <footer class="inspector-status-bar">
+            <span>Workspace: {{ workspace.project_path }}</span>
+            <span>Mode: {{ status_meta.mode|default:"Unknown" }}</span>
+            <span>Docs: {{ status_meta.docs|default:"Tutorial" }}</span>
+            <span data-offline-indicator>Offline-ready</span>
+        </footer>
+    </div>
+    {{ workspace.schema_graph|json_script:"schema-graph-data" }}
+    {% else %}
+    <section class="empty-state">
+        <h1>Import a Django project to get started</h1>
+        <p>The inspector guides you through schema scans, log ingestion, and safe automations.</p>
+        <a class="primary-btn" href="{% url 'inspector:wizard' %}">Launch onboarding wizard</a>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

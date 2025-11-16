@@ -73,18 +73,18 @@ electron-download RUN_ID:
 
 # Download only the macOS artifact from the latest successful run.
 electron-download-macos:
-    latest_run=$(gh run list --workflow=electron-desktop -L 5 --json databaseId,conclusion --jq '[.[] | select(.conclusion == \"success\")][0].databaseId') && \
+    latest_run=$(gh run list --workflow=electron-desktop -L 5 --json databaseId,conclusion --jq '[.[] | select(.conclusion == "success")][0].databaseId') && \
     if [ -z "$latest_run" ]; then \
         echo "No successful electron-desktop run found."; \
         exit 1; \
     fi && \
-    repo=$(git remote get-url origin | sed -n 's#.*github.com[:/]\\(.*\\)\\.git#\\1#p') && \
-    url=$(gh api repos/$repo/actions/runs/$latest_run/artifacts --jq '.artifacts[] | select(.name == \"djdesk-macos\") | .archive_download_url') && \
+    repo=$(git remote get-url origin | sed -n 's#.*github.com[:/]\(.*\)\.git#\1#p') && \
+    url=$(gh api repos/$repo/actions/runs/$latest_run/artifacts --jq '.artifacts[] | select(.name == "djdesk-macos") | .archive_download_url') && \
     if [ -z "$url" ]; then \
-        echo \"No macOS artifact found for run $latest_run\"; \
+        echo "No macOS artifact found for run $latest_run"; \
         exit 1; \
     fi && \
-    curl -L \"$url\" -o macos.zip && \
+    curl -L "$url" -o macos.zip && \
     rm -rf dist-artifacts/djdesk-macos && \
     mkdir -p dist-artifacts && \
     unzip macos.zip -d dist-artifacts >/dev/null && \

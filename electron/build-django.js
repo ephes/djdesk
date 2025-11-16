@@ -292,7 +292,7 @@ async function collectStatic(pythonExecutable) {
 async function writeLauncherScript() {
   console.log('Writing bundle launcher script...');
   const launcherPath = path.join(bundleRoot, 'run_django.py');
-  const content = String.raw`#!/usr/bin/env python
+const content = String.raw`#!/usr/bin/env python
 
 """Launch Django from the bundled sources."""
 
@@ -302,6 +302,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import Sequence
 
 
 def _augment_pythonpath(src_root: Path) -> None:
@@ -310,6 +311,11 @@ def _augment_pythonpath(src_root: Path) -> None:
         os.environ["PYTHONPATH"] = f"{src_root}{os.pathsep}{existing}"
     else:
         os.environ["PYTHONPATH"] = str(src_root)
+
+
+def _run_management_command(execute, command: Sequence[str]) -> None:
+    sys.argv = list(command)
+    execute(sys.argv)
 
 
 def main() -> None:
@@ -332,12 +338,15 @@ def main() -> None:
     except ImportError as exc:  # pragma: no cover - surfaced via Electron logs
         raise SystemExit(f"Failed to import Django: {exc}")
 
+    os.chdir(bundle_root)
+
+    migrate_command = ["manage.py", "migrate", "--noinput"]
+    _run_management_command(execute_from_command_line, migrate_command)
+
     host = args.host
     port = args.port
-    command = ["manage.py", "runserver", f"{host}:{port}", "--noreload"]
-    sys.argv = command
-    os.chdir(bundle_root)
-    execute_from_command_line(sys.argv)
+    runserver_command = ["manage.py", "runserver", f"{host}:{port}", "--noreload"]
+    _run_management_command(execute_from_command_line, runserver_command)
 
 
 if __name__ == "__main__":

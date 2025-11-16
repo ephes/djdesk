@@ -78,17 +78,8 @@ electron-download-macos:
         echo "No successful electron-desktop run found."; \
         exit 1; \
     fi && \
-    repo=$(git remote get-url origin | sed -n 's#.*github.com[:/]\(.*\)\.git#\1#p') && \
-    url=$(gh api repos/$repo/actions/runs/$latest_run/artifacts --jq '.artifacts[] | select(.name == "djdesk-macos") | .archive_download_url') && \
-    if [ -z "$url" ]; then \
-        echo "No macOS artifact found for run $latest_run"; \
-        exit 1; \
-    fi && \
-    curl -L "$url" -o macos.zip && \
-    rm -rf dist-artifacts/djdesk-macos && \
-    mkdir -p dist-artifacts && \
-    unzip macos.zip -d dist-artifacts >/dev/null && \
-    rm macos.zip
+    echo "Downloading macOS artifact from run $latest_run" && \
+    gh run download "$latest_run" --name djdesk-macos --dir dist-artifacts
 
 # Trigger the GitHub Actions electron-desktop workflow (manual run).
 electron-workflow-run:

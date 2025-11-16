@@ -87,7 +87,7 @@ The bundle is platform-specific and ignored by Git.
 
 ## GitHub Actions Workflow
 
-`.github/workflows/electron-desktop.yml` runs on push to main (when electron/, src/, or related files change) or via manual dispatch. Builds macOS, Windows, and Linux in parallel using a matrix strategy. Each job:
+`.github/workflows/electron-desktop.yml` runs via manual dispatch only (use `just electron-workflow-run` to trigger). Builds macOS, Windows, and Linux in parallel using a matrix strategy. Each job:
 1. Runs `npm ci` in electron/
 2. Executes `npm run bundle` to create django-bundle
 3. Calls `npm run build -- --<platform>`

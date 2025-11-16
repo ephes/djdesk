@@ -12,9 +12,9 @@ jobs:
           - os: macos-latest
             build-args: --mac
             artifact: macos
-          - os: ubuntu-latest
-            build-args: --linux
-            artifact: linux
+          # - os: ubuntu-latest
+          #   build-args: --linux
+          #   artifact: linux
           - os: windows-latest
             build-args: --win
             artifact: windows

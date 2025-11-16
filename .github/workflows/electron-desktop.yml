@@ -2,14 +2,6 @@ name: electron-desktop
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'electron/**'
-      - 'src/**'
-      - 'pyproject.toml'
-      - 'justfile'
-      - '.github/workflows/electron-desktop.yml'
 
 jobs:
   build:

@@ -8,7 +8,11 @@
     "bundle": "node build-django.js",
     "build": "npm run bundle && electron-builder"
   },
-  "author": "",
+  "homepage": "https://github.com/ephes/djdesk",
+  "author": {
+    "name": "DJDesk Team",
+    "email": "team@djdesk.invalid"
+  },
   "license": "ISC",
   "devDependencies": {
     "electron": "^33.0.0",

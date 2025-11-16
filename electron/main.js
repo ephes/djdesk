@@ -4,7 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const http = require('http');
 
-const DJANGO_BUNDLE_DIR = path.join(__dirname, 'django-bundle');
+const resourceBase = app.isPackaged ? process.resourcesPath : __dirname;
+const DJANGO_BUNDLE_DIR = path.join(resourceBase, 'django-bundle');
 const BUNDLE_RUNNER = path.join(DJANGO_BUNDLE_DIR, 'run_django.py');
 
 let mainWindow;
@@ -86,8 +87,9 @@ async function startDjango() {
     djangoPort = await getPortModule({ port: 8000 });
     console.log(`Starting Django on port ${djangoPort}...`);
 
-    // Path to manage.py (one level up from electron/)
-    const managePyPath = path.join(__dirname, '..', 'manage.py');
+    const managePyPath = app.isPackaged
+      ? path.join(DJANGO_BUNDLE_DIR, 'manage.py')
+      : path.join(__dirname, '..', 'manage.py');
 
     const djangoArgs = isBundled
       ? [

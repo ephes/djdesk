@@ -1,0 +1,75 @@
+{% extends "inspector/base.html" %}
+
+{% block body %}
+<section class="wizard-shell">
+    <header class="wizard-hero">
+        <h1>Project onboarding</h1>
+        <p>DJDesk validates your Django workspace, records metadata, and queues read-only scans.</p>
+        <a href="{% url 'inspector:dashboard' %}">Back to inspector</a>
+    </header>
+    <form method="post" class="wizard-form">
+        {% csrf_token %}
+        <div class="wizard-grid">
+            <div class="wizard-step">
+                <h2>1 · Name & metadata</h2>
+                <label>
+                    <span>Workspace name</span>
+                    {{ form.name }}
+                </label>
+                <label>
+                    <span>Description</span>
+                    {{ form.description }}
+                </label>
+            </div>
+            <div class="wizard-step">
+                <h2>2 · Locate project</h2>
+                <label>
+                    <span>Django project folder</span>
+                    {{ form.project_path }}
+                </label>
+                <label>
+                    <span>Python version</span>
+                    {{ form.python_version }}
+                </label>
+                <label>
+                    <span>Django version</span>
+                    {{ form.django_version }}
+                </label>
+            </div>
+            <div class="wizard-step">
+                <h2>3 · Docs & automation</h2>
+                <label>
+                    <span>Docs URL (optional)</span>
+                    {{ form.docs_url }}
+                </label>
+                <label class="wizard-checkbox">
+                    {{ form.auto_run_scan }}
+                    <span>{{ form.auto_run_scan.label }}</span>
+                </label>
+                <label class="wizard-checkbox">
+                    {{ form.confirm_readonly }}
+                    <span>{{ form.confirm_readonly.label }}</span>
+                </label>
+            </div>
+        </div>
+        {% if form.errors %}
+        <div class="wizard-errors">
+            <h3>Fix the highlighted fields</h3>
+            <ul>
+                {% for field in form %}
+                    {% for error in field.errors %}
+                    <li>{{ field.label }} – {{ error }}</li>
+                    {% endfor %}
+                {% endfor %}
+                {% for error in form.non_field_errors %}
+                <li>{{ error }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        <div class="wizard-actions">
+            <button type="submit" class="primary-btn">Create workspace</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

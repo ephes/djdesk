@@ -71,6 +71,16 @@ electron-download-latest:
 electron-download RUN_ID:
     gh run download "{{RUN_ID}}" --dir dist-artifacts
 
+# Download only the macOS artifact from the latest successful run.
+electron-download-macos:
+    latest_run=$(gh run list --workflow=electron-desktop -L 1 --json databaseId,conclusion --jq 'map(select(.conclusion == "success")) | .[0].databaseId') && \
+    if [ -z "$latest_run" ]; then \
+        echo "No successful electron-desktop run found."; \
+        exit 1; \
+    fi && \
+    gh api repos/$(git config --get remote.origin.url | sed -n 's#.*/\\(.*\\)/\\(.*\\)\\.git#\\1/\\2#p')/actions/runs/$latest_run/artifacts --jq '.artifacts[] | select(.name == \"djdesk-macos\") | .archive_download_url' | \
+    xargs -I {} sh -c 'curl -L \"$1\" -o macos.zip && rm -rf dist-artifacts/djdesk-macos && mkdir -p dist-artifacts && unzip macos.zip -d dist-artifacts && rm macos.zip' sh {}
+
 # Trigger the GitHub Actions electron-desktop workflow (manual run).
 electron-workflow-run:
     gh workflow run electron-desktop.yml

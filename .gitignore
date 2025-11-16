@@ -38,3 +38,6 @@ electron/.python-downloads/
 
 # GitHub artifacts
 dist-artifacts/
+
+# Documentation build artifacts
+docs/_build/

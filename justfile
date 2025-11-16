@@ -88,3 +88,21 @@ electron-workflow-run:
 # Remove downloaded GitHub artifact directories.
 electron-clean-artifacts:
     rm -rf dist-artifacts
+
+# Install documentation dependencies into the uv environment.
+docs-install:
+    uv pip install -r docs/requirements.txt
+
+# Build the static HTML documentation into docs/_build/html.
+docs-html:
+    just docs-install
+    uv run sphinx-build -b html docs docs/_build/html
+
+# Serve docs with live reload for authoring.
+docs-serve:
+    just docs-install
+    uv run sphinx-autobuild docs docs/_build/html
+
+# CI-friendly docs build (alias for docs-html for now).
+docs-check:
+    just docs-html

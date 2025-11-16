@@ -33,6 +33,8 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 - `just test` – run Django's test suite (`manage.py test tests`) using `djdesk.settings.test`.
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
 - `just hooks` – run every pre-commit hook against the full codebase.
+- `just docs-html` – build the Sphinx documentation (`docs/_build/html`).
+- `just docs-serve` – live-reload the docs while editing reST/Markdown files.
 - `just electron-install` / `just electron-start` – install Electron deps and launch the local shell.
 - `just electron-bundle` / `just electron-build-*` – create the python-build-standalone bundle and packaged binaries for each OS.
 - `just electron-runs` – list recent GitHub Actions builds; `just electron-workflow-run` triggers the matrix build.
@@ -72,3 +74,15 @@ PYTHON=$(command -v python3.14 || command -v python3) npm start
 ```
 
 `npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
+
+### Documentation
+
+The Sphinx + Furo docs live under `docs/` and mirror the tutorial stages defined in the specs.
+
+```bash
+uv pip install -r docs/requirements.txt  # once per machine
+just docs-html                           # build static HTML into docs/_build/html
+just docs-serve                          # autoreload while writing
+```
+
+Read the Docs config lives in `readthedocs.yml`; once connected, `main` publishes to https://djdesk.readthedocs.io/.

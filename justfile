@@ -54,3 +54,23 @@ electron-build:
         msys*|mingw*|cygwin*) cd electron && npm run build -- --win ;; \
         *) echo "Unsupported platform"; exit 1 ;; \
     esac
+# List recent GitHub Action runs for electron builds (requires gh CLI).
+electron-runs:
+    gh run list --workflow=electron-desktop -L 10
+
+# Download artifacts from the latest successful workflow run.
+electron-download-latest:
+    latest_run=$(gh run list --workflow=electron-desktop -L 1 --json databaseId,conclusion --jq 'map(select(.conclusion == "success")) | .[0].databaseId') && \
+    if [ -z "$latest_run" ]; then \
+        echo "No successful electron-desktop run found."; \
+        exit 1; \
+    fi && \
+    gh run download "$latest_run" --dir dist-artifacts
+
+# Download artifacts for a specific run (pass RUN_ID=<id>).
+electron-download RUN_ID:
+    gh run download "{{RUN_ID}}" --dir dist-artifacts
+
+# Trigger the GitHub Actions electron-desktop workflow (manual run).
+electron-workflow-run:
+    gh workflow run electron-desktop.yml

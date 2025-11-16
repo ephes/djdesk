@@ -20,7 +20,7 @@
     "target": ["nsis", "zip"]
   },
   "linux": {
-    "target": ["AppImage", "deb"],
+    "target": ["AppImage", "deb", "tar.gz"],
     "category": "Development"
   }
 }

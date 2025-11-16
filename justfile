@@ -79,8 +79,55 @@ electron-download-macos:
         echo "No successful electron-desktop run found."; \
         exit 1; \
     fi && \
-    echo "Downloading macOS artifact from run $latest_run" && \
-    gh run download "$latest_run" --name djdesk-macos --dir dist-artifacts
+    echo "Downloading macOS zip from run $latest_run" && \
+    tmp=$(mktemp -d) && \
+    gh run download "$latest_run" --name djdesk-macos --dir "$tmp" --pattern 'DJDesk-*-mac.zip' && \
+    file=$(find "$tmp" -name 'DJDesk-*-mac.zip' -print -quit) && \
+    if [ -z "$file" ]; then \
+        echo "DJDesk mac zip not found in artifact."; \
+        exit 1; \
+    fi && \
+    mkdir -p dist-artifacts && \
+    mv "$file" dist-artifacts/ && \
+    rm -rf "$tmp"
+
+# Download only the Windows zip from the latest successful run.
+electron-download-windows:
+    latest_run=$(gh run list --workflow=electron-desktop -L 5 --json databaseId,conclusion --jq '[.[] | select(.conclusion == "success")][0].databaseId') && \
+    if [ -z "$latest_run" ]; then \
+        echo "No successful electron-desktop run found."; \
+        exit 1; \
+    fi && \
+    echo "Downloading Windows zip from run $latest_run" && \
+    tmp=$(mktemp -d) && \
+    gh run download "$latest_run" --name djdesk-windows --dir "$tmp" --pattern 'DJDesk-*-win.zip' && \
+    file=$(find "$tmp" -name 'DJDesk-*-win.zip' -print -quit) && \
+    if [ -z "$file" ]; then \
+        echo "DJDesk Windows zip not found in artifact."; \
+        exit 1; \
+    fi && \
+    mkdir -p dist-artifacts && \
+    mv "$file" dist-artifacts/ && \
+    rm -rf "$tmp"
+
+# Download only the Linux tarball from the latest successful run.
+electron-download-linux:
+    latest_run=$(gh run list --workflow=electron-desktop -L 5 --json databaseId,conclusion --jq '[.[] | select(.conclusion == "success")][0].databaseId') && \
+    if [ -z "$latest_run" ]; then \
+        echo "No successful electron-desktop run found."; \
+        exit 1; \
+    fi && \
+    echo "Downloading Linux tar.gz from run $latest_run" && \
+    tmp=$(mktemp -d) && \
+    gh run download "$latest_run" --name djdesk-linux --dir "$tmp" --pattern 'DJDesk-*.tar.gz' && \
+    file=$(find "$tmp" -name 'DJDesk-*.tar.gz' -print -quit) && \
+    if [ -z "$file" ]; then \
+        echo "DJDesk Linux tar.gz not found in artifact."; \
+        exit 1; \
+    fi && \
+    mkdir -p dist-artifacts && \
+    mv "$file" dist-artifacts/ && \
+    rm -rf "$tmp"
 
 # Trigger the GitHub Actions electron-desktop workflow (manual run).
 electron-workflow-run:

@@ -25,6 +25,9 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "django.contrib.humanize",
+    "django_tasks",
+    "djdesk.inspector",
 ]
 
 MIDDLEWARE = [
@@ -114,3 +117,33 @@ else:
 # https://docs.djangoproject.com/en/4.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+def _env_flag(env_name: str, default: bool) -> bool:
+    """Return a boolean-ish environment variable with a friendly fallback."""
+    raw_value = os.environ.get(env_name)
+    if raw_value is None:
+        return default
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+INSPECTOR_FLAGS = {
+    "stage_0_hello": _env_flag("DJDESK_FLAG_STAGE_0", True),
+    "stage_1_import": _env_flag("DJDESK_FLAG_STAGE_1", True),
+    "stage_2_explorer": _env_flag("DJDESK_FLAG_STAGE_2", True),
+    "stage_3_native": _env_flag("DJDESK_FLAG_STAGE_3", True),
+    "stage_4_tasks": _env_flag("DJDESK_FLAG_STAGE_4", True),
+}
+
+INSPECTOR_DOCS_BASE_URL = os.environ.get(
+    "DJDESK_DOCS_BASE_URL", "https://djdesk.readthedocs.io/en/latest"
+)
+
+INSPECTOR_SAFE_COMMANDS = [
+    "python manage.py showmigrations",
+    "python manage.py check",
+    "python manage.py diffsettings",
+    "python manage.py sqlmigrate",
+    "python manage.py inspectdb",
+    "python manage.py dumpdata",
+]

@@ -4,16 +4,17 @@ from typing import Any
 
 from django.conf import settings
 from django.contrib import messages
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.views import View
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import FormView, TemplateView
 
+from . import data_lab
 from .forms import TaskRunForm, WorkspaceWizardForm
 from .models import DocLink, TaskPreset, Workspace, WorkspaceTaskRun
-from .services import workspace_status_payload
+from .services import workspace_data_lab_payload, workspace_status_payload
 
 
 class DashboardView(TemplateView):
@@ -37,7 +38,6 @@ class DashboardView(TemplateView):
             {
                 "workspace": workspace,
                 "workspaces": workspaces,
-                "inspector_flags": settings.INSPECTOR_FLAGS,
                 "docs_base_url": settings.INSPECTOR_DOCS_BASE_URL,
                 "doc_links": DocLink.objects.all(),
                 "task_presets": TaskPreset.objects.all(),
@@ -45,6 +45,15 @@ class DashboardView(TemplateView):
                 "workspace_status_url": status_url,
                 "task_form": TaskRunForm(
                     initial={"workspace": workspace.slug if workspace else None}
+                ),
+                "data_lab_payload": (
+                    workspace_data_lab_payload(workspace)
+                    if workspace
+                    else {
+                        "templates": data_lab.template_summary(),
+                        "notebooks": [],
+                        "live_enabled": settings.INSPECTOR_DATA_LAB_LIVE,
+                    }
                 ),
             }
         )
@@ -112,3 +121,47 @@ def task_run_detail_api(request: HttpRequest, pk: int) -> JsonResponse:
         "metadata": run.metadata,
     }
     return JsonResponse(data)
+
+
+@require_POST
+def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
+    workspace = get_object_or_404(Workspace, slug=slug)
+    template_slug = request.POST.get("template")
+    if not template_slug:
+        return JsonResponse({"errors": {"template": ["Template is required."]}}, status=400)
+
+    try:
+        data_lab.export_notebook(workspace, template_slug)
+    except ValueError as exc:
+        return JsonResponse({"errors": {"template": [str(exc)]}}, status=400)
+
+    payload = workspace_status_payload(workspace)
+    return JsonResponse(payload, status=201)
+
+
+class DataLabNotebookView(TemplateView):
+    """Renders exported notebooks inside a lightweight frame for the drawer."""
+
+    template_name = "inspector/data_lab_viewer.html"
+
+    def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
+        context = super().get_context_data(**kwargs)
+        workspace = get_object_or_404(Workspace, slug=kwargs["slug"])
+        notebook_slug = kwargs["notebook_slug"]
+        try:
+            notebook = data_lab.load_notebook(workspace, notebook_slug)
+        except FileNotFoundError as exc:  # pragma: no cover - safety net
+            raise Http404("Notebook not found.") from exc
+
+        template = data_lab.DATA_LAB_TEMPLATE_MAP.get(notebook_slug, {})
+        context.update(
+            {
+                "workspace": workspace,
+                "notebook_slug": notebook_slug,
+                "notebook_title": template.get("title", notebook_slug),
+                "notebook_description": template.get("description", ""),
+                "notebook_html": data_lab.render_notebook_html(notebook),
+                "live_enabled": settings.INSPECTOR_DATA_LAB_LIVE,
+            }
+        )
+        return context

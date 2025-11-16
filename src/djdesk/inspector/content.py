@@ -78,6 +78,7 @@ DOC_LINKS = [
         "stage": 0,
         "category": "tutorial",
         "icon": "play",
+        "pane_target": "hello",
     },
     {
         "slug": "stage-1-import",
@@ -87,6 +88,7 @@ DOC_LINKS = [
         "stage": 1,
         "category": "tutorial",
         "icon": "upload",
+        "pane_target": "wizard",
     },
     {
         "slug": "stage-2-explorer",
@@ -96,6 +98,7 @@ DOC_LINKS = [
         "stage": 2,
         "category": "tutorial",
         "icon": "layout-grid",
+        "pane_target": "schema",
     },
     {
         "slug": "stage-3-native",
@@ -105,6 +108,7 @@ DOC_LINKS = [
         "stage": 3,
         "category": "tutorial",
         "icon": "bell",
+        "pane_target": "native",
     },
     {
         "slug": "stage-4-runner",
@@ -114,6 +118,7 @@ DOC_LINKS = [
         "stage": 4,
         "category": "tutorial",
         "icon": "terminal",
+        "pane_target": "tasks",
     },
 ]
 

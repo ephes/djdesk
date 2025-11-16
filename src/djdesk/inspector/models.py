@@ -203,6 +203,7 @@ class DocLink(models.Model):
     stage = models.PositiveIntegerField(default=0)
     category = models.CharField(max_length=40, default="tutorial")
     icon = models.CharField(max_length=30, default="book-open")
+    pane_target = models.CharField(max_length=40, blank=True, default="")
 
     class Meta:
         ordering = ["stage", "title"]

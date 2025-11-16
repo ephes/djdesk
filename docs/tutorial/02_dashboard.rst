@@ -7,9 +7,8 @@ every pane so contributors can study the layout even before wiring their own pro
 Layout overview
 ---------------
 
-* **Toolbar** — lives in ``inspector/templates/inspector/dashboard.html`` and shows
-  feature-flag badges pulled from ``settings.INSPECTOR_FLAGS``. The "Docs" button
-  toggles the assistant drawer so documentation is always one click away.
+* **Toolbar** — lives in ``inspector/templates/inspector/dashboard.html``. The "Docs"
+  button toggles the assistant drawer so documentation is always one click away.
 * **Left rail** — lists :class:`~djdesk.inspector.models.Workspace` objects and
   the scan queue. Drag a folder onto the dropzone (Electron exposes ``File.path``)
   to pre-populate the wizard with the selected path.
@@ -24,8 +23,8 @@ Data sources
 
 The dashboard is intentionally server-rendered: ``DashboardView`` builds the initial
 context and :func:`djdesk.inspector.services.workspace_status_payload` keeps everything
-fresh via polling. This makes Stage 2 easy to follow in the docs because you can open
-DevTools and inspect the exact payloads shown in the tutorial.
+fresh via polling. That makes the tutorial easy to follow in the docs because you can
+open DevTools and inspect the exact payloads shown in the walkthrough.
 
 What to capture for the docs
 ----------------------------

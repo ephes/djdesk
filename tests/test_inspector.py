@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from django.test import Client, TestCase
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from djdesk.inspector import forms as inspector_forms
@@ -150,3 +150,41 @@ class DashboardViewTests(TestCase):
         response = self.client.get(reverse("inspector:dashboard"))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'data-status-endpoint=""', response.content)
+
+
+class DataLabAPITests(TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.override = override_settings(INSPECTOR_DATA_LAB_ROOT=self.temp_dir.name)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+        self.workspace = Workspace.objects.create(
+            name="Data Lab Workspace",
+            project_path="/tmp/datalab",
+            metadata={"recent_activity": [], "schema": {"nodes": []}},
+        )
+
+    def test_export_endpoint_creates_notebook(self) -> None:
+        response = self.client.post(
+            reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+            data={"template": "schema-audit"},
+        )
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        notebooks = payload["data_lab"]["notebooks"]
+        self.assertTrue(notebooks)
+        self.assertEqual(notebooks[0]["slug"], "schema-audit")
+
+    def test_notebook_view_renders(self) -> None:
+        self.client.post(
+            reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+            data={"template": "schema-audit"},
+        )
+        response = self.client.get(
+            reverse(
+                "inspector:data-lab-notebook",
+                args=[self.workspace.slug, "schema-audit"],
+            )
+        )
+        self.assertContains(response, "Schema audit starter")

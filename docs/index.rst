@@ -12,6 +12,7 @@ Control-room grade tutorial and reference material for the DJDesk Electron + Dja
    tutorial/02_dashboard
    tutorial/03_native_enhancements
    tutorial/04_task_runner
+   tutorial/05_data_lab
 
 .. toctree::
    :maxdepth: 2

@@ -126,15 +126,6 @@ def _env_flag(env_name: str, default: bool) -> bool:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
-
-INSPECTOR_FLAGS = {
-    "stage_0_hello": _env_flag("DJDESK_FLAG_STAGE_0", True),
-    "stage_1_import": _env_flag("DJDESK_FLAG_STAGE_1", True),
-    "stage_2_explorer": _env_flag("DJDESK_FLAG_STAGE_2", True),
-    "stage_3_native": _env_flag("DJDESK_FLAG_STAGE_3", True),
-    "stage_4_tasks": _env_flag("DJDESK_FLAG_STAGE_4", True),
-}
-
 INSPECTOR_DOCS_BASE_URL = os.environ.get(
     "DJDESK_DOCS_BASE_URL", "https://djdesk.readthedocs.io/en/latest"
 )
@@ -147,3 +138,8 @@ INSPECTOR_SAFE_COMMANDS = [
     "python manage.py inspectdb",
     "python manage.py dumpdata",
 ]
+
+INSPECTOR_DATA_LAB_ROOT = Path(
+    os.environ.get("DJDESK_DATA_LAB_ROOT", BASE_DIR / "var" / "data_lab")
+).expanduser()
+INSPECTOR_DATA_LAB_LIVE = _env_flag("DJDESK_FLAG_DATA_LAB_LIVE", False)

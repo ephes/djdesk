@@ -24,20 +24,11 @@ Django versions, docs URL, schema insights, etc.). ``ScanJob`` rows represent sc
 migration, log, and fixture scans. ``TaskPreset`` + ``WorkspaceTaskRun`` records power
 the assistant drawer and safe automation story.
 
-Feature flags
--------------
-
-``settings.INSPECTOR_FLAGS`` exposes ``stage_0_hello`` through ``stage_4_tasks`` so
-you can toggle panes on/off while capturing screenshots. The toolbar renders the
-flags as badges to help reviewers verify which tutorial stage they are seeing.
-
 Workflow summary
 ----------------
 
 1. Run ``just electron-start`` to boot the packaged Django server.
-2. Import a project via the wizard (Stage 1).
-3. Observe schema, migration, activity, and log data update in real time (Stage 2).
-4. Exercise native affordances such as drag/drop, offline indicator, and notifications
-   (Stage 3).
-5. Dispatch safe commands through ``django-tasks`` and monitor the assistant drawer
-   (Stage 4).
+2. Import a project via the wizard to seed scans and metadata.
+3. Observe schema, migration, activity, and log data update in real time.
+4. Exercise native affordances such as drag/drop, offline indicator, and notifications.
+5. Dispatch safe commands through ``django-tasks`` and monitor the assistant drawer.

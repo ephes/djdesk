@@ -22,4 +22,14 @@ urlpatterns = [
         views.task_run_detail_api,
         name="task-run-detail",
     ),
+    path(
+        "api/workspaces/<slug:slug>/data-lab/export/",
+        views.data_lab_export_api,
+        name="data-lab-export",
+    ),
+    path(
+        "workspaces/<slug:slug>/data-lab/<slug:notebook_slug>/",
+        views.DataLabNotebookView.as_view(),
+        name="data-lab-notebook",
+    ),
 ]

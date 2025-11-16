@@ -3,6 +3,9 @@ class InspectorUI {
     this.root = root;
     this.statusUrl = root?.dataset.statusEndpoint;
     this.taskEndpoint = root?.dataset.taskEndpoint;
+    this.workspaceSlug = root?.dataset.workspaceSlug || '';
+    this.taskDetailTemplate = root?.dataset.taskDetailTemplate || '';
+    this.dataLabExportUrl = root?.dataset.dataLabExport || '';
     this.scanBoard = root?.querySelector('#scan-board');
     this.insightGrid = root?.querySelector('.insight-grid');
     this.activityFeed = root?.querySelector('[data-activity-feed]');
@@ -13,6 +16,30 @@ class InspectorUI {
     this.schemaCanvas = root?.querySelector('#schema-canvas');
     this.previousTaskStatuses = new Map();
     this.schemaGraphInstance = null;
+    this.schemaTooltip = document.createElement('div');
+    this.schemaTooltip.className = 'schema-tooltip';
+    this.taskDrawer = root?.querySelector('[data-task-drawer]');
+    this.taskDrawerTitle = this.taskDrawer?.querySelector('[data-task-drawer-title]');
+    this.taskDrawerStatus = this.taskDrawer?.querySelector('[data-task-drawer-status]');
+    this.taskDrawerProgress = this.taskDrawer?.querySelector('[data-task-drawer-progress]');
+    this.taskDrawerLog = this.taskDrawer?.querySelector('[data-task-drawer-log]');
+    this.taskDrawerClose = this.taskDrawer?.querySelector('[data-task-drawer-close]');
+    this.taskDrawerPoll = null;
+    this.schemaStateDebounce = null;
+    this.tabs = [];
+    this.tabPanels = [];
+    this.docsDrawer = root?.querySelector('[data-docs-drawer]');
+    this.docsFrame = this.docsDrawer?.querySelector('[data-docs-frame]');
+    this.docsDrawerClose = this.docsDrawer?.querySelector('[data-docs-close]');
+    this.docsToggle = this.root?.querySelector('[data-docs-toggle]');
+    this.docLinks = Array.from(this.root?.querySelectorAll('[data-doc-link]') ?? []);
+    this.docsBaseUrl = root?.dataset.docsBaseUrl || '';
+    this.dataLabForm = root?.querySelector('[data-data-lab-form]');
+    this.dataLabList = root?.querySelector('[data-data-lab-list]');
+    this.dataLabViewer = root?.querySelector('[data-data-lab-viewer]');
+    this.dataLabFrame = root?.querySelector('[data-data-lab-frame]');
+    this.dataLabEmpty = root?.querySelector('[data-data-lab-empty]');
+    this.activeNotebookSlug = '';
   }
 
   init() {
@@ -20,25 +47,36 @@ class InspectorUI {
     this.bindTabs();
     this.bindDropzone();
     this.bindTaskForm();
+    this.bindTaskHistory();
+    this.bindTaskDrawer();
+    this.bindDocLinks();
+    this.bindDocsDrawer();
+    this.bindDataLab();
     this.observeConnection();
     this.startPolling();
     this.requestNotificationPermission();
     this.loadInitialSchema();
+    this.ensureSchemaTooltip();
     this.refreshIcons();
   }
 
   bindTabs() {
-    const tabs = this.root.querySelectorAll('[data-tab-target]');
-    const panels = this.root.querySelectorAll('.tab-panel');
-    tabs.forEach((tab) => {
+    this.tabs = Array.from(this.root.querySelectorAll('[data-tab-target]'));
+    this.tabPanels = Array.from(this.root.querySelectorAll('.tab-panel'));
+    this.tabs.forEach((tab) => {
       tab.addEventListener('click', () => {
-        tabs.forEach((t) => t.classList.remove('is-active'));
-        tab.classList.add('is-active');
-        const target = tab.dataset.tabTarget;
-        panels.forEach((panel) => {
-          panel.classList.toggle('is-visible', panel.id === `tab-${target}`);
-        });
+        this.activateTab(tab.dataset.tabTarget);
       });
+    });
+  }
+
+  activateTab(target) {
+    if (!target) return;
+    this.tabs.forEach((tab) => {
+      tab.classList.toggle('is-active', tab.dataset.tabTarget === target);
+    });
+    this.tabPanels.forEach((panel) => {
+      panel.classList.toggle('is-visible', panel.id === `tab-${target}`);
     });
   }
 
@@ -104,9 +142,125 @@ class InspectorUI {
           form.reset();
         })
         .catch((error) => {
-          this.showToast(error.message || 'Unable to run task.');
+          this.showToast(error.message || 'Unable to run task.', 'danger');
         });
     });
+  }
+
+  bindTaskHistory() {
+    if (!this.taskHistory) return;
+    this.taskHistory.addEventListener('click', (event) => {
+      const trigger = event.target.closest('[data-task-run]');
+      if (!trigger?.dataset.taskRun) {
+        return;
+      }
+      event.preventDefault();
+      this.openTaskDrawer(trigger.dataset.taskRun);
+    });
+  }
+
+  bindTaskDrawer() {
+    if (!this.taskDrawer) return;
+    this.taskDrawer.addEventListener('click', (event) => {
+      if (event.target === this.taskDrawer) {
+        this.closeTaskDrawer();
+      }
+    });
+    this.taskDrawerClose?.addEventListener('click', () => this.closeTaskDrawer());
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        this.closeTaskDrawer();
+      }
+    });
+  }
+
+  bindDocLinks() {
+    if (!this.docLinks.length) return;
+    this.docLinks.forEach((link) => {
+      link.addEventListener('click', (event) => {
+        if (event.metaKey || event.ctrlKey) {
+          return;
+        }
+        event.preventDefault();
+        const url = link.dataset.docUrl || link.href;
+        this.openDocsDrawer(url);
+        this.navigateToPane(link.dataset.paneTarget);
+      });
+    });
+  }
+
+  bindDocsDrawer() {
+    this.docsToggle?.addEventListener('click', () => {
+      this.openDocsDrawer(this.docsBaseUrl);
+    });
+    this.docsDrawerClose?.addEventListener('click', () => this.closeDocsDrawer());
+    this.docsDrawer?.addEventListener('click', (event) => {
+      if (event.target === this.docsDrawer) {
+        this.closeDocsDrawer();
+      }
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        this.closeDocsDrawer();
+      }
+    });
+  }
+
+  openDocsDrawer(url) {
+    if (!this.docsDrawer) return;
+    this.docsDrawer.classList.add('is-visible');
+    if (this.docsFrame && url) {
+      this.docsFrame.src = url;
+    }
+  }
+
+  closeDocsDrawer() {
+    this.docsDrawer?.classList.remove('is-visible');
+  }
+
+  bindDataLab() {
+    if (this.dataLabForm && this.dataLabExportUrl) {
+      this.dataLabForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const formData = new FormData(this.dataLabForm);
+        const template = formData.get('template');
+        if (!template) {
+          this.showToast('Choose a notebook template first.', 'danger');
+          return;
+        }
+        fetch(this.dataLabExportUrl, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRFToken': this.getCsrfToken(),
+          },
+        })
+          .then((response) => {
+            if (!response.ok) {
+              return response.json().then((data) => {
+                throw new Error(this.formatErrors(data.errors));
+              });
+            }
+            return response.json();
+          })
+          .then((payload) => {
+            this.showToast('Notebook exported.', 'success');
+            this.updateFromPayload(payload);
+          })
+          .catch((error) => {
+            this.showToast(error.message || 'Unable to export notebook.', 'danger');
+          });
+      });
+    }
+
+    if (this.dataLabList) {
+      this.dataLabList.addEventListener('click', (event) => {
+        const trigger = event.target.closest('[data-notebook-url]');
+        if (!trigger) return;
+        this.openNotebook(trigger.dataset.notebookUrl, trigger.dataset.notebookSlug);
+      });
+    }
   }
 
   startPolling() {
@@ -134,13 +288,14 @@ class InspectorUI {
     this.updateLogs(payload.log_excerpt || []);
     this.updateTasks(payload.tasks || []);
     this.updateSchema(payload.schema || null);
+    this.updateDataLab(payload.data_lab || null);
     this.refreshIcons();
   }
 
   updateScans(scans) {
     if (!this.scanBoard) return;
     if (!scans.length) {
-      this.scanBoard.innerHTML = '<p class="empty-note">No scans queued yet.</p>';
+      this.scanBoard.innerHTML = this.renderScanSkeleton();
       return;
     }
     this.scanBoard.innerHTML = scans
@@ -165,7 +320,7 @@ class InspectorUI {
   updateInsights(insights) {
     if (!this.insightGrid) return;
     if (!insights.length) {
-      this.insightGrid.innerHTML = '<p class="empty-note">Run a scan to populate insights.</p>';
+      this.insightGrid.innerHTML = this.renderInsightSkeleton();
       return;
     }
     this.insightGrid.innerHTML = insights
@@ -221,19 +376,21 @@ class InspectorUI {
   updateTasks(tasks) {
     if (!this.taskHistory) return;
     if (!tasks.length) {
-      this.taskHistory.innerHTML = '<li class="task-history-item is-empty">No tasks so far.</li>';
+      this.taskHistory.innerHTML = this.renderTaskSkeleton();
       return;
     }
 
     this.taskHistory.innerHTML = tasks
       .map(
         (task) => `
-        <li class="task-history-item task-history-item--${task.status}">
-          <div>
-            <strong>${this.escape(task.label)}</strong>
-            <small>${this.escape(task.status)}</small>
-          </div>
-          <div class="task-progress"><span style="width:${task.progress || 0}%"></span></div>
+        <li class="task-history-item task-history-item--${task.status}" data-task-run="${task.id}">
+          <button type="button" class="task-history-trigger" data-task-run="${task.id}">
+            <div>
+              <strong>${this.escape(task.label)}</strong>
+              <small>${this.escape(task.status)}</small>
+            </div>
+            <div class="task-progress"><span style="width:${task.progress || 0}%"></span></div>
+          </button>
         </li>
       `
       )
@@ -243,6 +400,7 @@ class InspectorUI {
       const previousStatus = this.previousTaskStatuses.get(task.id);
       if (previousStatus && previousStatus !== task.status && ['succeeded', 'failed'].includes(task.status)) {
         this.pushNotification(task.label, `Task ${task.status}`);
+        this.showToast(`${task.label} ${task.status}`, task.status === 'succeeded' ? 'success' : 'danger');
       }
       this.previousTaskStatuses.set(task.id, task.status);
     });
@@ -277,13 +435,17 @@ class InspectorUI {
     }
   }
 
-  showToast(message) {
+  showToast(message, tone = 'info') {
     const toast = document.createElement('div');
-    toast.className = 'inspector-message';
-    toast.textContent = message;
+    toast.className = `inspector-message inspector-message--${tone}`;
+    toast.innerHTML = `
+      <span class="inspector-message-icon" data-lucide="${this.getToastIcon(tone)}"></span>
+      <span>${this.escape(message)}</span>
+    `;
     const container = document.querySelector('.inspector-messages') || this.createMessageContainer();
     container.appendChild(toast);
-    setTimeout(() => toast.remove(), 4000);
+    this.refreshIcons();
+    setTimeout(() => toast.remove(), 4200);
   }
 
   createMessageContainer() {
@@ -338,10 +500,11 @@ class InspectorUI {
 
   updateSchema(schema) {
     if (!this.schemaCanvas) return;
+    this.ensureSchemaTooltip();
     const hasNodes = schema && Array.isArray(schema.nodes) && schema.nodes.length > 0;
     if (!hasNodes) {
       this.schemaCanvas.classList.add('is-empty');
-      this.schemaCanvas.innerHTML = '<p class="empty-note">Run a schema scan to visualize relationships.</p>';
+      this.schemaCanvas.innerHTML = this.renderSchemaSkeleton();
       if (this.schemaGraphInstance) {
         this.schemaGraphInstance.destroy();
         this.schemaGraphInstance = null;
@@ -354,6 +517,7 @@ class InspectorUI {
     }
     this.schemaCanvas.classList.remove('is-empty');
     this.schemaCanvas.innerHTML = '';
+    this.schemaCanvas.appendChild(this.schemaTooltip);
     const elements = this.buildSchemaElements(schema);
     if (this.schemaGraphInstance) {
       this.schemaGraphInstance.destroy();
@@ -395,6 +559,186 @@ class InspectorUI {
       layout: { name: 'cose', padding: 30, animate: true, fit: true },
       wheelSensitivity: 0.15,
     });
+    this.attachSchemaTooltip(schema);
+    this.restoreSchemaState();
+    this.schemaGraphInstance.on('pan zoom', () => this.scheduleSchemaStatePersist());
+  }
+
+  updateDataLab(data) {
+    if (!data) return;
+    this.updateTemplateOptions(data.templates || []);
+    if (!data.notebooks?.length) {
+      this.activeNotebookSlug = '';
+      this.renderDataLabList([]);
+      if (this.dataLabViewer) {
+        this.dataLabViewer.setAttribute('hidden', 'hidden');
+      }
+      return;
+    }
+    this.renderDataLabList(data.notebooks || []);
+    const existing = data.notebooks.find((nb) => nb.slug === this.activeNotebookSlug);
+    if (existing) {
+      this.highlightNotebook();
+    } else {
+      const first = data.notebooks[0];
+      this.openNotebook(first.viewer_url, first.slug);
+    }
+  }
+
+  ensureSchemaTooltip() {
+    if (!this.schemaCanvas || !this.schemaTooltip) return;
+    if (!this.schemaTooltip.parentElement) {
+      this.schemaCanvas.appendChild(this.schemaTooltip);
+    }
+  }
+
+  attachSchemaTooltip(schema) {
+    if (!this.schemaGraphInstance || !this.schemaTooltip) return;
+    const schemaNodes = new Map();
+    (schema.nodes || []).forEach((node) => {
+      schemaNodes.set(node.name, node);
+    });
+
+    this.schemaGraphInstance.off('mouseover');
+    this.schemaGraphInstance.off('mouseout');
+    this.schemaGraphInstance.off('mousemove');
+
+    this.schemaGraphInstance.on('mouseover', 'node', (event) => {
+      const node = schemaNodes.get(event.target.id());
+      if (!node) return;
+      this.schemaTooltip.innerHTML = this.buildTooltipContent(node);
+      this.schemaTooltip.classList.add('is-visible');
+      this.positionSchemaTooltip(event.renderedPosition);
+    });
+
+    this.schemaGraphInstance.on('mouseout', 'node', () => {
+      this.schemaTooltip.classList.remove('is-visible');
+    });
+
+    this.schemaGraphInstance.on('mousemove', 'node', (event) => {
+      this.positionSchemaTooltip(event.renderedPosition);
+    });
+  }
+
+  buildTooltipContent(node) {
+    const fields = Array.isArray(node.fields) ? node.fields.length : 0;
+    const relations = Array.isArray(node.relations) ? node.relations.length : 0;
+    const pending = Number(node.pending_migrations || 0);
+    return `
+      <strong>${this.escape(node.name || 'Model')}</strong>
+      <dl>
+        <dt>Fields</dt><dd>${fields}</dd>
+        <dt>Relations</dt><dd>${relations}</dd>
+        <dt>Pending</dt><dd>${pending}</dd>
+      </dl>
+    `;
+  }
+
+  positionSchemaTooltip(position) {
+    if (!this.schemaTooltip) return;
+    const offset = 12;
+    const x = position?.x ?? 0;
+    const y = position?.y ?? 0;
+    this.schemaTooltip.style.left = `${x + offset}px`;
+    this.schemaTooltip.style.top = `${y + offset}px`;
+  }
+
+  scheduleSchemaStatePersist() {
+    if (this.schemaStateDebounce) {
+      clearTimeout(this.schemaStateDebounce);
+    }
+    this.schemaStateDebounce = window.setTimeout(() => this.persistSchemaState(), 300);
+  }
+
+  persistSchemaState() {
+    if (!this.schemaGraphInstance || !this.workspaceSlug) return;
+    const payload = {
+      zoom: this.schemaGraphInstance.zoom(),
+      pan: this.schemaGraphInstance.pan(),
+    };
+    try {
+      localStorage.setItem(`djdesk.schema.${this.workspaceSlug}`, JSON.stringify(payload));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  restoreSchemaState() {
+    if (!this.schemaGraphInstance || !this.workspaceSlug) return;
+    let payload = null;
+    try {
+      payload = JSON.parse(localStorage.getItem(`djdesk.schema.${this.workspaceSlug}`));
+    } catch {
+      payload = null;
+    }
+    if (!payload) return;
+    const apply = () => {
+      if (payload.zoom) {
+        this.schemaGraphInstance.zoom(payload.zoom);
+      }
+      if (payload.pan) {
+        this.schemaGraphInstance.pan(payload.pan);
+      }
+    };
+    if (typeof this.schemaGraphInstance.ready === 'function') {
+      this.schemaGraphInstance.ready(apply);
+    } else {
+      apply();
+    }
+  }
+
+  updateTemplateOptions(templates) {
+    if (!this.dataLabForm || !templates.length) return;
+    const select = this.dataLabForm.querySelector('select[name="template"]');
+    if (!select) return;
+    const current = select.value;
+    select.innerHTML = templates
+      .map((template) => `<option value="${template.slug}">${this.escape(template.title)}</option>`)
+      .join('');
+    if (templates.some((template) => template.slug === current)) {
+      select.value = current;
+    }
+  }
+
+  renderDataLabList(notebooks) {
+    if (!this.dataLabList) return;
+    if (!notebooks.length) {
+      this.dataLabList.innerHTML = '<p class="empty-note">No exported notebooks yet.</p>';
+      this.highlightNotebook();
+      return;
+    }
+    this.dataLabList.innerHTML = notebooks
+      .map(
+        (notebook) => `
+        <button
+          type="button"
+          class="data-lab-list-item ${notebook.slug === this.activeNotebookSlug ? 'is-active' : ''}"
+          data-notebook-url="${notebook.viewer_url}"
+          data-notebook-slug="${notebook.slug}"
+        >
+          <strong>${this.escape(notebook.title)}</strong>
+          <small>${this.escape(notebook.file || '')}</small>
+        </button>
+      `
+      )
+      .join('');
+  }
+
+  openNotebook(url, slug) {
+    if (!this.dataLabViewer || !this.dataLabFrame || !url) return;
+    this.activeNotebookSlug = slug || '';
+    this.dataLabViewer.removeAttribute('hidden');
+    if (this.dataLabFrame.src !== url) {
+      this.dataLabFrame.src = url;
+    }
+    this.highlightNotebook();
+  }
+
+  highlightNotebook() {
+    if (!this.dataLabList) return;
+    this.dataLabList.querySelectorAll('[data-notebook-slug]').forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.notebookSlug === this.activeNotebookSlug);
+    });
   }
 
   buildSchemaElements(schema) {
@@ -406,6 +750,9 @@ class InspectorUI {
           id: node.name,
           label: node.name,
           badge: node.badge || '',
+          fields: Array.isArray(node.fields) ? node.fields : [],
+          relations: Array.isArray(node.relations) ? node.relations : [],
+          pending_migrations: node.pending_migrations || 0,
         },
       })),
       ...edges.map((edge, index) => ({
@@ -418,9 +765,182 @@ class InspectorUI {
     ];
   }
 
+  renderScanSkeleton() {
+    return Array.from({ length: 3 })
+      .map(
+        () => `
+        <article class="scan-card">
+          <header>
+            <span class="scan-kind">${this.skeletonLine('80%', '0.8rem')}</span>
+            ${this.skeletonLine('40px', '0.8rem')}
+          </header>
+          ${this.skeletonLine('100%', '0.75rem')}
+          ${this.skeletonLine('70%', '0.75rem')}
+        </article>
+      `
+      )
+      .join('');
+  }
+
+  renderInsightSkeleton() {
+    return Array.from({ length: 4 })
+      .map(
+        () => `
+        <article class="insight-card">
+          <header>
+            ${this.skeletonLine('60%', '0.8rem')}
+          </header>
+          ${this.skeletonLine('90%', '2.2rem')}
+          ${this.skeletonLine('80%', '0.8rem')}
+        </article>
+      `
+      )
+      .join('');
+  }
+
+  renderTaskSkeleton() {
+    return Array.from({ length: 3 })
+      .map(
+        () => `
+        <li class="task-history-item">
+          ${this.skeletonLine('70%', '0.9rem')}
+          <div class="task-progress">${this.skeletonLine('100%', '4px')}</div>
+        </li>
+      `
+      )
+      .join('');
+  }
+
+  renderSchemaSkeleton() {
+    return `
+      <div class="schema-skeleton">
+        ${this.skeletonLine('30%', '140px')}
+        ${this.skeletonLine('30%', '140px')}
+        ${this.skeletonLine('30%', '140px')}
+      </div>
+    `;
+  }
+
+  skeletonLine(width = '100%', height = '1rem') {
+    return `<span class="skeleton" style="display:block;width:${width};height:${height};"></span>`;
+  }
+
+  openTaskDrawer(taskId) {
+    if (!this.taskDrawer || !taskId) return;
+    this.taskDrawer.classList.add('is-visible');
+    this.setTaskDrawerLoading();
+    this.loadTaskDetails(taskId);
+  }
+
+  closeTaskDrawer() {
+    if (!this.taskDrawer) return;
+    this.taskDrawer.classList.remove('is-visible');
+    this.clearTaskDrawerPolling();
+  }
+
+  setTaskDrawerLoading() {
+    if (!this.taskDrawerTitle || !this.taskDrawerStatus || !this.taskDrawerLog) return;
+    this.taskDrawerTitle.textContent = 'Loading task…';
+    this.taskDrawerStatus.textContent = 'Fetching logs';
+    this.taskDrawerStatus.className = 'task-drawer-status';
+    if (this.taskDrawerProgress) {
+      this.taskDrawerProgress.style.width = '5%';
+    }
+    this.taskDrawerLog.innerHTML = '<p class="empty-note">Preparing log stream…</p>';
+  }
+
+  loadTaskDetails(taskId) {
+    const url = this.getTaskDetailUrl(taskId);
+    if (!url) return;
+    fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+      .then((response) => {
+        if (!response.ok) throw new Error('Request failed');
+        return response.json();
+      })
+      .then((data) => {
+        this.renderTaskDrawer(data);
+        if (['running', 'requested'].includes(data.status)) {
+          this.scheduleTaskDrawerRefresh(taskId);
+        } else {
+          this.clearTaskDrawerPolling();
+        }
+      })
+      .catch(() => {
+        this.showToast('Unable to load task log.', 'danger');
+        this.closeTaskDrawer();
+      });
+  }
+
+  renderTaskDrawer(data) {
+    if (!this.taskDrawer) return;
+    if (this.taskDrawerTitle) {
+      this.taskDrawerTitle.textContent = data.label || data.preset || 'Task';
+    }
+    if (this.taskDrawerStatus) {
+      this.taskDrawerStatus.textContent = data.status || 'unknown';
+      this.taskDrawerStatus.className = `task-drawer-status task-drawer-status--${data.status || 'info'}`;
+    }
+    if (this.taskDrawerProgress) {
+      this.taskDrawerProgress.style.width = `${data.progress ?? 0}%`;
+    }
+    if (this.taskDrawerLog) {
+      this.taskDrawerLog.textContent = data.log || 'Awaiting log output…';
+    }
+  }
+
+  scheduleTaskDrawerRefresh(taskId) {
+    this.clearTaskDrawerPolling();
+    this.taskDrawerPoll = window.setTimeout(() => this.loadTaskDetails(taskId), 3000);
+  }
+
+  clearTaskDrawerPolling() {
+    if (this.taskDrawerPoll) {
+      clearTimeout(this.taskDrawerPoll);
+      this.taskDrawerPoll = null;
+    }
+  }
+
+  getTaskDetailUrl(taskId) {
+    if (!this.taskDetailTemplate) return '';
+    if (!taskId) return '';
+    if (this.taskDetailTemplate.includes('0/')) {
+      return this.taskDetailTemplate.replace(/0\/?$/, `${taskId}/`);
+    }
+    return `${this.taskDetailTemplate}${taskId}/`;
+  }
+
+  navigateToPane(target) {
+    if (!target) return;
+    switch (target) {
+      case 'schema':
+        this.activateTab('schema');
+        this.schemaCanvas?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        break;
+      case 'tasks':
+        this.root.querySelector('[data-task-form]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        break;
+      case 'wizard':
+        this.root.querySelector('[data-dropzone]')?.scrollIntoView({ behavior: 'smooth' });
+        break;
+      default:
+        break;
+    }
+  }
+
   refreshIcons() {
     if (window.lucide?.createIcons) {
       window.lucide.createIcons();
+    }
+  }
+
+  getToastIcon(tone) {
+    switch (tone) {
+      case 'success':
+        return 'check-circle-2';
+      case 'danger':
+        return 'alert-triangle';
+      default:
+        return 'info';
     }
   }
 

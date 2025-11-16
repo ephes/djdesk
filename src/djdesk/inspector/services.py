@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone as datetime_timezone
 from typing import Any
 
+from django.conf import settings
+from django.urls import reverse
 from django.utils import timezone
 
 from .models import (
@@ -11,6 +14,7 @@ from .models import (
     Workspace,
     WorkspaceTaskRun,
 )
+from . import data_lab
 
 DEFAULT_SCAN_BLUEPRINT = (
     (ScanJob.Kind.SCHEMA, "Collecting models and relationships"),
@@ -85,6 +89,7 @@ def workspace_status_payload(workspace: Workspace) -> dict[str, Any]:
             "url": link.url,
             "stage": link.stage,
             "icon": link.icon,
+            "pane_target": link.pane_target,
         }
         for link in DocLink.objects.all()
     ]
@@ -98,6 +103,33 @@ def workspace_status_payload(workspace: Workspace) -> dict[str, Any]:
         "scans": scans,
         "tasks": tasks,
         "docs": docs,
+        "data_lab": workspace_data_lab_payload(workspace),
+    }
+
+
+def workspace_data_lab_payload(workspace: Workspace) -> dict[str, Any]:
+    """Serialize Data Lab templates + exported notebooks."""
+    notebooks_payload = []
+    for entry in data_lab.list_workspace_exports(workspace):
+        modified = datetime.fromtimestamp(entry["modified_at"], tz=datetime_timezone.utc)
+        notebooks_payload.append(
+            {
+                "slug": entry["slug"],
+                "title": entry["title"],
+                "description": entry["description"],
+                "file": entry["display_path"],
+                "modified_at": modified.isoformat(),
+                "viewer_url": reverse(
+                    "inspector:data-lab-notebook",
+                    kwargs={"slug": workspace.slug, "notebook_slug": entry["slug"]},
+                ),
+            }
+        )
+
+    return {
+        "templates": data_lab.template_summary(),
+        "notebooks": notebooks_payload,
+        "live_enabled": settings.INSPECTOR_DATA_LAB_LIVE,
     }
 
 

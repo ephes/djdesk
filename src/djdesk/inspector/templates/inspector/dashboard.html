@@ -4,7 +4,16 @@
 {% block body %}
     <div class="inspector-page">
         {% if workspace %}
-    <div class="inspector-shell" data-inspector-shell data-status-endpoint="{{ workspace_status_url }}" data-task-endpoint="{% url 'inspector:task-run-create' %}">
+    <div
+        class="inspector-shell"
+        data-inspector-shell
+        data-workspace-slug="{{ workspace.slug }}"
+        data-status-endpoint="{{ workspace_status_url }}"
+        data-task-endpoint="{% url 'inspector:task-run-create' %}"
+        data-task-detail-template="{% url 'inspector:task-run-detail' pk=0 %}"
+        {% if workspace.slug %}data-data-lab-export="{% url 'inspector:data-lab-export' workspace.slug %}"{% endif %}
+        data-docs-base-url="{{ docs_base_url }}"
+    >
         <header class="inspector-toolbar">
             <div class="toolbar-left">
                 <span class="product-lockup">DJDesk · Project Inspector</span>
@@ -24,11 +33,6 @@
                 </nav>
             </div>
             <div class="toolbar-right">
-                <div class="flag-badges">
-                    {% for flag, enabled in inspector_flags.items %}
-                        <span class="flag-badge {% if enabled %}is-enabled{% endif %}">{{ flag|cut:"stage_"|upper }}</span>
-                    {% endfor %}
-                </div>
                 <div class="connection-status" data-connection-indicator>Offline</div>
             </div>
         </header>
@@ -191,7 +195,14 @@ class SchemaWatcher:
                     <ul class="doc-links">
                         {% for doc in doc_links %}
                         <li>
-                            <a href="{{ doc.url }}" target="_blank" rel="noreferrer">
+                            <a
+                                href="{{ doc.url }}"
+                                target="_blank"
+                                rel="noreferrer"
+                                data-doc-link
+                                data-doc-url="{{ doc.url }}"
+                                data-pane-target="{{ doc.pane_target }}"
+                            >
                                 <span class="doc-link-title">
                                     <span class="doc-link-icon" data-lucide="{{ doc.icon|default:'book-open' }}"></span>
                                     <span>{{ doc.title }}</span>
@@ -236,19 +247,64 @@ class SchemaWatcher:
                     </header>
                     <ul class="task-history" data-task-history>
                         {% for run in workspace.task_runs.all|slice:":5" %}
-                        <li class="task-history-item task-history-item--{{ run.status }}">
-                            <div>
-                                <strong>{{ run.preset.label }}</strong>
-                                <small>{{ run.get_status_display }}</small>
-                            </div>
-                            <div class="task-progress">
-                                <span style="width: {{ run.progress }}%"></span>
-                            </div>
+                        <li class="task-history-item task-history-item--{{ run.status }}" data-task-run="{{ run.pk }}">
+                            <button type="button" class="task-history-trigger" data-task-run="{{ run.pk }}">
+                                <div>
+                                    <strong>{{ run.preset.label }}</strong>
+                                    <small>{{ run.get_status_display }}</small>
+                                </div>
+                                <div class="task-progress">
+                                    <span style="width: {{ run.progress }}%"></span>
+                                </div>
+                            </button>
                         </li>
                         {% empty %}
                         <li class="task-history-item is-empty">No tasks have been executed yet.</li>
                         {% endfor %}
                     </ul>
+                </section>
+                <section class="assistant-panel data-lab-panel" data-data-lab-panel>
+                    <header>
+                        <h3>Data Lab</h3>
+                        <span>{% if data_lab_payload.live_enabled %}Live kernels enabled{% else %}Export-only mode{% endif %}</span>
+                    </header>
+                    <form data-data-lab-form>
+                        <label>
+                            <span>Notebook template</span>
+                            <select name="template">
+                                {% for template in data_lab_payload.templates %}
+                                <option value="{{ template.slug }}">{{ template.title }}</option>
+                                {% endfor %}
+                            </select>
+                        </label>
+                        <button type="submit" class="primary-btn">Export notebook</button>
+                    </form>
+                    <div class="data-lab-list" data-data-lab-list>
+                        {% for notebook in data_lab_payload.notebooks %}
+                        <button
+                            type="button"
+                            class="data-lab-list-item"
+                            data-notebook-url="{{ notebook.viewer_url }}"
+                            data-notebook-slug="{{ notebook.slug }}"
+                        >
+                            <strong>{{ notebook.title }}</strong>
+                            <small>{{ notebook.file }}</small>
+                        </button>
+                        {% empty %}
+                        <p class="empty-note" data-data-lab-empty>No exported notebooks yet.</p>
+                        {% endfor %}
+                    </div>
+                    <div class="data-lab-viewer" data-data-lab-viewer {% if not data_lab_payload.notebooks %}hidden{% endif %}>
+                        {% if data_lab_payload.notebooks %}
+                        <iframe
+                            src="{{ data_lab_payload.notebooks.0.viewer_url }}"
+                            title="Workspace notebook"
+                            data-data-lab-frame
+                        ></iframe>
+                        {% else %}
+                        <iframe src="about:blank" title="Workspace notebook" data-data-lab-frame></iframe>
+                        {% endif %}
+                    </div>
                 </section>
             </aside>
         </div>
@@ -258,6 +314,42 @@ class SchemaWatcher:
             <span>Docs: {{ status_meta.docs|default:"Tutorial" }}</span>
             <span data-offline-indicator>Offline-ready</span>
         </footer>
+        <section class="task-drawer" data-task-drawer>
+            <div class="task-drawer-panel">
+                <header class="task-drawer-header">
+                    <div>
+                        <p class="task-drawer-label">Task details</p>
+                        <h2 data-task-drawer-title>Pending task</h2>
+                    </div>
+                    <button type="button" class="task-drawer-close" data-task-drawer-close>
+                        <span data-lucide="x"></span>
+                    </button>
+                </header>
+                <div class="task-drawer-meta">
+                    <span class="task-drawer-status" data-task-drawer-status>Awaiting data…</span>
+                    <div class="task-progress task-progress--drawer">
+                        <span data-task-drawer-progress style="width:0%"></span>
+                    </div>
+                </div>
+                <article class="task-drawer-log" data-task-drawer-log>
+                    <p class="empty-note">Select a task to stream logs.</p>
+                </article>
+            </div>
+        </section>
+        <section class="docs-drawer" data-docs-drawer>
+            <div class="docs-drawer-panel">
+                <header class="docs-drawer-header">
+                    <div>
+                        <p class="task-drawer-label">Inspector docs</p>
+                        <h2>Read the Docs</h2>
+                    </div>
+                    <button type="button" class="task-drawer-close" data-docs-close>
+                        <span data-lucide="x"></span>
+                    </button>
+                </header>
+                <iframe src="about:blank" title="DJDesk documentation" data-docs-frame></iframe>
+            </div>
+        </section>
     </div>
     {{ workspace.schema_graph|json_script:"schema-graph-data" }}
     {% else %}

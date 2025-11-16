@@ -65,6 +65,7 @@ electron-download-latest:
         echo "No successful electron-desktop run found."; \
         exit 1; \
     fi && \
+    rm -rf dist-artifacts && \
     gh run download "$latest_run" --dir dist-artifacts
 
 # Download artifacts for a specific run (pass RUN_ID=<id>).

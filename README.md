@@ -1,3 +1,15 @@
+## Documentation
+
+Full tutorial + reference lives on Read the Docs: https://djdesk.readthedocs.io/en/latest/
+
+```bash
+uv pip install -r docs/requirements.txt  # once per machine
+just docs-html                           # build static HTML into docs/_build/html
+just docs-serve                          # autoreload while writing
+```
+
+Read the Docs config lives in `readthedocs.yml`; `main` publishes to the URL above.
+
 ## Development
 
 ### Prerequisites
@@ -74,20 +86,3 @@ PYTHON=$(command -v python3.14 || command -v python3) npm start
 ```
 
 `npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
-
-### Documentation
-
-The Sphinx + Furo docs live under `docs/` and mirror the tutorial stages defined in the specs.
-
-```bash
-uv pip install -r docs/requirements.txt  # once per machine
-just docs-html                           # build static HTML into docs/_build/html
-just docs-serve                          # autoreload while writing
-```
-
-Read the Docs config lives in `readthedocs.yml`; once connected, `main` publishes to https://djdesk.readthedocs.io/.
-### Documentation
-
-Full documentation (tutorial + reference) lives on Read the Docs:
-
-https://djdesk.readthedocs.io/en/latest/

@@ -1,12 +1,43 @@
 Core Concepts
 =============
 
-High-level guidance for the DJDesk Control Room experience. Use this chapter to explain
-why Electron wraps Django, what "workspaces" represent, and how datasets flow from
-imports through automation to insights.
+DJDesk is a local-first "project inspector" for Django applications. Every tutorial
+chapter mirrors a concrete capability inside the Electron shell so contributors can
+inspect their own projects or simply follow along with the seeded workspace.
 
-Reference material to add:
+Why Electron?
+-------------
 
-- Local-first design principles drawn from ``specs/2025-11-16_app_contents.md``
-- Responsibilities split between Django (data + APIs) and Electron (OS integrations)
-- Feature flag nomenclature and how tutorial stages map to them
+* **Local file system access** — drag a project folder into the shell and the wizard
+  auto-fills the path. The same feature would be blocked in a browser sandbox.
+* **System automation** — ``django-tasks`` executes pre-approved commands on your own
+  machine. Electron can spawn ``python`` or ``pytest`` without jumping through server
+  hoops.
+* **Offline parity** — the SQLite database, docs bundle, and static assets ship with
+  the binary so the entire tutorial works without a network connection.
+
+Data model
+----------
+
+``Workspace`` instances capture metadata about an inspected project (path, Python and
+Django versions, docs URL, schema insights, etc.). ``ScanJob`` rows represent schema,
+migration, log, and fixture scans. ``TaskPreset`` + ``WorkspaceTaskRun`` records power
+the assistant drawer and safe automation story.
+
+Feature flags
+-------------
+
+``settings.INSPECTOR_FLAGS`` exposes ``stage_0_hello`` through ``stage_4_tasks`` so
+you can toggle panes on/off while capturing screenshots. The toolbar renders the
+flags as badges to help reviewers verify which tutorial stage they are seeing.
+
+Workflow summary
+----------------
+
+1. Run ``just electron-start`` to boot the packaged Django server.
+2. Import a project via the wizard (Stage 1).
+3. Observe schema, migration, activity, and log data update in real time (Stage 2).
+4. Exercise native affordances such as drag/drop, offline indicator, and notifications
+   (Stage 3).
+5. Dispatch safe commands through ``django-tasks`` and monitor the assistant drawer
+   (Stage 4).

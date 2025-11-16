@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, ipcMain, Notification, shell } = require('electron');
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -12,6 +12,52 @@ let mainWindow;
 let djangoProcess;
 let djangoPort;
 let getPortModule;
+
+const IPC_CHANNELS = {
+  OPEN_EXTERNAL: 'djdesk:open-external',
+  NOTIFY: 'djdesk:notify',
+};
+
+function registerIpcHandlers() {
+  ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL, async (_event, url) => {
+    if (!url || typeof url !== 'string') {
+      return false;
+    }
+
+    let parsed;
+    try {
+      parsed = new URL(url);
+    } catch (error) {
+      console.warn('Invalid URL format:', url, error.message);
+      return false;
+    }
+
+    try {
+      await shell.openExternal(parsed.toString());
+      return true;
+    } catch (error) {
+      console.warn('Failed to open external URL', error);
+      return false;
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.NOTIFY, (_event, rawOptions) => {
+    const options = rawOptions || {};
+    const title = options.title || 'DJDesk';
+    const body = options.body || '';
+    if (typeof Notification.isSupported === 'function' && !Notification.isSupported()) {
+      return false;
+    }
+    try {
+      const notification = new Notification({ title, body });
+      notification.show();
+      return true;
+    } catch (error) {
+      console.warn('Failed to show notification', error);
+      return false;
+    }
+  });
+}
 
 function getBundledPythonPath() {
   const bundlePython = process.platform === 'win32'
@@ -59,6 +105,7 @@ if (!gotTheLock) {
   console.log('Another instance is already running. Exiting...');
   app.quit();
 } else {
+  registerIpcHandlers();
   app.on('second-instance', () => {
     // Someone tried to run a second instance, we should focus our window
     if (mainWindow) {
@@ -233,6 +280,8 @@ app.on('before-quit', () => {
     console.log('Shutting down Django server...');
     djangoProcess.kill('SIGTERM');
   }
+  ipcMain.removeHandler(IPC_CHANNELS.OPEN_EXTERNAL);
+  ipcMain.removeHandler(IPC_CHANNELS.NOTIFY);
 });
 
 app.on('window-all-closed', () => {

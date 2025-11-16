@@ -1,3 +1,5 @@
+const WIZARD_STORAGE_KEY = 'djdesk.wizard.projectPath';
+
 class InspectorUI {
   constructor(root) {
     this.root = root;
@@ -40,6 +42,7 @@ class InspectorUI {
     this.dataLabFrame = root?.querySelector('[data-data-lab-frame]');
     this.dataLabEmpty = root?.querySelector('[data-data-lab-empty]');
     this.activeNotebookSlug = '';
+    this.nativeBridge = window.djdeskNative || null;
   }
 
   init() {
@@ -88,6 +91,32 @@ class InspectorUI {
       dropzone.classList.toggle('is-active', state);
     };
 
+    const message = dropzone.querySelector('p');
+    const defaultMessage = message?.textContent || 'Drop files from your editor to auto-import.';
+
+    const queuePath = (path) => {
+      if (!path) {
+        return;
+      }
+      this.persistWizardPath(path);
+      if (message) {
+        message.textContent = `Queued ${path}`;
+      }
+      this.showToast(`Primed wizard with ${path}`, 'success');
+    };
+
+    const nativeDropHandler = (event) => {
+      const paths = event.detail?.paths ?? [];
+      const [first] = paths;
+      if (!first) {
+        return;
+      }
+      toggle(false);
+      queuePath(first);
+    };
+
+    window.addEventListener('djdesk:workspace-drop', nativeDropHandler);
+
     dropzone.addEventListener('dragenter', (event) => {
       event.preventDefault();
       toggle(true);
@@ -103,15 +132,34 @@ class InspectorUI {
     dropzone.addEventListener('drop', (event) => {
       event.preventDefault();
       toggle(false);
+      if (this.nativeBridge) {
+        // Native bridge dispatches drop events via preload; avoid double-handling.
+        return;
+      }
       const files = Array.from(event.dataTransfer?.files ?? []);
       if (!files.length) {
-        dropzone.querySelector('p').textContent = 'Drop files from your editor to auto-import.';
+        if (message) {
+          message.textContent = defaultMessage;
+        }
         return;
       }
       const first = files[0];
       const path = first.path || first.name;
-      dropzone.querySelector('p').textContent = `Queued ${path}`;
+      queuePath(path);
     });
+  }
+
+  persistWizardPath(path) {
+    if (!path) return;
+    if (this.nativeBridge?.stageProjectPath) {
+      this.nativeBridge.stageProjectPath(path);
+      return;
+    }
+    try {
+      localStorage.setItem(WIZARD_STORAGE_KEY, path);
+    } catch {
+      // Ignore storage failures.
+    }
   }
 
   bindTaskForm() {
@@ -185,6 +233,7 @@ class InspectorUI {
         const url = link.dataset.docUrl || link.href;
         this.openDocsDrawer(url);
         this.navigateToPane(link.dataset.paneTarget);
+        this.openExternal(url);
       });
     });
   }
@@ -216,6 +265,13 @@ class InspectorUI {
 
   closeDocsDrawer() {
     this.docsDrawer?.classList.remove('is-visible');
+  }
+
+  openExternal(url) {
+    if (!url) return;
+    if (this.nativeBridge?.openExternal) {
+      this.nativeBridge.openExternal(url);
+    }
   }
 
   bindDataLab() {
@@ -424,12 +480,19 @@ class InspectorUI {
   }
 
   requestNotificationPermission() {
+    if (this.nativeBridge?.notify) {
+      return;
+    }
     if ('Notification' in window && Notification.permission === 'default') {
       Notification.requestPermission();
     }
   }
 
   pushNotification(title, body) {
+    if (this.nativeBridge?.notify) {
+      this.nativeBridge.notify({ title: title || 'DJDesk Task', body: body || '' });
+      return;
+    }
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(title || 'DJDesk Task', { body });
     }
@@ -959,6 +1022,61 @@ class InspectorUI {
   }
 }
 
+class WizardUI {
+  constructor(form) {
+    this.form = form;
+    this.projectInput = form?.querySelector('input[name="project_path"]');
+    this.nativeBridge = window.djdeskNative || null;
+  }
+
+  init() {
+    if (!this.form || !this.projectInput) return;
+    this.prefillFromStagedPath();
+  }
+
+  prefillFromStagedPath() {
+    const path = this.getStagedPath();
+    if (!path || this.projectInput.value) return;
+    this.projectInput.value = path;
+    this.renderHint(path);
+    this.clearStagedPath();
+  }
+
+  getStagedPath() {
+    if (this.nativeBridge?.getStagedProjectPath) {
+      return this.nativeBridge.getStagedProjectPath();
+    }
+    try {
+      return localStorage.getItem(WIZARD_STORAGE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  clearStagedPath() {
+    if (this.nativeBridge?.clearStagedProjectPath) {
+      this.nativeBridge.clearStagedProjectPath();
+      return;
+    }
+    try {
+      localStorage.removeItem(WIZARD_STORAGE_KEY);
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  renderHint(path) {
+    let hint = this.form.querySelector('[data-wizard-drop-hint]');
+    if (!hint) {
+      hint = document.createElement('p');
+      hint.dataset.wizardDropHint = '1';
+      hint.className = 'wizard-drop-hint';
+      this.projectInput.insertAdjacentElement('afterend', hint);
+    }
+    hint.textContent = `Auto-filled from drag & drop: ${path}`;
+  }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   if (window.lucide?.createIcons) {
     window.lucide.createIcons();
@@ -967,5 +1085,10 @@ document.addEventListener('DOMContentLoaded', () => {
   if (shell) {
     const ui = new InspectorUI(shell);
     ui.init();
+  }
+  const wizardForm = document.querySelector('.wizard-form');
+  if (wizardForm) {
+    const wizard = new WizardUI(wizardForm);
+    wizard.init();
   }
 });

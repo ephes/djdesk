@@ -154,3 +154,14 @@ docs-serve:
 # CI-friendly docs build (alias for docs-html for now).
 docs-check:
     just docs-html
+
+# Build docs and open the landing page in a browser.
+docs-open:
+    just docs-html
+    if command -v open >/dev/null 2>&1; then \
+        open "docs/_build/html/index.html"; \
+    elif command -v xdg-open >/dev/null 2>&1; then \
+        xdg-open "docs/_build/html/index.html"; \
+    else \
+        cmd.exe /c start "" "$(pwd)/docs/_build/html/index.html"; \
+    fi

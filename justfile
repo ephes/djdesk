@@ -60,7 +60,7 @@ electron-runs:
 
 # Download artifacts from the latest successful workflow run.
 electron-download-latest:
-    latest_run=$(gh run list --workflow=electron-desktop -L 1 --json databaseId,conclusion --jq 'map(select(.conclusion == "success")) | .[0].databaseId') && \
+    latest_run=$(gh run list --workflow=electron-desktop -L 5 --json databaseId,conclusion --jq '[.[] | select(.conclusion == "success")][0].databaseId') && \
     if [ -z "$latest_run" ]; then \
         echo "No successful electron-desktop run found."; \
         exit 1; \

@@ -24,7 +24,9 @@ class DashboardView(TemplateView):
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        workspaces = list(Workspace.objects.prefetch_related("scans", "task_runs"))
+        workspaces = list(
+            Workspace.objects.prefetch_related("scans", "task_runs", "task_runs__preset")
+        )
         workspace = self._resolve_workspace(workspaces)
         status_meta: dict[str, Any] = {}
         status_url = ""

@@ -20,6 +20,10 @@ Changed
   the embedded SQLite schema stays current when distributing desktop builds.
 - Linux Electron builds are temporarily disabled in CI while the packaging pipeline is stabilized,
   preventing broken artifacts from being published.
+- Task runner presets now execute the real ``INSPECTOR_SAFE_COMMANDS`` through ``django-tasks``,
+  stream stdout/stderr into the assistant drawer, and enforce the new
+  ``DJDESK_INSPECTOR_TASK_TIMEOUT`` guardrail so automation steps stay deterministic on desktop
+  builds.
 
 Documentation
 ~~~~~~~~~~~~~
@@ -28,6 +32,9 @@ Documentation
   concepts, architecture, and API/WebSocket docs) so the documentation matches the product surface.
 - Rewrote the Electron packaging guide and ensured the Read the Docs requirements install
   ``django-tasks`` so published instructions stay accurate with the codebase.
+- Replaced the multi-file Stage tutorial with a single “Integrating Django with Electron” guide,
+  added a migration helper page, and updated the docs navigation/reference pages accordingly so
+  readers follow one cohesive integration story.
 
 0.1.0 (2025-11-15)
 ------------------

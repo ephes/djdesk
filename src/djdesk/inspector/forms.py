@@ -43,6 +43,7 @@ class WorkspaceWizardForm(forms.ModelForm):
     )
     confirm_readonly = forms.BooleanField(
         required=True,
+        initial=True,
         label="I understand DJDesk only performs read-only inspection commands.",
         error_messages={"required": "Confirmation is required to continue."},
     )

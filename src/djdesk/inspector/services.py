@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone as datetime_timezone
+from datetime import datetime
+from datetime import timezone as datetime_timezone
 from typing import Any
 
 from django.conf import settings
 from django.urls import reverse
 from django.utils import timezone
 
+from . import data_lab
 from .models import (
     DocLink,
     ScanJob,
@@ -14,7 +16,6 @@ from .models import (
     Workspace,
     WorkspaceTaskRun,
 )
-from . import data_lab
 
 DEFAULT_SCAN_BLUEPRINT = (
     (ScanJob.Kind.SCHEMA, "Collecting models and relationships"),
@@ -87,9 +88,9 @@ def workspace_status_payload(workspace: Workspace) -> dict[str, Any]:
         {
             "title": link.title,
             "url": link.url,
-            "stage": link.stage,
             "icon": link.icon,
             "pane_target": link.pane_target,
+            "description": link.description,
         }
         for link in DocLink.objects.all()
     ]

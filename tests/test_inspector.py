@@ -8,7 +8,8 @@ from django.urls import reverse
 
 from djdesk.inspector import forms as inspector_forms
 from djdesk.inspector.forms import TaskRunForm, WorkspaceWizardForm
-from djdesk.inspector.models import ScanJob, TaskPreset, Workspace
+from djdesk.inspector.models import ScanJob, TaskPreset, Workspace, WorkspaceTaskRun
+from djdesk.inspector.tasks import execute_workspace_task
 
 
 class WorkspaceWizardFormTests(TestCase):
@@ -188,3 +189,63 @@ class DataLabAPITests(TestCase):
             )
         )
         self.assertContains(response, "Schema audit starter")
+
+
+class TaskExecutionIntegrationTests(TestCase):
+    def setUp(self) -> None:
+        self.project_root = Path(__file__).resolve().parents[1]
+        self.workspace = Workspace.objects.create(
+            name="Repo Workspace",
+            project_path=str(self.project_root),
+            metadata={"recent_activity": [], "schema": {"nodes": []}},
+        )
+        self.preset, _ = TaskPreset.objects.get_or_create(
+            key="check",
+            defaults={
+                "label": "Run checks",
+                "description": "Execute django check",
+                "command": "python manage.py check",
+            },
+        )
+
+    def test_execute_workspace_task_runs_safe_command(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+
+        execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.SUCCEEDED)
+        self.assertIn("command", run.metadata)
+        command_meta = run.metadata["command"]
+        self.assertEqual(command_meta["exit_code"], 0)
+        self.assertFalse(command_meta["timed_out"])
+        self.assertTrue(run.log)
+
+    def test_rejects_unsafe_commands(self) -> None:
+        preset = TaskPreset.objects.create(
+            key="unsafe-migrate",
+            label="Run migrations",
+            description="Should be blocked",
+            command="python manage.py migrate",
+        )
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=preset)
+
+        execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertIn("not part of", run.log)
+
+    def test_missing_workspace_path(self) -> None:
+        broken_workspace = Workspace.objects.create(
+            name="Missing path",
+            project_path="/tmp/djdesk/missing",
+            metadata={"recent_activity": [], "schema": {"nodes": []}},
+        )
+        run = WorkspaceTaskRun.objects.create(workspace=broken_workspace, preset=self.preset)
+
+        execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertIn("does not exist", run.log)

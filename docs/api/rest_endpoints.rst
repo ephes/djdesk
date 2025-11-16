@@ -6,7 +6,7 @@ ships with CSRF protection enabled, so remember to include the ``csrftoken`` val
 when POSTing from custom scripts or sketches.
 
 ``GET /api/workspaces/<slug>/status/``
--------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Returns the data needed to render the dashboard. Example response (trimmed):
 
@@ -36,8 +36,8 @@ Returns the data needed to render the dashboard. Example response (trimmed):
       "tasks": [
         {"id": 5, "label": "Diff migrations", "status": "running", "progress": 40}
       ],
-      "docs": [
-        {"title": "Stage 2 — Project Explorer", "url": "https://djdesk.readthedocs.io/..."}
+      "doc_links": [
+        {"title": "Integration guide — Render Django UI", "url": "https://djdesk.readthedocs.io/en/latest/guide/integrating_django_with_electron.html#guide-render-django"}
       ]
     }
 
@@ -45,7 +45,7 @@ The Electron renderer polls this endpoint every few seconds. You can also hit it
 ``curl`` while following the tutorial to see the raw data.
 
 ``POST /api/task-runs/``
-------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 Queues a preset command for the selected workspace. Required fields:
 
@@ -68,7 +68,7 @@ Response payload mirrors ``GET /api/workspaces/<slug>/status/`` and includes an 
 ``task_run`` object with the ID/status/log of the newly created run.
 
 ``GET /api/task-runs/<id>/``
-----------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Returns an individual run with log output and metadata. Useful for debugging or
 building future CLI tooling:
@@ -81,11 +81,19 @@ building future CLI tooling:
       "label": "Diff migrations",
       "status": "succeeded",
       "progress": 100,
-      "log": "[15:21:00] Inspecting migrations\n[15:21:04] Found 3 pending migrations.",
+      "log": "[15:21:00] Executing `python manage.py showmigrations`\n[15:21:01] Command finished with exit code 0.",
       "metadata": {
-        "simulation": {
-          "summary": "Pending migrations identified across analytics apps.",
-          "result": {"pending": 3, "apps": ["catalog.datasets", "ledger.entries"]}
+        "command": {
+          "raw": "python manage.py showmigrations",
+          "safe_prefix": "python manage.py showmigrations",
+          "workspace_path": "/Users/example/Projects/atlas",
+          "exit_code": 0,
+          "duration_seconds": 2.41,
+          "output_lines": 12,
+          "timed_out": false
         }
       }
     }
+
+If a command fails (non-zero exit code, timeout, or workspace validation error) the response keeps
+the same structure but the ``command`` payload adds an ``error`` string summarizing the root cause.

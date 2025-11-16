@@ -10,7 +10,6 @@ from django.utils.safestring import mark_safe
 
 from .models import Workspace
 
-
 DATA_LAB_TEMPLATES = [
     {
         "slug": "schema-audit",
@@ -22,7 +21,10 @@ DATA_LAB_TEMPLATES = [
                 "type": "markdown",
                 "source": [
                     "# Workspace schema audit — {{WORKSPACE_NAME}}\n",
-                    "This seeded notebook mirrors the inspector's schema canvas and surfaces the same SAFE commands you can dispatch from DJDesk.\n",
+                    (
+                        "This seeded notebook mirrors the inspector's schema canvas and "
+                        "surfaces the same SAFE commands you can dispatch from DJDesk.\n"
+                    ),
                 ],
             },
             {
@@ -41,7 +43,11 @@ DATA_LAB_TEMPLATES = [
                 "type": "markdown",
                 "source": [
                     "## SAFE command reference\n",
-                    "Use the Task Runner drawer to dispatch read-only commands. Tokens and execution policies inherit DJDesk's SAFE command contract.\n",
+                    (
+                        "Use the Task Runner drawer to dispatch read-only commands. "
+                        "Tokens and execution policies inherit DJDesk's SAFE command "
+                        "contract.\n"
+                    ),
                 ],
             },
         ],
@@ -49,14 +55,20 @@ DATA_LAB_TEMPLATES = [
     {
         "slug": "log-study",
         "title": "Log study scratchpad",
-        "description": "Explore tail logs exported from the inspector without mutating the project.",
+        "description": (
+            "Explore tail logs exported from the inspector without mutating the "
+            "project."
+        ),
         "tags": ["logs"],
         "cells": [
             {
                 "type": "markdown",
                 "source": [
                     "# Log excerpts — {{WORKSPACE_NAME}}\n",
-                    "The inspector captured a snapshot from {{WORKSPACE_PATH}}. Use this tab to review notable events offline.\n",
+                    (
+                        "The inspector captured a snapshot from {{WORKSPACE_PATH}}. "
+                        "Use this tab to review notable events offline.\n"
+                    ),
                 ],
             },
             {

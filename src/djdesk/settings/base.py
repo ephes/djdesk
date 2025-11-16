@@ -138,6 +138,7 @@ INSPECTOR_SAFE_COMMANDS = [
     "python manage.py inspectdb",
     "python manage.py dumpdata",
 ]
+INSPECTOR_TASK_TIMEOUT = int(os.environ.get("DJDESK_INSPECTOR_TASK_TIMEOUT", "60"))
 
 INSPECTOR_DATA_LAB_ROOT = Path(
     os.environ.get("DJDESK_DATA_LAB_ROOT", BASE_DIR / "var" / "data_lab")

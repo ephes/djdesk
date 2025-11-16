@@ -74,3 +74,7 @@ electron-download RUN_ID:
 # Trigger the GitHub Actions electron-desktop workflow (manual run).
 electron-workflow-run:
     gh workflow run electron-desktop.yml
+
+# Remove downloaded GitHub artifact directories.
+electron-clean-artifacts:
+    rm -rf dist-artifacts

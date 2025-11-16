@@ -178,9 +178,6 @@ async function downloadFile(url, destination) {
 async function extractArchive(archivePath, destination) {
   await fsp.mkdir(destination, { recursive: true });
   const args = ['-xzf', archivePath, '-C', destination];
-  if (process.platform === 'win32') {
-    args.splice(1, 0, '--force-local');
-  }
   await runCommand('tar', args);
 }
 

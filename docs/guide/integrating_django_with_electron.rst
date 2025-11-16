@@ -103,6 +103,18 @@ Apply this to your project
 2. Seed predictable data (fixtures or migrations) so screenshots and QA runs stay deterministic.
 3. Expose one consolidated status endpoint per workspace/project so the renderer can refresh UI sections with a single request.
 
+Bootstrap reproducible tutorial fixtures
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Screenshot parity depends on everyone importing the same sample projects. DJDesk ships the fixtures as generated bundles instead of checking them into git:
+
+.. code-block:: bash
+
+    just fetch-samples                 # creates sample_projects/
+    tree sample_projects/djdesk        # inspect the Atlas Telemetry workspace
+
+Behind the scenes ``scripts/fetch_samples.py`` writes the ``django-polls``, ``djdesk`` (Atlas Telemetry), and ``generated`` projects into ``INSPECTOR_SAMPLE_ROOT`` (defaults to ``sample_projects/``). ``content.py`` references these repo-relative paths so seeds, migrations, and screenshots always point at real files. Override ``DJDESK_SAMPLE_ROOT`` if you prefer to stash the bundles elsewhere.
+
 .. _guide-desktop-affordances:
 
 Add desktop-only affordances (optional)
@@ -124,6 +136,18 @@ Apply this to your project
 1. Use the preload script to expose OS integrations (paths, clipboard, drag/drop) in a controlled way.
 2. Favor Web APIs Electron already supports (Notifications, clipboard) before building custom IPC.
 3. Add graceful degradation paths so the same templates make sense when opened in a browser.
+
+Bundle docs for offline parity
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The inspector's Docs drawer now prefers a local Sphinx export so tutorial captures work offline:
+
+.. code-block:: bash
+
+    just docs-bundle                   # builds docs/_build/html + copies into var/docs_bundle
+    ls var/docs_bundle/index.html      # entry point served by OfflineDocsView
+
+``DashboardView`` checks ``var/docs_bundle/index.html`` and swaps the drawer + deep links to ``/docs/offline/...`` when available. The renderer still opens the external Read the Docs URL in the user's browser, but the iframe stays pinned to the offline build so QA and Electron demos render deterministically. Delete ``var/docs_bundle`` (or skip ``just docs-bundle``) to fall back to ``INSPECTOR_DOCS_BASE_URL``.
 
 .. _guide-safe-automation:
 

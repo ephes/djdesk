@@ -231,9 +231,12 @@ class InspectorUI {
         }
         event.preventDefault();
         const url = link.dataset.docUrl || link.href;
+        const external = link.dataset.docExternal === 'true';
         this.openDocsDrawer(url);
         this.navigateToPane(link.dataset.paneTarget);
-        this.openExternal(url);
+        if (external) {
+          this.openExternal(url);
+        }
       });
     });
   }

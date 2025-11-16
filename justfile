@@ -165,3 +165,12 @@ docs-open:
     else \
         cmd.exe /c start "" "$(pwd)/docs/_build/html/index.html"; \
     fi
+
+# Generate the tutorial sample projects.
+fetch-samples:
+    uv run python scripts/fetch_samples.py
+
+# Build docs and copy them into the offline bundle directory.
+docs-bundle:
+    just docs-html
+    uv run python scripts/bundle_docs.py

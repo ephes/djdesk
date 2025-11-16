@@ -6,7 +6,7 @@ from unittest import mock
 
 from django import forms
 from django.core.exceptions import ValidationError
-from django.test import Client, TestCase, override_settings
+from django.test import Client, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from djdesk.inspector import forms as inspector_forms
@@ -14,6 +14,7 @@ from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm, WorkspaceWizardForm
 from djdesk.inspector.models import ScanJob, TaskPreset, Workspace, WorkspaceTaskRun
 from djdesk.inspector.tasks import execute_workspace_task
+from djdesk.inspector.views import DashboardView
 
 
 class WorkspaceModelTests(TestCase):
@@ -256,6 +257,15 @@ class InspectorAPIViewTests(TestCase):
 
 
 class DashboardViewTests(TestCase):
+    def setUp(self) -> None:
+        self.factory = RequestFactory()
+
+    def _build_view(self) -> DashboardView:
+        view = DashboardView()
+        request = self.factory.get("/")
+        view.setup(request)
+        return view
+
     def test_dashboard_handles_workspace_without_slug(self) -> None:
         Workspace.objects.all().delete()
         workspace = Workspace.objects.create(
@@ -268,6 +278,53 @@ class DashboardViewTests(TestCase):
         response = self.client.get(reverse("inspector:dashboard"))
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'data-status-endpoint=""', response.content)
+
+    def test_dashboard_prefers_offline_docs_when_available(self) -> None:
+        Workspace.objects.all().delete()
+        workspace = Workspace.objects.create(
+            name="Docs Workspace",
+            project_path="/tmp/docs-workspace",
+            metadata={"recent_activity": [], "schema": {"nodes": []}},
+        )
+        workspace.scans.create(
+            kind=ScanJob.Kind.SCHEMA,
+            status=ScanJob.Status.COMPLETED,
+            summary="Done",
+        )
+        with TemporaryDirectory() as temp_dir:
+            bundle_root = Path(temp_dir)
+            (bundle_root / "index.html").write_text("<html>Docs</html>")
+            with override_settings(INSPECTOR_DOCS_BUNDLE_ROOT=bundle_root):
+                response = self.client.get(reverse("inspector:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"Offline bundle", response.content)
+        self.assertIn(b'/docs/offline/"', response.content)
+
+    @override_settings(INSPECTOR_DOCS_BASE_URL="https://docs.example.com/en/latest/")
+    def test_doc_url_skips_external_hosts(self) -> None:
+        view = self._build_view()
+        malicious = "https://evil.example.org/en/latest/guide/"
+        result = view._doc_url(malicious, offline=True)
+        self.assertEqual(result, malicious)
+
+    @override_settings(INSPECTOR_DOCS_BASE_URL="https://docs.example.com/en/latest/")
+    def test_doc_url_rejects_traversal(self) -> None:
+        view = self._build_view()
+        payload = "https://docs.example.com/en/latest/../etc/passwd"
+        result = view._doc_url(payload, offline=True)
+        self.assertEqual(result, payload)
+
+    @override_settings(INSPECTOR_DOCS_BASE_URL="https://docs.example.com/en/latest/")
+    def test_doc_url_rewrites_valid_path(self) -> None:
+        view = self._build_view()
+        payload = "https://docs.example.com/en/latest/guide/page.html"
+        expected = reverse(
+            "inspector:docs-offline",
+            kwargs={"resource": "guide/page.html"},
+        )
+        result = view._doc_url(payload, offline=True)
+        self.assertEqual(result, expected)
 
 
 class DataLabAPITests(TestCase):
@@ -307,6 +364,48 @@ class DataLabAPITests(TestCase):
         )
         self.assertContains(response, "Schema audit starter")
 
+
+class OfflineDocsViewTests(TestCase):
+    def setUp(self) -> None:
+        self.temp_dir = TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.bundle_root = Path(self.temp_dir.name)
+        (self.bundle_root / "index.html").write_text("<html>Docs</html>")
+        fonts = self.bundle_root / "fonts"
+        fonts.mkdir()
+        (fonts / "sample.woff2").write_bytes(b"font")
+        self.override = override_settings(INSPECTOR_DOCS_BUNDLE_ROOT=self.bundle_root)
+        self.override.enable()
+        self.addCleanup(self.override.disable)
+
+    def test_serves_index_page(self) -> None:
+        response = self.client.get(reverse("inspector:docs-offline-root"))
+        self.assertContains(response, "Docs")
+
+    def test_prevents_traversal(self) -> None:
+        response = self.client.get(
+            reverse("inspector:docs-offline", kwargs={"resource": "../secret.txt"})
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_blocks_absolute_paths(self) -> None:
+        response = self.client.get(
+            reverse("inspector:docs-offline", kwargs={"resource": "/etc/passwd"})
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_blocks_encoded_traversal(self) -> None:
+        response = self.client.get(
+            reverse("inspector:docs-offline", kwargs={"resource": "..%2Fsecret.txt"})
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_serves_fonts_with_expected_mimetype(self) -> None:
+        response = self.client.get(
+            reverse("inspector:docs-offline", kwargs={"resource": "fonts/sample.woff2"})
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "font/woff2")
 
 class TaskExecutionIntegrationTests(TestCase):
     def setUp(self) -> None:

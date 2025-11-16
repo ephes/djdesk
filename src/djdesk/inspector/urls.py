@@ -32,4 +32,6 @@ urlpatterns = [
         views.DataLabNotebookView.as_view(),
         name="data-lab-notebook",
     ),
+    path("docs/offline/", views.OfflineDocsView.as_view(), name="docs-offline-root"),
+    path("docs/offline/<path:resource>", views.OfflineDocsView.as_view(), name="docs-offline"),
 ]

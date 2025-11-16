@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from . import assets
+
 TASK_PRESETS = [
     {
         "key": "showmigrations",
@@ -135,7 +137,7 @@ DOC_LINKS = [
 WORKSPACE_FIXTURES = [
     {
         "name": "Atlas Telemetry Studio",
-        "project_path": "~/Projects/sample_projects/atlas",
+        "project_path": assets.sample_project_path("djdesk"),
         "python_version": "3.14.0",
         "django_version": "5.2.8",
         "docs_url": "https://djdesk.readthedocs.io/en/latest/",
@@ -144,7 +146,7 @@ WORKSPACE_FIXTURES = [
         "last_scan_at": "2025-11-16T15:30:00+00:00",
         "metadata": {
             "status": {
-                "project": "~/Projects/sample_projects/atlas",
+                "project": assets.sample_project_path("djdesk"),
                 "mode": "Offline ready",
                 "profile": "Local studio",
                 "docs": "Integration guide — Render Django UI",

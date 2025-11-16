@@ -130,6 +130,10 @@ INSPECTOR_DOCS_BASE_URL = os.environ.get(
     "DJDESK_DOCS_BASE_URL", "https://djdesk.readthedocs.io/en/latest"
 )
 
+INSPECTOR_SAMPLE_ROOT = Path(
+    os.environ.get("DJDESK_SAMPLE_ROOT", BASE_DIR / "sample_projects")
+).expanduser()
+
 INSPECTOR_SAFE_COMMANDS = [
     "python manage.py showmigrations",
     "python manage.py check",
@@ -144,3 +148,7 @@ INSPECTOR_DATA_LAB_ROOT = Path(
     os.environ.get("DJDESK_DATA_LAB_ROOT", BASE_DIR / "var" / "data_lab")
 ).expanduser()
 INSPECTOR_DATA_LAB_LIVE = _env_flag("DJDESK_FLAG_DATA_LAB_LIVE", False)
+
+INSPECTOR_DOCS_BUNDLE_ROOT = Path(
+    os.environ.get("DJDESK_DOCS_BUNDLE_ROOT", BASE_DIR / "var" / "docs_bundle")
+).expanduser()

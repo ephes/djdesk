@@ -46,11 +46,19 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
 - `just hooks` – run every pre-commit hook against the full codebase.
 - `just docs-html` – build the Sphinx documentation (`docs/_build/html`).
+- `just docs-bundle` – build docs and copy the HTML bundle into `var/docs_bundle` for offline use.
 - `just docs-serve` – live-reload the docs while editing reST/Markdown files.
 - `just electron-install` / `just electron-start` – install Electron deps and launch the local shell.
 - `just electron-bundle` / `just electron-build-*` – create the python-build-standalone bundle and packaged binaries for each OS.
 - `just electron-runs` – list recent GitHub Actions builds; `just electron-workflow-run` triggers the matrix build.
 - `just electron-download-latest` / `just electron-download-macos` / `just electron-download-windows` / `just electron-download-linux` / `just electron-download RUN_ID=<id>` – download workflow artifacts (all platforms or per platform); `just electron-clean-artifacts` removes the downloaded zips.
+- `just fetch-samples` – materialize sample Django projects under `sample_projects/` for screenshots, tests, and wizard defaults.
+
+### Sample projects & offline docs
+
+The tutorial relies on reproducible sample workspaces so screenshots and wizard defaults stay in sync. Run `just fetch-samples` after cloning (or whenever the bundles change) to populate `sample_projects/` with the `django-polls`, `djdesk`, and `generated` fixtures referenced throughout the inspector. Seed migrations expect these directories to exist, so run the recipe before applying migrations or capturing docs/screenshots.
+
+The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
 
 ### Settings and environments
 

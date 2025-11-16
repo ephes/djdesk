@@ -39,6 +39,9 @@ dist-artifacts/
 # Documentation build artifacts
 docs/_build/
 
+# Sample bundles
+sample_projects/
+
 # Specifications
 specs/
 

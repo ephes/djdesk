@@ -190,18 +190,18 @@ class SchemaWatcher:
                 <section class="assistant-panel">
                     <header>
                         <h3>Documentation</h3>
-                        <span>Synced with Read the Docs</span>
+                        <span>Synced with {{ docs_source.label }}</span>
                     </header>
                     <ul class="doc-links">
                         {% for doc in doc_links %}
                         <li>
                             <a
                                 href="{{ doc.url }}"
-                                target="_blank"
-                                rel="noreferrer"
+                                {% if doc.external %}target="_blank" rel="noreferrer"{% endif %}
                                 data-doc-link
                                 data-doc-url="{{ doc.url }}"
                                 data-pane-target="{{ doc.pane_target }}"
+                                data-doc-external="{% if doc.external %}true{% else %}false{% endif %}"
                             >
                                 <span class="doc-link-title">
                                     <span class="doc-link-icon" data-lucide="{{ doc.icon|default:'book-open' }}"></span>
@@ -340,7 +340,7 @@ class SchemaWatcher:
                 <header class="docs-drawer-header">
                     <div>
                         <p class="task-drawer-label">Inspector docs</p>
-                        <h2>Read the Docs</h2>
+                        <h2>{{ docs_source.label }}</h2>
                     </div>
                     <button type="button" class="task-drawer-close" data-docs-close>
                         <span data-lucide="x"></span>

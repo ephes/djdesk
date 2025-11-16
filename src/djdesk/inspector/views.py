@@ -1,21 +1,36 @@
 from __future__ import annotations
 
+import mimetypes
+import posixpath
 from typing import Any
+from urllib.parse import urlsplit
 
 from django import forms
 from django.conf import settings
 from django.contrib import messages
-from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
+from django.http import (
+    FileResponse,
+    Http404,
+    HttpRequest,
+    HttpResponse,
+    JsonResponse,
+)
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
 from django.views import View
 from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import FormView, TemplateView
 
-from . import data_lab
+from . import assets, data_lab
 from .forms import TaskRunForm, WorkspaceWizardForm
 from .models import DocLink, TaskPreset, Workspace, WorkspaceTaskRun
 from .services import workspace_data_lab_payload, workspace_status_payload
+
+MIMETYPE_OVERRIDES = {
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".svg": "image/svg+xml",
+}
 
 
 class DashboardView(TemplateView):
@@ -37,12 +52,15 @@ class DashboardView(TemplateView):
                 "inspector:workspace-status", kwargs={"slug": workspace.slug}
             )
 
+        docs_source = self._docs_source()
+
         context.update(
             {
                 "workspace": workspace,
                 "workspaces": workspaces,
-                "docs_base_url": settings.INSPECTOR_DOCS_BASE_URL,
-                "doc_links": DocLink.objects.all(),
+                "docs_base_url": docs_source["base_url"],
+                "doc_links": docs_source["links"],
+                "docs_source": docs_source,
                 "task_presets": TaskPreset.objects.all(),
                 "status_meta": status_meta,
                 "workspace_status_url": status_url,
@@ -67,6 +85,59 @@ class DashboardView(TemplateView):
         if slug:
             return next((ws for ws in workspaces if ws.slug == slug), None)
         return next(iter(workspaces), None)
+
+    def _docs_source(self) -> dict[str, Any]:
+        offline = assets.docs_bundle_available()
+        if offline:
+            base_url = reverse("inspector:docs-offline-root")
+            label = "Offline bundle"
+        else:
+            base_url = settings.INSPECTOR_DOCS_BASE_URL
+            label = "Read the Docs"
+
+        links = []
+        for link in DocLink.objects.all():
+            url = self._doc_url(link.url, offline)
+            links.append(
+                {
+                    "title": link.title,
+                    "description": link.description,
+                    "url": url,
+                    "icon": link.icon,
+                    "pane_target": link.pane_target,
+                    "external": not offline,
+                }
+            )
+        return {"base_url": base_url, "links": links, "offline": offline, "label": label}
+
+    def _doc_url(self, url: str, offline: bool) -> str:
+        if not offline:
+            return url
+        parsed = urlsplit(url)
+        base = settings.INSPECTOR_DOCS_BASE_URL.rstrip("/") + "/"
+        base_parsed = urlsplit(base)
+        base_path = base_parsed.path.rstrip("/") + "/"
+        path = parsed.path or "/"
+        if parsed.netloc != base_parsed.netloc:
+            return url
+        if not path.startswith(base_path):
+            return url
+        relative = path[len(base_path) :] or "index.html"
+        normalized = posixpath.normpath(relative)
+        if normalized.startswith(".."):
+            return url
+        if normalized == ".":
+            normalized = "index.html"
+        if normalized == "index.html":
+            offline_url = reverse("inspector:docs-offline-root")
+        else:
+            offline_url = reverse(
+                "inspector:docs-offline",
+                kwargs={"resource": normalized},
+            )
+        if parsed.fragment:
+            offline_url = f"{offline_url}#{parsed.fragment}"
+        return offline_url
 
 
 class WorkspaceWizardView(FormView):
@@ -173,3 +244,26 @@ class DataLabNotebookView(TemplateView):
             }
         )
         return context
+
+
+class OfflineDocsView(View):
+    """Serve Sphinx HTML files from the offline bundle directory."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, resource: str = "") -> FileResponse:
+        if not assets.docs_bundle_available():
+            raise Http404("Offline docs bundle not found.")
+        try:
+            asset_path = assets.resolve_docs_asset(resource)
+        except (FileNotFoundError, ValueError) as exc:
+            raise Http404("Offline docs asset missing.") from exc
+
+        suffix = asset_path.suffix.lower()
+        content_type = MIMETYPE_OVERRIDES.get(suffix)
+        if not content_type:
+            content_type, _ = mimetypes.guess_type(asset_path.name)
+        return FileResponse(
+            asset_path.open("rb"),
+            content_type=content_type or "text/html",
+        )

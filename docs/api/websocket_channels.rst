@@ -1,9 +1,7 @@
 WebSocket Channels
 ==================
 
-The current tutorial build relies on REST polling, but the PRD calls out WebSockets
-for live updates. This section documents the planned channels so contributors can help
-implement them later.
+The current reference build relies on REST polling, but the PRD calls out WebSockets for live updates. This section documents the planned channels so contributors can help implement them later.
 
 Planned channels
 ----------------

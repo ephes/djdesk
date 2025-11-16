@@ -1,7 +1,7 @@
 REST Endpoints
 ==============
 
-All endpoints documented below live in ``djdesk.inspector.urls``. The tutorial build
+All endpoints documented below live in ``djdesk.inspector.urls``. The reference build
 ships with CSRF protection enabled, so remember to include the ``csrftoken`` value
 when POSTing from custom scripts or sketches.
 

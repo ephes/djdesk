@@ -1,35 +1,36 @@
 Architecture Overview
 =====================
 
-High-level view of how the tutorial build works today.
+This page complements the :doc:`guide/integrating_django_with_electron` by highlighting how the moving pieces fit together. Use it as a quick reference while adapting DJDesk patterns to your own project.
 
 Process model
 -------------
 
-``electron/main.js`` boots Django either via the bundled Python runtime or the
-system interpreter. It discovers a free port, spawns ``runserver`` with the local
-settings module, waits for ``/`` to respond, and then points the renderer at the
-server. ``preload.cjs`` (not shown in code snippets yet) is where we'll wire drag/drop
-paths, ``djdesk://`` deep links, and future IPC calls for shell automation.
+``electron/main.js`` boots Django either via the bundled python-build-standalone interpreter or the system interpreter. Startup flow:
 
-Data flow
----------
+1. Discover an open port with :mod:`get-port`.
+2. Spawn ``run_django.py`` (when bundled) or ``manage.py runserver`` (when relying on system Python) with ``DJANGO_SETTINGS_MODULE`` pointing at ``djdesk.settings.local``.
+3. Poll ``/`` until Django responds, then load the renderer window.
+4. Stream Django stdout/stderr to the terminal for quick debugging.
 
-* The left rail and canvas render directly from Django context so Stage 2 screenshots
-  are deterministic. ``DashboardView`` adds ``workspace``, ``doc_links``,
-  ``task_presets`` and other metadata.
-* ``inspector/static/inspector/app.js`` polls ``/api/workspaces/<slug>/status/`` every
-  few seconds to keep the scan queue, insights, and log stream up to date. When a user
-  submits the assistant form the server responds with the same payload so the client
-  can refresh everything without waiting for the next poll.
-* ``django-tasks`` runs commands synchronously via the ``ImmediateBackend`` today.
-  When we switch to Celery/Redis the ``TaskPreset`` + ``WorkspaceTaskRun`` models stay
-  the same—the backend swaps out underneath.
+``preload.cjs`` now exposes ``window.djdeskNative`` so drag/drop paths, desktop notifications, and ``shell.openExternal`` deep links are mediated through a single bridge. The preload layer dispatches ``djdesk:workspace-drop`` events with sanitized file paths, stages the wizard hint under ``djdesk.wizard.projectPath``, and proxies notification/deep-link requests back to ``electron/main.js`` via IPC.
+
+Renderer data flow
+------------------
+
+* The dashboard is server-rendered; ``DashboardView`` populates ``workspace``, ``doc_links``, ``task_presets``, and other context so the first paint always has meaningful data.
+* ``inspector/static/inspector/app.js`` polls ``/api/workspaces/<slug>/status/`` to keep the scan queue, insights, schema graph, and log stream updated. Submitting the assistant form returns the same payload so the UI can refresh immediately.
+* ``django-tasks`` executes commands synchronously via ``ImmediateBackend``. Swapping in Celery/Redis later will not change the REST payload or UI contract because the ``TaskPreset`` + ``WorkspaceTaskRun`` models stay stable.
+
+Native hooks
+------------
+
+* **Drag/drop wizard priming** – the preload script fires ``djdesk:workspace-drop`` events and stores the normalized path under ``djdesk.wizard.projectPath``. ``app.js`` listens for the event to update the sidebar dropzone, while the wizard form reads/clears the staged path on load.
+* **Notifications** – ``app.js`` calls ``window.djdeskNative.notify`` when task runs finish so Electron's main process can raise an OS notification. Browsers fall back to the Web Notifications API when the bridge is absent.
+* **Doc deep links** – links annotated with ``data-doc-link`` still open the in-app drawer, but they also call ``window.djdeskNative.openExternal`` so the system browser mirrors the same Read the Docs location.
+* **Offline indicator** – templates expose ``data-offline-indicator`` so ``navigator.onLine`` updates the status bar.
 
 Frontend assets
 ---------------
 
-The UI intentionally avoids a dedicated JS build step so contributors can tweak
-``inspector/static/inspector/app.css`` + ``app.js`` and refresh Electron immediately.
-Future iterations can replace the static CSS with a Vite build, but for the tutorial
-it is more important to keep the stack approachable.
+No JS bundler is required for the reference build—``inspector/static/inspector/app.css`` and ``app.js`` are served as-is. This keeps contribution friction low and mirrors how many Django teams work today. You can always migrate to Vite or another bundler after validating the Electron integration.

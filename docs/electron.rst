@@ -1,54 +1,11 @@
 Electron Packaging
 ==================
 
-DJDesk includes a full Electron wrapper so the tutorial can be shipped as an
-installable desktop app. This page explains **why** we bundle Django with Electron,
-how the local workflow operates, and how GitHub Actions produces distributable
-installers.
+DJDesk includes a full Electron wrapper so the reference implementation can ship as an installable desktop app. Use this page as the in-depth companion to :ref:`guide-package`. For a discussion about *why* you might choose Electron at all, start with :doc:`concepts`.
 
-Deciding on Electron
---------------------
+.. note::
 
-Before diving into commands, confirm that Electron is the right transport for your
-project.
-
-Benefits
-~~~~~~~~
-
-* **Zero Python setup for end users.** Every installer contains python-build-standalone
-  Python 3.14.0+20251031 plus the packages listed under
-  ``[project].dependencies`` in ``pyproject.toml``.
-* **Offline-first experience.** ``electron/django-bundle/`` ships Django, collected
-  static files, and project sources, so the UI runs without network access after the
-  first install.
-* **Native presentation.** Electron Builder emits DMG/ZIP (macOS), NSIS/ZIP (Windows),
-  and AppImage/DEB/TAR.GZ (Linux), giving users familiar installers and dock/taskbar
-  integration.
-
-Trade-offs
-~~~~~~~~~~
-
-* Installer size quickly exceeds 150 MB once Django, Electron, and optional
-  data-science libraries are included.
-* Memory footprint includes both the Chromium renderer and the Django/Python process.
-* Updates are manual today—users must install new builds until auto-update code is
-  added.
-* The bundled Django server only listens on ``127.0.0.1``. Multi-user or remote access
-  still requires a traditional deployment.
-
-When to use it
-~~~~~~~~~~~~~~
-
-* Internal tooling for analysts or operators who cannot manage Python environments.
-* Offline-friendly demos where bandwidth is unpredictable.
-* Prototyping native-feeling UX over existing Django dashboards or admin.
-
-When to reconsider
-~~~~~~~~~~~~~~~~~~
-
-* Strict bundle size limits (<50 MB) or highly resource-constrained targets.
-* Deployments that already succeed as web apps or need centralized databases.
-* Teams preferring lighter shells (e.g., Tauri) or Python-only bundling (PyInstaller).
+   Looking for decision criteria instead of implementation details? See :doc:`concepts` for the benefits/trade-offs matrix.
 
 System overview
 ---------------
@@ -167,9 +124,10 @@ Production checklist
   "db.sqlite3"``. Inside an installer this resolves to ``django-bundle/db.sqlite3``,
   which may be read-only. Override ``DATABASES['default']['NAME']`` via environment
   variables to a writable path under ``app.getPath('userData')``.
-* **Migrations.** ``build-django.js`` does not run ``manage.py migrate``. Run migrations
-  manually before bundling or extend the script to apply them so new installs ship with
-  initialized schemas.
+* **Migrations.** The bundled launcher applies ``manage.py migrate`` on startup (see
+  ``run_django.py``). If you require migrations to run during bundling instead, extend
+  ``build-django.js`` accordingly; the reference build performs them when the Electron
+  shell boots.
 * **Updates.** Releases are manual (no auto-updater yet). ``just electron-workflow-run``
   triggers CI builds, but you still need to distribute the resulting artifacts.
 * **Logging & diagnostics.** ``main.js`` streams Django stdout/stderr to the terminal.

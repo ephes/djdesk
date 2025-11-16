@@ -5,14 +5,9 @@ Control-room grade tutorial and reference material for the DJDesk Electron + Dja
 
 .. toctree::
    :maxdepth: 2
-   :caption: Tutorial
+   :caption: Guide
 
-   tutorial/00_getting_started
-   tutorial/01_workspace_setup
-   tutorial/02_dashboard
-   tutorial/03_native_enhancements
-   tutorial/04_task_runner
-   tutorial/05_data_lab
+   guide/integrating_django_with_electron
 
 .. toctree::
    :maxdepth: 2

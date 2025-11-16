@@ -1,17 +1,14 @@
 API Overview
 ============
 
-The tutorial build exposes a handful of JSON endpoints that power the Electron
+The reference build exposes a handful of JSON endpoints that power the Electron
 renderer. Every endpoint lives under the ``inspector`` namespace and requires CSRF
 tokens when called from the browser; Electron injects the cookie for us.
 
 Authentication
 --------------
 
-Stage 0/1 rely on Django's default session middleware. Electron shares cookies with
-the embedded browser context, so CSRF tokens are available via ``document.cookie``.
-If you plan to open these endpoints in an external browser, log in via the Django
-admin first so the session cookie exists.
+The reference build uses Django's default session middleware. Electron shares cookies with the embedded browser context, so CSRF tokens are available via ``document.cookie`` without additional work. If you expose the endpoints to external browsers or tools, log in through the Django admin (or your own login form) first so the session cookie exists.
 
 Key endpoints
 -------------
@@ -29,10 +26,15 @@ Key endpoints
 ``GET /api/task-runs/<id>/``
     Lightweight endpoint for future explorers that want to fetch log output on demand.
 
+Adding your own endpoints
+-------------------------
+
+1. Keep APIs namespaced (DJDesk uses ``inspector``) so Electron only talks to the routes you expect.
+2. Return consolidated payloads where possible—``workspace_status_payload`` is an example that feeds multiple UI panels.
+3. Protect mutating endpoints with CSRF. DJDesk sends ``X-CSRFToken`` headers and cookies when posting from the assistant drawer.
+4. Document each endpoint’s schema inside ``docs/api/rest_endpoints.rst`` (or your equivalent) so contributors know what data Electron expects.
+
 WebSockets vs polling
 ---------------------
 
-The tutorial build uses polling (see ``inspector/static/inspector/app.js``) because it
-is easy to reason about and works while Electron is still being wired up. The API
-docs describe the desired WebSocket channels, but until :mod:`channels` lands you can
-rely on the REST responses documented in this chapter.
+The reference build uses polling (see ``inspector/static/inspector/app.js``) because it is easy to reason about and works before :mod:`channels` is introduced. ``docs/api/websocket_channels.rst`` outlines the desired future channels, but until that code lands you can rely on the REST responses documented here.

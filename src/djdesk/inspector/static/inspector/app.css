@@ -824,6 +824,16 @@ h3,
   padding: 0.6rem;
 }
 
+.wizard-drop-hint {
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 8px;
+  padding: 0.45rem 0.75rem;
+}
+
 .wizard-checkbox {
   flex-direction: row !important;
   align-items: center;

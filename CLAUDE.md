@@ -109,6 +109,8 @@ Artifacts can be downloaded via `just electron-download-*` commands.
 3. **Use uv and just recipes** - ensures consistency across contributors
 4. **Settings isolation**: Star imports in settings modules are intentional (see pyproject.toml ruff ignores)
 5. **Python 3.14+** required (see pyproject.toml requires-python)
+6. **Always update documentation and changelog** - When making changes, update relevant documentation in `docs/` and add entries to `CHANGELOG.md`
+7. **Run `just test` and `just lint` before committing** - Ensure all tests pass and code meets linting standards before creating commits
 
 ## Read the Docs
 

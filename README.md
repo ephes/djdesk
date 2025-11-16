@@ -86,3 +86,8 @@ just docs-serve                          # autoreload while writing
 ```
 
 Read the Docs config lives in `readthedocs.yml`; once connected, `main` publishes to https://djdesk.readthedocs.io/.
+### Documentation
+
+Full documentation (tutorial + reference) lives on Read the Docs:
+
+https://djdesk.readthedocs.io/en/latest/

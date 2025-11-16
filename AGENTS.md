@@ -11,3 +11,5 @@ before performing automated changes:
    instructions).
 4. Do not amend user commits unless explicitly asked, and avoid destructive git
    commands (`reset --hard`, etc.).
+5. Keep documentation and the changelog up to date whenever code changes warrant it.
+6. Always run `just test` and `just lint` before committing.

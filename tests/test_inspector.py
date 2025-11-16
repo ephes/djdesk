@@ -2,14 +2,82 @@ from __future__ import annotations
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
+from django import forms
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from djdesk.inspector import forms as inspector_forms
+from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm, WorkspaceWizardForm
 from djdesk.inspector.models import ScanJob, TaskPreset, Workspace, WorkspaceTaskRun
 from djdesk.inspector.tasks import execute_workspace_task
+
+
+class WorkspaceModelTests(TestCase):
+    def test_retries_slug_generation_on_collision(self) -> None:
+        Workspace.objects.create(
+            name="Atlas",
+            project_path="/tmp/atlas",
+            metadata={"recent_activity": []},
+        )
+        slug_sequence = ["atlas", "atlas-2"]
+        with mock.patch(
+            "djdesk.inspector.models.Workspace._generate_unique_slug",
+            side_effect=slug_sequence,
+        ):
+            workspace = Workspace(
+                name="Atlas Copy",
+                project_path="/tmp/atlas-copy",
+                metadata={"recent_activity": []},
+            )
+            workspace.save()
+
+        self.assertEqual(workspace.slug, "atlas-2")
+
+
+class TaskPresetModelTests(TestCase):
+    def test_rejects_unsafe_commands_via_full_clean(self) -> None:
+        preset = TaskPreset(
+            key="blocked",
+            label="Blocked",
+            description="Unsafe command",
+            command="python manage.py migrate",
+        )
+        with self.assertRaises(ValidationError):
+            preset.full_clean()
+        with self.assertRaises(ValidationError):
+            preset.save()
+
+
+class WorkspaceTaskRunLogTests(TestCase):
+    def setUp(self) -> None:
+        self.workspace = Workspace.objects.create(
+            name="Log Workspace",
+            project_path="/tmp/log-workspace",
+            metadata={"recent_activity": [], "schema": {"nodes": []}},
+        )
+        self.preset = TaskPreset.objects.create(
+            key="check-log",
+            label="Check",
+            description="Log flush test",
+            command="python manage.py check",
+        )
+
+    def test_flush_log_buffer_persists_pending_lines(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run.append_log("First line")
+        self.assertEqual(run.log, "")
+        run.flush_log_buffer()
+        self.assertIn("First line", run.log)
+
+    def test_auto_flushes_after_batch_size(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        for index in range(run.LOG_BATCH_SIZE):
+            run.append_log(f"Line {index}")
+        self.assertIn("Line 0", run.log)
 
 
 class WorkspaceWizardFormTests(TestCase):
@@ -61,6 +129,31 @@ class WorkspaceWizardFormTests(TestCase):
             finally:
                 inspector_forms.PROTECTED_PATHS.remove(protected_path)
 
+    def test_rejects_duplicate_project_paths(self) -> None:
+        with TemporaryDirectory() as temp:
+            project_path = Path(temp)
+            (project_path / "manage.py").write_text("# stub manage file")
+            Workspace.objects.create(
+                name="Existing",
+                project_path=str(project_path.resolve()),
+                metadata={"recent_activity": []},
+            )
+
+            form = WorkspaceWizardForm(
+                data={
+                    "name": "Duplicate",
+                    "project_path": str(project_path),
+                    "python_version": "3.14.0",
+                    "django_version": "5.2.8",
+                    "description": "Duplicate path",
+                    "docs_url": "",
+                    "auto_run_scan": False,
+                    "confirm_readonly": True,
+                }
+            )
+            self.assertFalse(form.is_valid())
+            self.assertIn("already managed", str(form.errors.get("project_path", [])))
+
 
 class TaskRunFormTests(TestCase):
     def setUp(self) -> None:
@@ -87,6 +180,30 @@ class TaskRunFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("confirm_safe", form.errors)
 
+    def test_surface_enqueue_failures(self) -> None:
+        form = TaskRunForm(
+            data={
+                "workspace": self.workspace.slug,
+                "preset": self.preset.key,
+                "notes": "Run checks",
+                "confirm_safe": "on",
+            }
+        )
+        self.assertTrue(form.is_valid())
+        with mock.patch("djdesk.inspector.forms.execute_workspace_task") as task_mock:
+            task_mock.enqueue.side_effect = RuntimeError("Queue offline")
+            with self.assertRaises(forms.ValidationError):
+                form.save()
+
+        run = (
+            WorkspaceTaskRun.objects.filter(workspace=self.workspace, preset=self.preset)
+            .order_by("-pk")
+            .first()
+        )
+        assert run is not None
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertIn("Unable to enqueue", run.log)
+
 
 class InspectorAPIViewTests(TestCase):
     def setUp(self) -> None:
@@ -112,7 +229,7 @@ class InspectorAPIViewTests(TestCase):
             key="check",
             defaults={
                 "label": "Run checks",
-                "description": "",
+                "description": "Run safe checks",
                 "command": "python manage.py check",
             },
         )
@@ -222,12 +339,17 @@ class TaskExecutionIntegrationTests(TestCase):
         self.assertTrue(run.log)
 
     def test_rejects_unsafe_commands(self) -> None:
-        preset = TaskPreset.objects.create(
-            key="unsafe-migrate",
-            label="Run migrations",
-            description="Should be blocked",
-            command="python manage.py migrate",
+        TaskPreset.objects.bulk_create(
+            [
+                TaskPreset(
+                    key="unsafe-migrate",
+                    label="Run migrations",
+                    description="Should be blocked",
+                    command="python manage.py migrate",
+                )
+            ]
         )
+        preset = TaskPreset.objects.get(key="unsafe-migrate")
         run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=preset)
 
         execute_workspace_task.call(run.pk)
@@ -249,3 +371,35 @@ class TaskExecutionIntegrationTests(TestCase):
 
         self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
         self.assertIn("does not exist", run.log)
+
+    @mock.patch("djdesk.inspector.tasks.run_command")
+    def test_handles_timeout_result(self, mock_run_command: mock.MagicMock) -> None:
+        mock_run_command.return_value = CommandResult(
+            exit_code=124,
+            duration=1.2,
+            output_lines=4,
+            safe_prefix="python manage.py check",
+            timed_out=True,
+        )
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+
+        execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertIn("timed out", run.log)
+
+    @mock.patch(
+        "djdesk.inspector.tasks.run_command",
+        side_effect=CommandExecutionError("boom"),
+    )
+    def test_handles_command_execution_errors(
+        self, mock_run_command: mock.MagicMock
+    ) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+
+        execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertIn("boom", run.log)

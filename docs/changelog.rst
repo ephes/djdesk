@@ -24,6 +24,9 @@ Changed
   stream stdout/stderr into the assistant drawer, and enforce the new
   ``DJDESK_INSPECTOR_TASK_TIMEOUT`` guardrail so automation steps stay deterministic on desktop
   builds.
+- Workspace onboarding now blocks duplicate/sloppy project paths, retries slug generation on rare
+  collisions, indexes ``project_path`` lookups, enforces SAFE command presets, and batches task log
+  writes so long-running automations stay responsive inside the Inspector UI.
 
 Documentation
 ~~~~~~~~~~~~~

@@ -31,6 +31,7 @@ def _fail_run(
     safe_prefix: str | None = None,
 ) -> dict[str, Any]:
     run.append_log(message)
+    run.flush_log_buffer()
     payload: dict[str, Any] = {
         "raw": run.preset.command,
         "workspace_path": run.workspace.project_path,
@@ -73,6 +74,7 @@ def execute_workspace_task(task_run_id: int) -> dict[str, Any]:
     run.progress = 5
     run.save(update_fields=["progress"])
     run.append_log(f"Executing `{command}` inside {run.workspace.project_path}")
+    run.flush_log_buffer()
 
     try:
         result = run_command(
@@ -91,8 +93,10 @@ def execute_workspace_task(task_run_id: int) -> dict[str, Any]:
     run.save(update_fields=["progress"])
     if result.timed_out:
         run.append_log("Command timed out before completion.")
+        run.flush_log_buffer()
     else:
         run.append_log(f"Command finished with exit code {result.exit_code}.")
+        run.flush_log_buffer()
 
     payload = _success_payload(run, result)
     run.mark_finished(success=(result.exit_code == 0 and not result.timed_out))

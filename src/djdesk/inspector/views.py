@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django import forms
 from django.conf import settings
 from django.contrib import messages
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -92,7 +93,12 @@ class TaskRunCreateView(View):
         if not form.is_valid():
             return JsonResponse({"errors": form.errors}, status=400)
 
-        run = form.save()
+        try:
+            run = form.save()
+        except forms.ValidationError as exc:
+            errors = exc.message_dict or {"__all__": exc.messages}
+            return JsonResponse({"errors": errors}, status=400)
+
         payload = workspace_status_payload(run.workspace)
         payload["task_run"] = {
             "id": run.pk,

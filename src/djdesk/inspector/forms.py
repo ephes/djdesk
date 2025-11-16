@@ -6,6 +6,7 @@ from django import forms
 
 from . import services
 from .models import TaskPreset, Workspace, WorkspaceTaskRun
+from .tasks import execute_workspace_task
 
 PROTECTED_PATHS: list[Path] = [
     Path("/etc"),
@@ -82,8 +83,14 @@ class WorkspaceWizardForm(forms.ModelForm):
             raise forms.ValidationError("Cannot inspect protected system directories.")
         if not (resolved / "manage.py").exists():
             raise forms.ValidationError("manage.py not found in the provided folder.")
+        normalized = str(resolved)
+        existing_qs = Workspace.objects.filter(project_path=normalized)
+        if self.instance.pk:
+            existing_qs = existing_qs.exclude(pk=self.instance.pk)
+        if existing_qs.exists():
+            raise forms.ValidationError("This folder is already managed by another workspace.")
 
-        return str(resolved)
+        return normalized
 
     def save(self, commit: bool = True) -> Workspace:
         workspace = super().save(commit=False)
@@ -145,9 +152,17 @@ class TaskRunForm(forms.Form):
             requested_by=self.initial.get("requested_by", "inspector"),
             metadata={"notes": self.cleaned_data.get("notes", "")},
         )
-        from .tasks import execute_workspace_task
+        try:
+            result = execute_workspace_task.enqueue(run.pk)
+        except Exception as exc:
+            run.status = WorkspaceTaskRun.Status.FAILED
+            run.append_log("Unable to enqueue task; please try again later.")
+            run.flush_log_buffer()
+            run.save(update_fields=["status"])
+            raise forms.ValidationError(
+                {"__all__": ["Unable to dispatch the requested task."]}
+            ) from exc
 
-        result = execute_workspace_task.enqueue(run.pk)
         run.result_id = result.id
         run.save(update_fields=["result_id"])
         return run

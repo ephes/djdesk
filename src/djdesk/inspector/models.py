@@ -3,9 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from django.db import models
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.text import slugify
+
+from .command_runner import (
+    CommandExecutionError,
+    UnsafeCommandError,
+    validate_safe_command,
+)
 
 
 class Workspace(models.Model):
@@ -26,14 +33,50 @@ class Workspace(models.Model):
 
     class Meta:
         ordering = ["name"]
+        indexes = [
+            models.Index(fields=["project_path"]),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["project_path"],
+                name="inspector_workspace_unique_project_path",
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover - human readable helper
         return self.name
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        if not self.slug:
-            self.slug = self._generate_unique_slug()
-        super().save(*args, **kwargs)
+        attempts = 0
+        while True:
+            if not self.slug:
+                self.slug = self._generate_unique_slug()
+            try:
+                with transaction.atomic(using=kwargs.get("using")):
+                    super().save(*args, **kwargs)
+                return
+            except IntegrityError as exc:
+                if not self._is_slug_integrity_error(exc):
+                    raise
+                attempts += 1
+                if attempts >= 5:
+                    raise
+                # Force a new slug generation and retry.
+                self.slug = ""
+
+    def clean(self) -> None:
+        super().clean()
+        normalized = (self.project_path or "").strip()
+        if not normalized:
+            raise ValidationError({"project_path": "Project path cannot be empty."})
+        self.project_path = normalized
+        exists = (
+            Workspace.objects.exclude(pk=self.pk)
+            .filter(project_path=normalized)
+            .exists()
+        )
+        if exists:
+            raise ValidationError({"project_path": "A workspace already inspects this folder."})
 
     def _generate_unique_slug(self) -> str:
         base = slugify(self.name) or "workspace"
@@ -43,6 +86,10 @@ class Workspace(models.Model):
             suffix += 1
             candidate = f"{base}-{suffix}"
         return candidate
+
+    def _is_slug_integrity_error(self, exc: IntegrityError) -> bool:
+        message = str(exc).lower()
+        return "inspector_workspace.slug" in message or ".slug" in message
 
     @property
     def insights(self) -> list[dict[str, Any]]:
@@ -131,9 +178,25 @@ class TaskPreset(models.Model):
     def __str__(self) -> str:  # pragma: no cover - helper
         return self.label
 
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        self.full_clean()
+        super().save(*args, **kwargs)
+
+    def clean(self) -> None:
+        super().clean()
+        command = (self.command or "").strip()
+        if not command:
+            raise ValidationError({"command": "Command cannot be empty."})
+        try:
+            validate_safe_command(command)
+        except (UnsafeCommandError, CommandExecutionError) as exc:
+            raise ValidationError({"command": str(exc)}) from exc
+
 
 class WorkspaceTaskRun(models.Model):
     """Instance of a `django-tasks` command associated with a workspace."""
+
+    LOG_BATCH_SIZE = 5
 
     class Status(models.TextChoices):
         REQUESTED = ("requested", "Requested")
@@ -178,6 +241,7 @@ class WorkspaceTaskRun(models.Model):
         self.save(update_fields=["status", "started_at"])
 
     def mark_finished(self, *, success: bool) -> None:
+        self.flush_log_buffer()
         self.status = self.Status.SUCCEEDED if success else self.Status.FAILED
         self.completed_at = timezone.now()
         self.progress = 100
@@ -186,10 +250,24 @@ class WorkspaceTaskRun(models.Model):
     def append_log(self, message: str) -> None:
         stamp = timezone.now().strftime("%H:%M:%S")
         new_line = f"[{stamp}] {message}"
+        buffer = getattr(self, "_log_buffer", None)
+        if buffer is None:
+            buffer = []
+            self._log_buffer = buffer
+        buffer.append(new_line)
+        if len(buffer) >= self.LOG_BATCH_SIZE:
+            self.flush_log_buffer()
+
+    def flush_log_buffer(self) -> None:
+        buffer = getattr(self, "_log_buffer", None)
+        if not buffer:
+            return
+        chunk = "\n".join(buffer)
+        self._log_buffer = []
         if self.log:
-            self.log = f"{self.log}\n{new_line}"
+            self.log = f"{self.log}\n{chunk}"
         else:
-            self.log = new_line
+            self.log = chunk
         self.save(update_fields=["log"])
 
 

@@ -38,3 +38,6 @@ dist-artifacts/
 
 # Documentation build artifacts
 docs/_build/
+
+# Specifications
+specs/

@@ -28,6 +28,10 @@ test:
 electron-install:
     cd electron && npm install
 
+# Run the Electron main-process guard tests (plain Node, no Electron launch needed).
+electron-test:
+    cd electron && npm test
+
 # Build the bundled Django payload used by the Electron shell.
 electron-bundle:
     cd electron && npm run bundle

@@ -13,6 +13,16 @@ Added
 - Built an interactive Inspector dashboard experience with schema visualization assets,
   templatetags, and wizard/dashboard templates that surface curated insights directly in the app.
 
+Security
+~~~~~~~~
+
+- The Electron shell now keeps the privileged window on the exact local Django origin: foreign
+  top-level navigations and redirects are cancelled, new windows and ``<webview>`` tags are
+  denied, and external ``http(s)`` links open in the system browser instead.
+- ``djdeskNative.openExternal`` only dispatches ``http:``/``https:`` URLs without credentials and,
+  like ``djdeskNative.notify``, only answers the top-level frame showing the DJDesk origin, so
+  ``file:`` and custom protocol handlers can no longer be launched from page content.
+
 Changed
 ~~~~~~~
 

@@ -4,6 +4,7 @@ The checks are text based on purpose: the runtime dependencies do not include a 
 and the workflows are small enough that these assertions stay readable.
 """
 
+import json
 import re
 from pathlib import Path
 from unittest import TestCase
@@ -59,6 +60,12 @@ class QualityWorkflowTests(TestCase):
 
     def test_runs_electron_guard_tests(self) -> None:
         self.assertRegex(self.text, r"run: npm test\n\s+working-directory: electron")
+
+    def test_npm_test_passes_files_not_a_directory(self) -> None:
+        """Node 22 (the CI version) treats a directory argument to --test as a module path."""
+        package = json.loads((WORKFLOWS.parents[1] / "electron" / "package.json").read_text())
+        self.assertEqual(package["scripts"]["test"], "node --test test/*.test.js")
+        self.assertRegex(self.text, r"node-version: '22'")
 
     def test_steps_do_not_mask_failures(self) -> None:
         self.assertNotIn("continue-on-error", self.text)

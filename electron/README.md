@@ -57,7 +57,7 @@ The bundle is ignored by Git and may be regenerated at any time.
 
 ```bash
 cd electron
-npm test   # node --test test/ — no Electron launch or npm install needed
+npm test   # node --test test/*.test.js — no Electron launch or npm install needed
 ```
 
 ## Running the App

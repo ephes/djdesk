@@ -43,3 +43,14 @@ The task runner now shells out to the inspected workspace for every preset. Only
 process is killed after ``DJDESK_INSPECTOR_TASK_TIMEOUT`` seconds (default ``60``). Override the
 environment variable ``DJDESK_INSPECTOR_TASK_TIMEOUT`` in packaging scripts if your presets need a
 longer window while keeping the read-only contract intact.
+
+"Match" means more than a prefix: the exact argv that is executed must be
+``<interpreter> manage.py <command>`` from the allowlist followed only by the arguments that
+command's policy permits (app labels and read-only options such as ``--database``, ``--format``
+or ``--deploy``). Options that write files or load other modules, such as ``dumpdata --output``,
+``--settings`` and ``--pythonpath``, are refused in every spelling before anything is started.
+
+Each command owns a process group. On completion, timeout, or a failure while its output is being
+logged, the whole group receives ``SIGTERM`` and, two seconds later, ``SIGKILL``; the output pipe is
+closed and the child is reaped. On Windows ``taskkill /T /F`` stops the tree below a still-running
+child. Unexpected failures mark the run as failed and keep the original error.

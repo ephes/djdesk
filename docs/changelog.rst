@@ -11,6 +11,12 @@ Fixed
 
 - Atomically claim requested task runs, preserving outcomes on duplicate delivery.
 
+- Stop the whole process group of a workspace command on timeout (``SIGTERM``, then ``SIGKILL``)
+  instead of only the direct child, so processes it started no longer keep running.
+- Always stop and reap a workspace command and close its output pipe, including when logging its
+  output fails; such runs are now recorded as failed with the original error instead of staying
+  ``RUNNING``.
+
 Added
 ~~~~~
 
@@ -27,6 +33,10 @@ Added
 Security
 ~~~~~~~~
 
+- Workspace commands are validated as the exact argv that is executed against a per-command
+  allowlist of arguments. ``dumpdata --output``/``-o`` and every other option outside the
+  read-only set (``--settings``, ``--pythonpath``, ``diffsettings --default``, abbreviations,
+  grouped short options) are refused, so presets can no longer overwrite files.
 - The Electron shell now keeps the privileged window on the exact local Django origin: foreign
   top-level navigations and redirects are cancelled, new windows and ``<webview>`` tags are
   denied, and external ``http(s)`` links open in the system browser instead.

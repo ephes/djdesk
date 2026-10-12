@@ -28,7 +28,8 @@ The window that carries the preload bridge must only ever display the local Djan
   redirects are only cancelled. Sub frames (the docs drawer ``<iframe>``) may load the trusted
   origin or plain ``http(s)`` pages, never ``file:``, ``data:``, ``javascript:``, or custom schemes.
 * **New windows.** ``window.open`` and ``target="_blank"`` never create an Electron window.
-  ``http(s)`` targets open in the system browser; everything else is dropped. ``<webview>``
+  ``http(s)`` targets (local DJDesk pages included) open in the system browser; everything else
+  is dropped. ``<webview>``
   attachment is blocked.
 * **IPC senders.** ``djdesk:open-external`` and ``djdesk:notify`` only answer the top-level frame
   while it displays the trusted origin. Sub frames and foreign pages get ``false``.

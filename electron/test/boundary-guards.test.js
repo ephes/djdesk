@@ -185,27 +185,43 @@ test('isTrustedSender requires the top-level trusted frame', () => {
   );
 });
 
+/**
+ * Mirror Electron's dispatch order: `will-frame-navigate` first, and
+ * `will-navigate` (main frame only) only when the first was not cancelled.
+ */
+function emitNavigation(contents, url, isMainFrame = true) {
+  const frameEvent = navEvent(url, isMainFrame);
+  contents.emit('will-frame-navigate', frameEvent);
+  if (frameEvent.defaultPrevented || !isMainFrame) {
+    return frameEvent.defaultPrevented;
+  }
+  const event = navEvent(url, true);
+  contents.emit('will-navigate', event);
+  return event.defaultPrevented;
+}
+
 test('internal main-frame navigation stays allowed', () => {
   const { contents, shell } = guardedContents();
-  for (const name of ['will-navigate', 'will-frame-navigate', 'will-redirect']) {
-    const event = navEvent(`${TRUSTED}/workspaces/demo/?tab=1`);
-    contents.emit(name, event);
-    assert.equal(event.defaultPrevented, false, name);
-  }
+  assert.equal(emitNavigation(contents, `${TRUSTED}/workspaces/demo/?tab=1`), false);
+  const redirect = navEvent(`${TRUSTED}/accounts/login/`);
+  contents.emit('will-redirect', redirect);
+  assert.equal(redirect.defaultPrevented, false);
   assert.deepEqual(shell.opened, []);
 });
 
 test('foreign main-frame navigation is blocked and handed to the browser once', async () => {
   const { contents, shell } = guardedContents();
   const url = 'https://evil.example/phish';
-  const navigate = navEvent(url);
-  const frameNavigate = navEvent(url);
-  contents.emit('will-navigate', navigate);
-  contents.emit('will-frame-navigate', frameNavigate);
+  assert.equal(emitNavigation(contents, url), true);
   await flush();
-  assert.equal(navigate.defaultPrevented, true);
-  assert.equal(frameNavigate.defaultPrevented, true);
   assert.deepEqual(shell.opened, [url]);
+});
+
+test('will-frame-navigate leaves main-frame decisions to will-navigate', () => {
+  const { contents } = guardedContents();
+  const event = navEvent('https://evil.example/');
+  contents.emit('will-frame-navigate', event);
+  assert.equal(event.defaultPrevented, false);
 });
 
 test('foreign main-frame targets are blocked; only http(s) ones reach the browser', async () => {
@@ -220,14 +236,14 @@ test('foreign main-frame targets are blocked; only http(s) ones reach the browse
     'http://localhost:8000/',
     'https://127.0.0.1:8000/',
   ]) {
-    for (const name of ['will-navigate', 'will-frame-navigate']) {
-      const event = navEvent(url);
-      contents.emit(name, event);
-      assert.equal(event.defaultPrevented, true, `${name} ${url}`);
-    }
+    assert.equal(emitNavigation(contents, url), true, url);
   }
   await flush();
-  assert.deepEqual(shell.opened, ['http://127.0.0.1:9999/', 'http://localhost:8000/', 'https://127.0.0.1:8000/']);
+  assert.deepEqual(shell.opened, [
+    'http://127.0.0.1:9999/',
+    'http://localhost:8000/',
+    'https://127.0.0.1:8000/',
+  ]);
 });
 
 test('foreign redirects are blocked and never dispatched', async () => {
@@ -254,18 +270,16 @@ test('legacy positional event arguments are honoured', () => {
 test('sub frames may load http(s) docs but not local or custom schemes', async () => {
   const { contents, shell } = guardedContents();
   for (const url of ['https://djdesk.readthedocs.io/', `${TRUSTED}/docs/`, 'about:blank']) {
-    for (const name of ['will-frame-navigate', 'will-redirect']) {
-      const event = navEvent(url, false);
-      contents.emit(name, event);
-      assert.equal(event.defaultPrevented, false, `${name} ${url}`);
-    }
+    assert.equal(emitNavigation(contents, url, false), false, url);
+    const redirect = navEvent(url, false);
+    contents.emit('will-redirect', redirect);
+    assert.equal(redirect.defaultPrevented, false, url);
   }
   for (const url of ['file:///etc/passwd', 'djdesk://x', 'javascript:alert(1)', 'data:text/html,x']) {
-    for (const name of ['will-frame-navigate', 'will-redirect']) {
-      const event = navEvent(url, false);
-      contents.emit(name, event);
-      assert.equal(event.defaultPrevented, true, `${name} ${url}`);
-    }
+    assert.equal(emitNavigation(contents, url, false), true, url);
+    const redirect = navEvent(url, false);
+    contents.emit('will-redirect', redirect);
+    assert.equal(redirect.defaultPrevented, true, url);
   }
   await flush();
   assert.deepEqual(shell.opened, []);
@@ -280,7 +294,7 @@ test('popups are always denied; http(s) targets open in the browser', async () =
   assert.deepEqual(contents.windowOpenHandler({ url: 'about:blank' }), { action: 'deny' });
   assert.deepEqual(contents.windowOpenHandler({}), { action: 'deny' });
   await flush();
-  assert.deepEqual(shell.opened, ['https://example.com/docs']);
+  assert.deepEqual(shell.opened, ['https://example.com/docs', `${TRUSTED}/admin/`]);
 });
 
 test('webview attachment is blocked', () => {
@@ -292,7 +306,5 @@ test('webview attachment is blocked', () => {
 
 test('everything is blocked while the trusted origin is unknown', () => {
   const { contents } = guardedContents(null);
-  const event = navEvent(`${TRUSTED}/`);
-  contents.emit('will-navigate', event);
-  assert.equal(event.defaultPrevented, true);
+  assert.equal(emitNavigation(contents, `${TRUSTED}/`), true);
 });

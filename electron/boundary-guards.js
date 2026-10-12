@@ -155,9 +155,17 @@ function isNavigationAllowed(url, isMainFrame, trustedOrigin) {
  * webContents instance.
  */
 function installNavigationGuards(webContents, { shell, getTrustedOrigin, logger = console }) {
-  const guard = (kind, dispatchExternally) => (event, legacyUrl, _isInPlace, legacyIsMainFrame) => {
+  const guard = (kind, { dispatchExternally = false, subFramesOnly = false } = {}) => (
+    event,
+    legacyUrl,
+    _isInPlace,
+    legacyIsMainFrame
+  ) => {
     const url = eventUrl(event, legacyUrl);
     const isMainFrame = eventIsMainFrame(event, legacyIsMainFrame);
+    if (subFramesOnly && isMainFrame) {
+      return;
+    }
     if (isNavigationAllowed(url, isMainFrame, getTrustedOrigin())) {
       return;
     }
@@ -169,22 +177,22 @@ function installNavigationGuards(webContents, { shell, getTrustedOrigin, logger 
     }
   };
 
-  // `will-navigate` only fires for the main frame and is the single place
-  // that hands a blocked link to the system browser. `will-frame-navigate`
-  // fires for every frame and only blocks, so nothing is dispatched twice.
-  webContents.on('will-navigate', guard('navigation', true));
-  webContents.on('will-frame-navigate', guard('navigation', false));
-  webContents.on('will-redirect', guard('redirect', false));
+  // Electron emits `will-frame-navigate` before `will-navigate` and skips the
+  // latter once the former is cancelled. Main-frame navigation is therefore
+  // decided in `will-navigate` alone (which also hands blocked links to the
+  // system browser exactly once); `will-frame-navigate` only polices sub frames.
+  webContents.on('will-navigate', guard('navigation', { dispatchExternally: true }));
+  webContents.on('will-frame-navigate', guard('navigation', { subFramesOnly: true }));
+  webContents.on('will-redirect', guard('redirect'));
   webContents.on('will-attach-webview', (event) => {
     event.preventDefault();
     logger.warn('Blocked <webview> attachment');
   });
 
   webContents.setWindowOpenHandler((details) => {
-    const url = details?.url;
-    if (!isTrustedUrl(url, getTrustedOrigin())) {
-      void openExternalSafely(shell, url, logger);
-    }
+    // Never create a second privileged window; http(s) targets (including
+    // local DJDesk pages) open in the system browser, everything else is dropped.
+    void openExternalSafely(shell, details?.url, logger);
     return { action: 'deny' };
   });
 }

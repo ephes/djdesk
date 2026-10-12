@@ -70,11 +70,7 @@ class Workspace(models.Model):
         if not normalized:
             raise ValidationError({"project_path": "Project path cannot be empty."})
         self.project_path = normalized
-        exists = (
-            Workspace.objects.exclude(pk=self.pk)
-            .filter(project_path=normalized)
-            .exists()
-        )
+        exists = Workspace.objects.exclude(pk=self.pk).filter(project_path=normalized).exists()
         if exists:
             raise ValidationError({"project_path": "A workspace already inspects this folder."})
 
@@ -235,10 +231,21 @@ class WorkspaceTaskRun(models.Model):
     def __str__(self) -> str:  # pragma: no cover - helper
         return f"{self.preset.label} ({self.get_status_display()})"
 
-    def mark_running(self) -> None:
-        self.status = self.Status.RUNNING
-        self.started_at = timezone.now()
-        self.save(update_fields=["status", "started_at"])
+    def mark_running(self) -> bool:
+        """Atomically claim a requested run without holding a command-time lock."""
+        started_at = timezone.now()
+        claimed = (
+            type(self)
+            .objects.filter(pk=self.pk, status=self.Status.REQUESTED)
+            .update(
+                status=self.Status.RUNNING,
+                started_at=started_at,
+            )
+        )
+        if claimed:
+            self.status = self.Status.RUNNING
+            self.started_at = started_at
+        return bool(claimed)
 
     def mark_finished(self, *, success: bool) -> None:
         self.flush_log_buffer()

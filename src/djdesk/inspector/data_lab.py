@@ -56,8 +56,7 @@ DATA_LAB_TEMPLATES = [
         "slug": "log-study",
         "title": "Log study scratchpad",
         "description": (
-            "Explore tail logs exported from the inspector without mutating the "
-            "project."
+            "Explore tail logs exported from the inspector without mutating the project."
         ),
         "tags": ["logs"],
         "cells": [
@@ -165,9 +164,32 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
     """Persist the rendered notebook to disk and return its path."""
     notebook = build_notebook(workspace, template_slug)
     workspace_dir = workspace_data_lab_dir(workspace)
-    path = workspace_dir / f"{template_slug}.ipynb"
-    path.write_text(json.dumps(notebook, indent=2), encoding="utf-8")
-    return path
+    content = json.dumps(notebook, indent=2)
+    suffix = 1
+    while True:
+        filename = template_slug if suffix == 1 else f"{template_slug}-{suffix}"
+        path = workspace_dir / f"{filename}.ipynb"
+        try:
+            handle = path.open("x", encoding="utf-8")
+        except FileExistsError:
+            suffix += 1
+            continue
+        try:
+            with handle:
+                handle.write(content)
+        except BaseException:
+            path.unlink(missing_ok=True)
+            raise
+        return path
+
+
+def export_template(slug: str) -> dict[str, Any]:
+    """Resolve template metadata consistently from an export's filename stem."""
+    if slug not in DATA_LAB_TEMPLATE_MAP:
+        base, _, suffix = slug.rpartition("-")
+        if suffix.isdigit():
+            slug = base
+    return DATA_LAB_TEMPLATE_MAP.get(slug, {})
 
 
 def list_workspace_exports(workspace: Workspace) -> list[dict[str, Any]]:
@@ -175,7 +197,7 @@ def list_workspace_exports(workspace: Workspace) -> list[dict[str, Any]]:
     exports: list[dict[str, Any]] = []
     for path in sorted(workspace_dir.glob("*.ipynb")):
         slug = path.stem
-        template = DATA_LAB_TEMPLATE_MAP.get(slug)
+        template = export_template(slug)
         exports.append(
             {
                 "slug": slug,
@@ -227,8 +249,7 @@ def _render_code_cell(cell: dict[str, Any]) -> str:
                 rendered_outputs.append(f"<pre>{escape(text)}</pre>")
         if rendered_outputs:
             outputs_html = (
-                "<div class='nb-output'><header>Output</header>"
-                f"{''.join(rendered_outputs)}</div>"
+                f"<div class='nb-output'><header>Output</header>{''.join(rendered_outputs)}</div>"
             )
     return (
         "<section class='nb-cell nb-cell--code'>"

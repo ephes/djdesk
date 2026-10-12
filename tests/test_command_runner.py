@@ -277,7 +277,7 @@ class ProcessFixtureCase(SimpleTestCase):
             "        handle.write(f'{pid}\\n')\n"
             "record(os.getpid())\n"
         )
-        (self.workspace / "manage.py").write_text(prelude + body)
+        (self.workspace / "manage.py").write_text(prelude + body, encoding="utf-8")
 
     def run_fixture(self, *, timeout: float = 1.0, log_callback=None):
         self.lines: list[str] = []
@@ -428,9 +428,17 @@ class ProcessTreeTests(ProcessFixtureCase):
 
     def test_output_is_decoded_with_the_locale_encoding(self) -> None:
         self.write_manage("sys.stdout.buffer.write(b'caf\\xe9\\n\\x81 end\\n')\n")
-        with mock.patch.object(command_runner.locale, "getencoding", return_value="cp1252"):
+        with mock.patch.object(command_runner, "_output_encoding", return_value="cp1252"):
             self.run_fixture(timeout=10)
         self.assertEqual(self.lines, ["café", "\ufffd end"])
+
+    def test_output_encoding_matches_text_mode_pipes(self) -> None:
+        with mock.patch.object(command_runner.locale, "getencoding", return_value="cp1252"):
+            with mock.patch.object(command_runner.sys, "flags", mock.Mock(utf8_mode=0)):
+                self.assertEqual(command_runner._output_encoding(), "cp1252")
+            # Python UTF-8 mode overrides the locale, as it does for text=True pipes.
+            with mock.patch.object(command_runner.sys, "flags", mock.Mock(utf8_mode=1)):
+                self.assertEqual(command_runner._output_encoding(), "utf-8")
 
     def test_multibyte_characters_split_across_reads_are_preserved(self) -> None:
         self.write_manage(
@@ -439,7 +447,7 @@ class ProcessTreeTests(ProcessFixtureCase):
             "    sys.stdout.buffer.flush()\n"
             "    time.sleep(0.05)\n"
         )
-        with mock.patch.object(command_runner.locale, "getencoding", return_value="utf-8"):
+        with mock.patch.object(command_runner, "_output_encoding", return_value="utf-8"):
             self.run_fixture(timeout=10)
         self.assertEqual(self.lines, ["é€"])
 

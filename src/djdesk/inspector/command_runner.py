@@ -7,6 +7,7 @@ import re
 import shlex
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -301,6 +302,11 @@ def _stop_and_reap(process: subprocess.Popen) -> None:
             process.wait()
 
 
+def _output_encoding() -> str:
+    """Return the encoding a text-mode pipe assumes: UTF-8 in UTF-8 mode, else the locale's."""
+    return "utf-8" if sys.flags.utf8_mode else locale.getencoding()
+
+
 def run_command(
     *,
     command: str,
@@ -337,9 +343,8 @@ def run_command(
     except OSError as exc:
         raise CommandExecutionError(f"Unable to start command: {exc}") from exc
 
-    # The child writes in the locale encoding (what a text-mode pipe would assume), not
-    # necessarily UTF-8; undecodable bytes are replaced instead of aborting the run.
-    decoder = codecs.getincrementaldecoder(locale.getencoding())(errors="replace")
+    # Undecodable bytes are replaced instead of aborting the run.
+    decoder = codecs.getincrementaldecoder(_output_encoding())(errors="replace")
     pending = ""
     output_lines = 0
     timed_out = False

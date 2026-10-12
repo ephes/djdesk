@@ -12,6 +12,10 @@ Added
   projects from the Electron UI.
 - Built an interactive Inspector dashboard experience with schema visualization assets,
   templatetags, and wizard/dashboard templates that surface curated insights directly in the app.
+- Added a read-only ``ci`` GitHub Actions workflow that runs Ruff, the Django test suite with
+  ``djdesk.settings.test``, and the Electron guard tests on every push to ``main`` and every pull
+  request, plus a matching ``just ci`` recipe. Packaging stays in the manual ``electron-desktop``
+  workflow.
 
 Security
 ~~~~~~~~

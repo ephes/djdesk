@@ -44,6 +44,7 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 - `just install` – install/update dependencies via `uv sync`.
 - `just test` – run Django's test suite (`manage.py test tests`) using `djdesk.settings.test`.
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
+- `just ci` – run everything the push/PR workflow runs: locked install with the `dev` extra, Ruff, the Django tests, and the Electron guard tests.
 - `just hooks` – run every pre-commit hook against the full codebase.
 - `just docs-html` – build the Sphinx documentation (`docs/_build/html`).
 - `just docs-bundle` – build docs and copy the HTML bundle into `var/docs_bundle` for offline use.
@@ -60,6 +61,17 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 The tutorial relies on reproducible sample workspaces so screenshots and wizard defaults stay in sync. Run `just fetch-samples` after cloning (or whenever the bundles change) to populate `sample_projects/` with the `django-polls`, `djdesk`, and `generated` fixtures referenced throughout the inspector. Seed migrations expect these directories to exist, so run the recipe before applying migrations or capturing docs/screenshots.
 
 The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and on every pull request with a read-only token and no secrets:
+
+1. `uv sync --locked --extra dev` – install exactly what `uv.lock` pins (the job fails if the lock is stale).
+2. `uv run ruff check .` – the same lint as `just lint`.
+3. `python manage.py test tests` with `DJANGO_SETTINGS_MODULE=djdesk.settings.test` – in-memory SQLite, no real workspace or home database.
+4. `npm test` in `electron/` – the main-process boundary-guard tests (`node --test`, no `npm install`).
+
+Run `just ci` locally before opening a pull request; a change is only ready for review once both CI jobs are green. Cross-platform packaging stays in the manual `electron-desktop` workflow and is not part of these checks.
 
 ### Settings and environments
 

@@ -119,3 +119,11 @@ Commands own a POSIX session; timeout and callback cleanup kill its process grou
 On Windows DJDesk creates a new process group and uses `taskkill /T /F` to stop
 its tree. Cleanup reaps the direct process and closes the output reader. The
 Django CI suite exercises actual process fixtures on Linux, macOS, and Windows.
+
+Command output and retained task logs each have a 1 MiB byte budget (including
+log timestamps), configured by `DJDESK_INSPECTOR_COMMAND_OUTPUT_BYTES` and
+`DJDESK_INSPECTOR_TASK_LOG_BYTES`. A bounded chunk queue holds at most 64 KiB.
+Exhausting either budget stops the command and records truncation as failure;
+large single lines count toward the same limit. Cleanup never waits indefinitely
+for an inherited output pipe. POSIX containment covers the owned process group;
+Windows tree termination requires the direct process still to be present.

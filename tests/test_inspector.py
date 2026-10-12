@@ -80,6 +80,24 @@ class WorkspaceTaskRunLogTests(TestCase):
             run.append_log(f"Line {index}")
         self.assertIn("Line 0", run.log)
 
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_retained_log_budget_includes_line_overhead(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        with self.assertRaisesRegex(CommandExecutionError, "truncated"):
+            for _ in range(100):
+                run.append_log("tiny line")
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+        self.assertIn("truncated", run.log)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_single_large_log_line_is_bounded(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        with self.assertRaises(CommandExecutionError):
+            run.append_log("é" * 1000000)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+
 
 class WorkspaceWizardFormTests(TestCase):
     def test_creates_workspace_and_seeds_scans(self) -> None:
@@ -518,3 +536,62 @@ class TaskExecutionIntegrationTests(TestCase):
         run.refresh_from_db()
         self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
         self.assertIn("sink failed", run.metadata["command"]["error"])
+
+    def test_failed_sink_fallback_keeps_diagnostic_and_buffer(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+
+        def sink(instance, message):
+            if "Executing" not in message:
+                instance._log_buffer = ["buffered output"]
+                raise RuntimeError("sink failed")
+
+        with (
+            mock.patch.object(WorkspaceTaskRun, "append_log", autospec=True, side_effect=sink),
+            mock.patch(
+                "djdesk.inspector.tasks.run_command",
+                side_effect=lambda **kw: kw["log_callback"]("line"),
+            ),
+        ):
+            execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertIn("sink failed", run.metadata["command"]["error"])
+        self.assertIn("buffered output", run.log)
+        self.assertIn("sink failed", run.log)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_final_status_log_exhaustion_marks_failed(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+
+        reached_status = []
+
+        def command(**kw):
+            instance = kw["log_callback"].__self__
+            marker = "\n[Output truncated: retained log byte budget exhausted.]"
+            size = 256 - len(marker.encode()) - len(instance.log.encode()) - 1 - 11 - 10
+            kw["log_callback"]("x" * max(0, size))
+            reached_status.append(True)
+            return CommandResult(
+                exit_code=0, duration=0.1, output_lines=1, safe_prefix=self.preset.command
+            )
+
+        with mock.patch("djdesk.inspector.tasks.run_command", side_effect=command):
+            payload = execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertTrue(payload["output_limited"])
+        self.assertEqual(reached_status, [True])
+        self.assertLessEqual(len(run.log.encode()), 256)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_callback_log_exhaustion_marks_failed(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        with mock.patch(
+            "djdesk.inspector.tasks.run_command",
+            side_effect=lambda **kw: kw["log_callback"]("x" * 1000000),
+        ):
+            payload = execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertTrue(payload["output_limited"])
+        self.assertLessEqual(len(run.log.encode()), 256)

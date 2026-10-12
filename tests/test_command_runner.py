@@ -19,6 +19,8 @@ class CommandPolicyTests(SimpleTestCase):
             "--output=sentinel",
             "-o sentinel",
             "-osentinel",
+            "-ao sentinel",
+            "-aosentinel",
             "--out sentinel",
         ):
             with self.subTest(option=option), mock.patch("subprocess.Popen") as spawn:
@@ -51,7 +53,7 @@ class CommandCleanupTests(SimpleTestCase):
             (path / "manage.py").write_text(
                 "import time; print('ready', flush=True); time.sleep(30)"
             )
-            command = f"{sys.executable} manage.py"
+            command = f'"{sys.executable}" manage.py'
             spawned = []
             real_spawn = subprocess.Popen
 
@@ -129,3 +131,26 @@ class ProcessTreeTests(SimpleTestCase):
             _stop_process_tree(process)
         self.assertEqual(taskkill.call_args.args[0], ["taskkill", "/PID", "123", "/T", "/F"])
         process.wait.assert_called_once()
+
+
+class OutputBudgetTests(SimpleTestCase):
+    @override_settings(INSPECTOR_COMMAND_OUTPUT_BYTES=8192)
+    def test_flood_and_single_line_stop_at_byte_budget(self):
+        for content in ("b'x\\n' * 1000000", "b'x' * 3000000"):
+            with self.subTest(content=content), TemporaryDirectory() as temp:
+                path = Path(temp)
+                (path / "manage.py").write_text(
+                    "import sys, time\n"
+                    + f"sys.stdout.buffer.write({content})\n"
+                    + "sys.stdout.flush()\ntime.sleep(30)\n"
+                )
+                command = f'"{sys.executable}" manage.py'
+                output = []
+                with override_settings(INSPECTOR_SAFE_COMMANDS=[command]):
+                    result = run_command(
+                        command=command, workspace_path=temp, timeout=5, log_callback=output.append
+                    )
+                self.assertTrue(result.output_limited)
+                self.assertLess(sum(len(line.encode()) for line in output), 8300)
+                self.assertLess(result.duration, 3)
+                self.assertIn("truncated", output[-1])

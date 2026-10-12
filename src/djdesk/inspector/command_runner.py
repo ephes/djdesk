@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import codecs
 import os
 import shlex
 import signal
@@ -8,7 +9,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 from typing import Callable
 
 from django.conf import settings
@@ -33,6 +34,7 @@ class CommandResult:
     output_lines: int
     safe_prefix: str
     timed_out: bool = False
+    output_limited: bool = False
 
 
 def _normalize_command(command: str) -> str:
@@ -93,7 +95,9 @@ def validate_safe_command(command: str) -> str:
                     raise UnsafeCommandError("Unsupported command arguments or file output.")
         try:
             parser = load_command_class("django.core", name).create_parser(args[0], name)
-            parser.parse_args(args[3:])
+            options = parser.parse_args(args[3:])
+            if name == "dumpdata" and options.output is not None:
+                raise UnsafeCommandError("dumpdata output must remain on stdout.")
         except (CommandError, SystemExit, ImportError) as exc:
             raise UnsafeCommandError("Unsupported command arguments.") from exc
         return safe
@@ -149,84 +153,125 @@ def run_command(
     log_callback: Callable[[str], None],
     safe_prefix: str | None = None,
 ) -> CommandResult:
-    """
-    Execute ``command`` inside ``workspace_path`` streaming output to ``log_callback``.
-    """
-
+    """Stream bounded output from a command in an owned process session."""
     safe_prefix = validate_safe_command(command)
     workdir = _resolve_workspace_path(workspace_path)
     env = os.environ.copy()
-    env.setdefault("PYTHONUNBUFFERED", "1")
-
-    try:
-        args = shlex.split(command)
-    except ValueError as exc:
-        raise CommandExecutionError("Unable to parse command string.") from exc
-
+    env["PYTHONUNBUFFERED"] = "1"
+    limit = settings.INSPECTOR_COMMAND_OUTPUT_BYTES
+    if limit <= 0:
+        raise CommandExecutionError("Command output budget must be positive.")
     start = time.monotonic()
     try:
         process = subprocess.Popen(
-            args,
+            shlex.split(command),
             cwd=str(workdir),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
             env=env,
+            bufsize=0,
             start_new_session=(os.name != "nt"),
             creationflags=(subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0),
         )
     except OSError as exc:
         raise CommandExecutionError(f"Unable to start command: {exc}") from exc
 
-    queue: Queue[str] = Queue()
+    queue: Queue[bytes] = Queue(maxsize=16)
+    stopped = threading.Event()
+    finished = threading.Event()
+    exhausted = threading.Event()
+    read_errors: list[Exception] = []
 
     def _reader() -> None:
-        assert process.stdout is not None
-        for raw_line in process.stdout:
-            queue.put(raw_line)
-        process.stdout.close()
+        total = 0
+        try:
+            assert process.stdout is not None
+            while not stopped.is_set():
+                chunk = process.stdout.read(min(4096, limit - total + 1))
+                if not chunk:
+                    break
+                allowed = chunk[: limit - total]
+                total += len(allowed)
+                if len(allowed) < len(chunk):
+                    exhausted.set()
+                while allowed and not stopped.is_set():
+                    try:
+                        queue.put(allowed, timeout=0.05)
+                        break
+                    except Full:
+                        continue
+                if exhausted.is_set():
+                    break
+        except Exception as exc:
+            read_errors.append(exc)
+        finally:
+            finished.set()
 
     reader = threading.Thread(target=_reader, daemon=True)
     output_lines = 0
     timed_out = False
+    tree_stopped = False
+    pending = ""
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    deadline = start + timeout
+    cleanup_deadline = None
     try:
         reader.start()
-        deadline = time.monotonic() + timeout
-
-        while True:
-            remaining = deadline - time.monotonic()
-            wait_time = 0.2
-            if remaining < wait_time:
-                wait_time = max(0.05, remaining)
-            try:
-                line = queue.get(timeout=max(wait_time, 0.05))
-            except Empty:
-                line = None
-            if line is not None:
-                cleaned = line.rstrip("\r\n")
-                log_callback(cleaned)
-                output_lines += 1
-            process_done = process.poll() is not None
-            if process_done and queue.empty() and not reader.is_alive():
-                break
-            if not timed_out and time.monotonic() > deadline:
-                timed_out = True
-                log_callback(f"Timeout reached ({timeout}s). Terminating command.")
+        while not finished.is_set() or not queue.empty():
+            if not tree_stopped and (time.monotonic() >= deadline or exhausted.is_set()):
+                timed_out = not exhausted.is_set()
                 _stop_process_tree(process)
-
-        exit_code = process.wait(timeout=2)
+                tree_stopped = True
+                cleanup_deadline = time.monotonic() + 1
+            if cleanup_deadline is not None and time.monotonic() > cleanup_deadline:
+                raise CommandExecutionError("Output pipe remained open after tree termination.")
+            try:
+                chunk = queue.get(timeout=0.05)
+            except Empty:
+                continue
+            pending += decoder.decode(chunk)
+            lines = pending.split("\n")
+            pending = lines.pop()
+            for line in lines:
+                log_callback(line.rstrip("\r"))
+                output_lines += 1
+        if exhausted.is_set() and not tree_stopped:
+            _stop_process_tree(process)
+            tree_stopped = True
+        pending += decoder.decode(b"", final=True)
+        if pending:
+            log_callback(pending.rstrip("\r"))
+            output_lines += 1
+        if read_errors:
+            raise CommandExecutionError(f"Unable to read command output: {read_errors[0]}")
+        # A command can close stdout and continue running.
+        remaining = max(0, deadline - time.monotonic())
+        try:
+            exit_code = process.wait(timeout=remaining)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            if not tree_stopped:
+                _stop_process_tree(process)
+                tree_stopped = True
+            exit_code = process.returncode
+        if timed_out:
+            log_callback(f"Timeout reached ({timeout}s). Terminating command.")
+        if exhausted.is_set():
+            log_callback(f"Output truncated: byte budget ({limit}) exhausted.")
     finally:
-        _stop_process_tree(process)
-        reader.join(timeout=2)
+        stopped.set()
+        if not tree_stopped:
+            _stop_process_tree(process)
+        if reader.ident is not None:
+            reader.join(timeout=2)
         if process.stdout is not None and not reader.is_alive():
             process.stdout.close()
 
-    duration = time.monotonic() - start
     return CommandResult(
         exit_code=exit_code,
-        duration=duration,
+        duration=time.monotonic() - start,
         output_lines=output_lines,
         safe_prefix=safe_prefix,
         timed_out=timed_out,
+        output_limited=exhausted.is_set(),
     )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
@@ -70,11 +71,7 @@ class Workspace(models.Model):
         if not normalized:
             raise ValidationError({"project_path": "Project path cannot be empty."})
         self.project_path = normalized
-        exists = (
-            Workspace.objects.exclude(pk=self.pk)
-            .filter(project_path=normalized)
-            .exists()
-        )
+        exists = Workspace.objects.exclude(pk=self.pk).filter(project_path=normalized).exists()
         if exists:
             raise ValidationError({"project_path": "A workspace already inspects this folder."})
 
@@ -248,13 +245,30 @@ class WorkspaceTaskRun(models.Model):
         self.save(update_fields=["status", "completed_at", "progress"])
 
     def append_log(self, message: str) -> None:
+        if getattr(self, "_log_truncated", False):
+            return
         stamp = timezone.now().strftime("%H:%M:%S")
         new_line = f"[{stamp}] {message}"
         buffer = getattr(self, "_log_buffer", None)
         if buffer is None:
             buffer = []
             self._log_buffer = buffer
+        marker = "\n[Output truncated: retained log byte budget exhausted.]"
+        limit = settings.INSPECTOR_TASK_LOG_BYTES
+        if limit < len(marker.encode("utf-8")):
+            raise CommandExecutionError("Task log byte budget is too small.")
+        used = getattr(self, "_log_bytes", None)
+        if used is None:
+            used = len(self.log.encode("utf-8"))
+        encoded = new_line.encode("utf-8")
+        room = limit - len(marker.encode("utf-8")) - used - 1
+        if len(encoded) > room:
+            buffer.append(encoded[: max(0, room)].decode("utf-8", errors="ignore") + marker)
+            self._log_truncated = True
+            self.flush_log_buffer()
+            raise CommandExecutionError("Output truncated: retained log byte budget exhausted.")
         buffer.append(new_line)
+        self._log_bytes = used + len(encoded) + 1
         if len(buffer) >= self.LOG_BATCH_SIZE:
             self.flush_log_buffer()
 

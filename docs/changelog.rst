@@ -4,6 +4,12 @@ Documentation Changelog
 Unreleased
 ----------
 
+Fixed
+~~~~~
+
+- Bound command output, queued chunks, and retained task logs; fail truncated commands.
+- Close grouped-short-option output bypasses and bound inherited-pipe cleanup.
+
 - Validate management-command arguments and refuse dumpdata file output.
 - Terminate owned command trees on timeout, with desktop OS process fixtures in CI.
 - Reap commands when output callbacks fail and record unexpected task failures.

@@ -142,6 +142,11 @@ INSPECTOR_SAFE_COMMANDS = [
     "python manage.py inspectdb",
     "python manage.py dumpdata",
 ]
+INSPECTOR_COMMAND_OUTPUT_BYTES = int(
+    os.environ.get("DJDESK_INSPECTOR_COMMAND_OUTPUT_BYTES", "1048576")
+)
+INSPECTOR_TASK_LOG_BYTES = int(os.environ.get("DJDESK_INSPECTOR_TASK_LOG_BYTES", "1048576"))
+
 INSPECTOR_TASK_TIMEOUT = int(os.environ.get("DJDESK_INSPECTOR_TASK_TIMEOUT", "60"))
 
 INSPECTOR_DATA_LAB_ROOT = Path(

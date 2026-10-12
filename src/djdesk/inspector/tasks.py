@@ -18,6 +18,7 @@ from .command_runner import (
 from .models import WorkspaceTaskRun
 
 logger = logging.getLogger(__name__)
+_UNEXPECTED_ERROR_CHARS = 2000
 
 
 def _store_command_metadata(run: WorkspaceTaskRun, payload: dict[str, Any]) -> dict[str, Any]:
@@ -40,6 +41,7 @@ def _fail_run(
         "raw": run.preset.command,
         "workspace_path": run.workspace.project_path,
         "error": message,
+        "output_limited": run.log_truncated,
     }
     if safe_prefix:
         payload["safe_prefix"] = safe_prefix
@@ -59,6 +61,7 @@ def _success_payload(run: WorkspaceTaskRun, result: CommandResult) -> dict[str, 
         "duration_seconds": result.duration,
         "output_lines": result.output_lines,
         "timed_out": result.timed_out,
+        "output_limited": result.output_limited or run.log_truncated,
     }
     return _store_command_metadata(run, payload)
 
@@ -70,7 +73,9 @@ def _record_unexpected_failure(run: WorkspaceTaskRun, error: BaseException | Non
     The run's own logging path may be what failed, so the outcome is written with one direct
     update instead of ``append_log``/``save``. The caller's original error keeps propagating.
     """
-    message = f"Command execution failed unexpectedly: {type(error).__name__}: {error}"
+    # Error text can be arbitrarily long (a database error may quote the statement it failed on).
+    detail = f"{type(error).__name__}: {error}"[:_UNEXPECTED_ERROR_CHARS]
+    message = f"Command execution failed unexpectedly: {detail}"
     try:
         stamp = timezone.now().strftime("%H:%M:%S")
         buffered = getattr(run, "_log_buffer", None) or []
@@ -123,26 +128,39 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
     run.append_log(f"Executing `{command}` inside {run.workspace.project_path}")
     run.flush_log_buffer()
 
+    def log_output(line: str) -> None:
+        run.append_log(line)
+        if run.log_truncated:
+            # Raising from the callback makes the runner stop the command's process group.
+            raise CommandExecutionError(
+                "Output truncated: retained log byte budget exhausted. Command stopped."
+            )
+
     try:
         result = run_command(
             command=command,
             workspace_path=run.workspace.project_path,
             timeout=settings.INSPECTOR_TASK_TIMEOUT,
-            log_callback=run.append_log,
+            log_callback=log_output,
         )
     except CommandExecutionError as exc:
         return _fail_run(run, str(exc), safe_prefix=safe_prefix)
 
     run.progress = 95
     run.save(update_fields=["progress"])
-    if result.timed_out:
+    if result.output_limited:
+        run.append_log("Command stopped because its output exceeded the byte budget.")
+    elif result.timed_out:
         run.append_log("Command timed out before completion.")
     else:
         run.append_log(f"Command finished with exit code {result.exit_code}.")
     run.flush_log_buffer()
 
+    # A run whose output or retained log was cut short never counts as successful.
     payload = _success_payload(run, result)
-    run.mark_finished(success=(result.exit_code == 0 and not result.timed_out))
+    run.mark_finished(
+        success=(result.exit_code == 0 and not result.timed_out and not payload["output_limited"])
+    )
 
     # Ensure the calling view gets deterministic data even inside transactions.
     transaction.on_commit(lambda: None)

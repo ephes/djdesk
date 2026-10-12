@@ -86,6 +86,49 @@ class WorkspaceTaskRunLogTests(TestCase):
         self.assertIn("Line 0", run.log)
 
 
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_retained_log_budget_counts_timestamps_and_newlines(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        for _ in range(100):
+            run.append_log("tiny line")
+        self.assertTrue(run.log_truncated)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+        self.assertGreater(len(run.log.encode()), 256 - 40)
+        self.assertTrue(run.log.endswith(WorkspaceTaskRun.LOG_TRUNCATION_MARKER))
+        self.assertEqual(run.log.count(WorkspaceTaskRun.LOG_TRUNCATION_MARKER), 1)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_single_large_log_line_is_cut_on_a_character_boundary(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run.append_log("é" * 1_000_000)
+        self.assertTrue(run.log_truncated)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+        self.assertIn("é", run.log)
+        self.assertTrue(run.log.endswith(WorkspaceTaskRun.LOG_TRUNCATION_MARKER))
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_log_budget_includes_text_stored_before_this_instance(self) -> None:
+        run = WorkspaceTaskRun.objects.create(
+            workspace=self.workspace, preset=self.preset, log="x" * 200
+        )
+        run = WorkspaceTaskRun.objects.get(pk=run.pk)
+        run.append_log("y" * 100)
+        self.assertTrue(run.log_truncated)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+
+    def test_log_within_budget_is_not_truncated(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        for index in range(12):
+            run.append_log(f"Line {index}")
+        run.flush_log_buffer()
+        self.assertFalse(run.log_truncated)
+        run.refresh_from_db()
+        self.assertEqual(len(run.log.splitlines()), 12)
+
+
 class WorkspaceWizardFormTests(TestCase):
     def test_creates_workspace_and_seeds_scans(self) -> None:
         with TemporaryDirectory() as temp:

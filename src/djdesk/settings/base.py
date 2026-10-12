@@ -143,6 +143,12 @@ INSPECTOR_SAFE_COMMANDS = [
     "python manage.py dumpdata",
 ]
 INSPECTOR_TASK_TIMEOUT = int(os.environ.get("DJDESK_INSPECTOR_TASK_TIMEOUT", "60"))
+# Bytes of output read from one workspace command before it is stopped, and bytes of log
+# text (output plus timestamps and status lines) retained for one task run.
+INSPECTOR_COMMAND_OUTPUT_BYTES = int(
+    os.environ.get("DJDESK_INSPECTOR_COMMAND_OUTPUT_BYTES", str(1024 * 1024))
+)
+INSPECTOR_TASK_LOG_BYTES = int(os.environ.get("DJDESK_INSPECTOR_TASK_LOG_BYTES", str(1024 * 1024)))
 
 INSPECTOR_DATA_LAB_ROOT = Path(
     os.environ.get("DJDESK_DATA_LAB_ROOT", BASE_DIR / "var" / "data_lab")

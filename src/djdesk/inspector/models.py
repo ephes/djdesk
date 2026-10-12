@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
@@ -193,6 +194,7 @@ class WorkspaceTaskRun(models.Model):
     """Instance of a `django-tasks` command associated with a workspace."""
 
     LOG_BATCH_SIZE = 5
+    LOG_TRUNCATION_MARKER = "[Output truncated: retained log byte budget exhausted.]"
 
     class Status(models.TextChoices):
         REQUESTED = ("requested", "Requested")
@@ -254,14 +256,43 @@ class WorkspaceTaskRun(models.Model):
         self.progress = 100
         self.save(update_fields=["status", "completed_at", "progress"])
 
+    @property
+    def log_truncated(self) -> bool:
+        """Whether the retained log hit ``INSPECTOR_TASK_LOG_BYTES`` and dropped output."""
+        return getattr(self, "_log_truncated", False)
+
     def append_log(self, message: str) -> None:
+        """
+        Buffer one timestamped line, keeping the whole log within ``INSPECTOR_TASK_LOG_BYTES``.
+
+        The line that would exceed the budget is cut, the truncation marker is stored in its
+        place and every later line is dropped; callers check ``log_truncated``.
+        """
+        if self.log_truncated:
+            return
         stamp = timezone.now().strftime("%H:%M:%S")
-        new_line = f"[{stamp}] {message}"
+        new_line = f"[{stamp}] {message}".encode("utf-8", errors="replace")
         buffer = getattr(self, "_log_buffer", None)
         if buffer is None:
             buffer = []
             self._log_buffer = buffer
-        buffer.append(new_line)
+        used = getattr(self, "_log_bytes", None)
+        if used is None:
+            used = len("\n".join(part for part in [self.log, *buffer] if part).encode("utf-8"))
+        marker = self.LOG_TRUNCATION_MARKER.encode("utf-8")
+        # Each stored line costs its bytes plus the newline joining it to the text before it,
+        # and room for the marker line is always held back.
+        room = settings.INSPECTOR_TASK_LOG_BYTES - used - (1 if used else 0) - len(marker) - 1
+        if len(new_line) > room:
+            kept = new_line[: max(room, 0)].decode("utf-8", errors="ignore")
+            if kept:
+                buffer.append(kept)
+            buffer.append(self.LOG_TRUNCATION_MARKER)
+            self._log_truncated = True
+            self.flush_log_buffer()
+            return
+        buffer.append(new_line.decode("utf-8"))
+        self._log_bytes = used + (1 if used else 0) + len(new_line)
         if len(buffer) >= self.LOG_BATCH_SIZE:
             self.flush_log_buffer()
 

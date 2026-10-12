@@ -426,6 +426,23 @@ class ProcessTreeTests(ProcessFixtureCase):
         self.assertTrue(result.timed_out)
         self.assert_fully_cleaned_up()
 
+    def test_output_is_decoded_with_the_locale_encoding(self) -> None:
+        self.write_manage("sys.stdout.buffer.write(b'caf\\xe9\\n\\x81 end\\n')\n")
+        with mock.patch.object(command_runner.locale, "getencoding", return_value="cp1252"):
+            self.run_fixture(timeout=10)
+        self.assertEqual(self.lines, ["café", "\ufffd end"])
+
+    def test_multibyte_characters_split_across_reads_are_preserved(self) -> None:
+        self.write_manage(
+            "for byte in 'é€'.encode('utf-8'):\n"
+            "    sys.stdout.buffer.write(bytes([byte]))\n"
+            "    sys.stdout.buffer.flush()\n"
+            "    time.sleep(0.05)\n"
+        )
+        with mock.patch.object(command_runner.locale, "getencoding", return_value="utf-8"):
+            self.run_fixture(timeout=10)
+        self.assertEqual(self.lines, ["é€"])
+
     def test_command_has_no_stdin(self) -> None:
         self.write_manage("print(repr(sys.stdin.read()))\n")
         result = self.run_fixture(timeout=10)

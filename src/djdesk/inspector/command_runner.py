@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import codecs
+import locale
 import os
 import re
 import shlex
@@ -336,7 +337,9 @@ def run_command(
     except OSError as exc:
         raise CommandExecutionError(f"Unable to start command: {exc}") from exc
 
-    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    # The child writes in the locale encoding (what a text-mode pipe would assume), not
+    # necessarily UTF-8; undecodable bytes are replaced instead of aborting the run.
+    decoder = codecs.getincrementaldecoder(locale.getencoding())(errors="replace")
     pending = ""
     output_lines = 0
     timed_out = False

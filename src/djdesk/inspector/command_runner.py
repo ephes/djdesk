@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import codecs
+import locale
 import os
+import re
 import shlex
+import signal
 import subprocess
-import threading
+import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from queue import Empty, Queue
-from typing import Callable
+from typing import Callable, Mapping, Sequence
 
 from django.conf import settings
 
@@ -32,23 +35,153 @@ class CommandResult:
     timed_out: bool = False
 
 
-def _normalize_command(command: str) -> str:
-    """Return a whitespace-normalized command for comparisons."""
+def _pattern(expression: str) -> re.Pattern[str]:
+    return re.compile(expression, re.ASCII)
+
+
+# Permitted values never start with "-" and are never empty, so an accepted argv has exactly
+# one reading: Django's argument parser cannot take a value for an option or the reverse.
+_LABEL = r"[A-Za-z_][A-Za-z0-9_]*"
+_APP_OR_MODEL = _pattern(rf"{_LABEL}(\.{_LABEL})?")
+_IDENTIFIER = _pattern(r"[A-Za-z0-9_]+")
+_ALIAS = _pattern(r"[A-Za-z0-9_][A-Za-z0-9_-]*")
+_PRIMARY_KEYS = _pattern(r"[A-Za-z0-9_][A-Za-z0-9_-]*(,[A-Za-z0-9_][A-Za-z0-9_-]*)*")
+_VERBOSITY = _pattern(r"[0-3]")
+
+_COMMON_FLAGS = frozenset({"--traceback", "--no-color", "--force-color"})
+_COMMON_VALUED = {"--verbosity": _VERBOSITY, "-v": _VERBOSITY}
+
+
+@dataclass(frozen=True, slots=True)
+class _CommandPolicy:
+    """The complete set of argument shapes one management command may receive."""
+
+    flags: frozenset[str] = frozenset()
+    valued: Mapping[str, re.Pattern[str]] = field(default_factory=dict)
+    positional: re.Pattern[str] | None = None
+    max_positionals: int | None = None
+
+
+# Every option is spelled out in full. Anything absent is refused: abbreviations, grouped or
+# attached short options, "--", module-loading overrides (--settings, --pythonpath,
+# diffsettings --default) and every option that writes a file (dumpdata --output / -o).
+_COMMAND_POLICIES: dict[str, _CommandPolicy] = {
+    "check": _CommandPolicy(
+        flags=frozenset({"--list-tags", "--deploy"}),
+        valued={
+            "--tag": _IDENTIFIER,
+            "-t": _IDENTIFIER,
+            "--fail-level": _pattern(r"CRITICAL|ERROR|WARNING|INFO|DEBUG"),
+            "--database": _ALIAS,
+        },
+        positional=_pattern(_LABEL),
+    ),
+    "showmigrations": _CommandPolicy(
+        flags=frozenset({"--list", "-l", "--plan", "-p"}),
+        valued={"--database": _ALIAS},
+        positional=_pattern(_LABEL),
+    ),
+    "diffsettings": _CommandPolicy(
+        flags=frozenset({"--all"}),
+        # diffsettings --output selects a display format; it does not name a file.
+        valued={"--output": _pattern(r"hash|unified")},
+    ),
+    "sqlmigrate": _CommandPolicy(
+        flags=frozenset({"--backwards"}),
+        valued={"--database": _ALIAS},
+        positional=_IDENTIFIER,
+        max_positionals=2,
+    ),
+    "inspectdb": _CommandPolicy(
+        flags=frozenset({"--include-partitions", "--include-views"}),
+        valued={"--database": _ALIAS},
+        positional=_IDENTIFIER,
+    ),
+    "dumpdata": _CommandPolicy(
+        flags=frozenset({"--natural-foreign", "--natural-primary", "--all", "-a"}),
+        valued={
+            "--format": _pattern(r"json|jsonl|xml|yaml"),
+            "--indent": _pattern(r"[0-9]{1,2}"),
+            "--database": _ALIAS,
+            "--exclude": _APP_OR_MODEL,
+            "-e": _APP_OR_MODEL,
+            "--pks": _PRIMARY_KEYS,
+        },
+        positional=_APP_OR_MODEL,
+    ),
+}
+
+_MANAGE_SCRIPT = "manage.py"
+
+
+def split_command(command: str) -> list[str]:
+    """Split a stored command line into the argv list that is validated and executed."""
     try:
-        tokens = shlex.split(command)
+        return shlex.split(command)
     except ValueError as exc:  # unmatched quotes, etc.
         raise CommandExecutionError("Unable to parse command string.") from exc
-    return " ".join(tokens)
+
+
+def _check_arguments(policy: _CommandPolicy, arguments: Sequence[str]) -> None:
+    refused = UnsafeCommandError("Command arguments are not permitted for this command.")
+    positionals = 0
+    index = 0
+    while index < len(arguments):
+        argument = arguments[index]
+        index += 1
+        if not argument.startswith("-"):
+            positionals += 1
+            if policy.positional is None or not policy.positional.fullmatch(argument):
+                raise refused
+            if policy.max_positionals is not None and positionals > policy.max_positionals:
+                raise refused
+            continue
+        # Only long options may carry "=value"; short options must be the exact token.
+        if argument.startswith("--"):
+            name, has_value, value = argument.partition("=")
+        else:
+            name, has_value, value = argument, "", ""
+        if name in _COMMON_FLAGS or name in policy.flags:
+            if has_value:
+                raise refused
+            continue
+        value_pattern = policy.valued.get(name) or _COMMON_VALUED.get(name)
+        if value_pattern is None:
+            raise refused
+        if not has_value:
+            if index >= len(arguments):
+                raise refused
+            value = arguments[index]
+            index += 1
+        if not value_pattern.fullmatch(value):
+            raise refused
+
+
+def validate_argv(argv: Sequence[str]) -> str:
+    """
+    Return the allowlisted prefix for ``argv`` or raise ``UnsafeCommandError``.
+
+    This is the only command guard. It receives the argv list exactly as it is handed to the
+    operating system and accepts it only when it is ``<interpreter> manage.py <command>`` from
+    ``INSPECTOR_SAFE_COMMANDS`` followed solely by argument shapes that command's policy lists.
+    """
+    argv = list(argv)
+    for raw in settings.INSPECTOR_SAFE_COMMANDS:
+        prefix = split_command(raw)
+        if len(prefix) == 3 and prefix[1] == _MANAGE_SCRIPT and argv[:3] == prefix:
+            break
+    else:
+        raise UnsafeCommandError("Command is not part of INSPECTOR_SAFE_COMMANDS.")
+    policy = _COMMAND_POLICIES.get(prefix[2])
+    if policy is None:
+        raise UnsafeCommandError("No argument policy exists for this management command.")
+    _check_arguments(policy, argv[3:])
+    return " ".join(prefix)
 
 
 def validate_safe_command(command: str) -> str:
-    """Ensure ``command`` belongs to ``INSPECTOR_SAFE_COMMANDS`` and return the prefix."""
-    normalized = _normalize_command(command)
-    for raw in settings.INSPECTOR_SAFE_COMMANDS:
-        safe = _normalize_command(raw)
-        if normalized == safe or normalized.startswith(f"{safe} "):
-            return safe
-    raise UnsafeCommandError("Command is not part of INSPECTOR_SAFE_COMMANDS.")
+    """Validate a stored command line and return its allowlisted prefix."""
+    return validate_argv(split_command(command))
 
 
 def _resolve_workspace_path(raw_path: str) -> Path:
@@ -65,10 +198,113 @@ def _resolve_workspace_path(raw_path: str) -> Path:
 
     if not resolved.is_dir():
         raise CommandExecutionError("Workspace path must be a directory.")
-    manage_py = resolved / "manage.py"
+    manage_py = resolved / _MANAGE_SCRIPT
     if not manage_py.exists():
         raise CommandExecutionError("manage.py not found in workspace path.")
     return resolved
+
+
+_READ_SIZE = 65536
+_POLL_INTERVAL = 0.02
+# How long the command's process group gets to exit after SIGTERM before SIGKILL.
+TERMINATION_GRACE_SECONDS = 2.0
+
+if os.name == "nt":  # pragma: no cover - exercised only on Windows
+    import _winapi
+    import msvcrt
+
+    _OWN_GROUP = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+
+    def _prepare_stream(stream) -> None:
+        pass
+
+    def _read_available(stream) -> bytes | None:
+        try:
+            available = _winapi.PeekNamedPipe(msvcrt.get_osfhandle(stream.fileno()), 0)[0]
+        except BrokenPipeError:
+            return b""
+        if not available:
+            return None
+        return os.read(stream.fileno(), min(available, _READ_SIZE))
+
+    def _leader_exited(process: subprocess.Popen) -> bool:
+        # The open process handle keeps the pid reserved after the exit status is read.
+        return process.poll() is not None
+
+    def _stop_group(process: subprocess.Popen) -> None:
+        # Windows has no group-wide SIGTERM; taskkill /T walks the tree below a live child.
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10,
+            check=False,
+        )
+        process.kill()
+
+else:
+    _OWN_GROUP = {"start_new_session": True}
+
+    def _prepare_stream(stream) -> None:
+        os.set_blocking(stream.fileno(), False)
+
+    def _read_available(stream) -> bytes | None:
+        """Return pending output, ``b""`` at end of stream, or ``None`` when nothing is ready."""
+        try:
+            return os.read(stream.fileno(), _READ_SIZE)
+        except BlockingIOError:
+            return None
+
+    def _leader_exited(process: subprocess.Popen) -> bool:
+        """
+        Report whether the direct child has exited, without reaping it.
+
+        Until ``Popen.wait`` reaps the child its pid, and so the id of the process group it
+        leads, cannot be reused; signalling the group therefore only ever reaches our command.
+        """
+        if process.returncode is not None:
+            return True
+        try:
+            status = os.waitid(os.P_PID, process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except ChildProcessError:
+            return True
+        return status is not None
+
+    def _signal_group(process: subprocess.Popen, signum: int) -> None:
+        try:
+            os.killpg(process.pid, signum)
+        except (ProcessLookupError, PermissionError):
+            # Nothing left to signal (macOS reports EPERM for a group of zombies).
+            pass
+
+    def _stop_group(process: subprocess.Popen) -> None:
+        _signal_group(process, signal.SIGTERM)
+        deadline = time.monotonic() + TERMINATION_GRACE_SECONDS
+        while time.monotonic() < deadline:
+            # The group is gone once the child exited and no descendant holds the pipe open.
+            if _read_available(process.stdout) == b"" and _leader_exited(process):
+                break
+            time.sleep(_POLL_INTERVAL)
+        _signal_group(process, signal.SIGKILL)
+
+
+def _stop_and_reap(process: subprocess.Popen) -> None:
+    """Stop everything the command started, close its pipe and reap it. Runs on every exit."""
+    try:
+        # A reaped child no longer reserves its group id, so there is nothing safe to signal.
+        if process.returncode is None:
+            _stop_group(process)
+    finally:
+        try:
+            process.stdout.close()
+        finally:
+            process.wait()
+
+
+def _output_encoding() -> str:
+    """Return the encoding a text-mode pipe assumes: UTF-8 in UTF-8 mode, else the locale's."""
+    return "utf-8" if sys.flags.utf8_mode else locale.getencoding()
 
 
 def run_command(
@@ -77,83 +313,75 @@ def run_command(
     workspace_path: str,
     timeout: float,
     log_callback: Callable[[str], None],
-    safe_prefix: str | None = None,
 ) -> CommandResult:
     """
     Execute ``command`` inside ``workspace_path`` streaming output to ``log_callback``.
-    """
 
-    safe_prefix = safe_prefix or validate_safe_command(command)
+    The command runs in its own process group. However this function exits (completion,
+    timeout, or an exception from ``log_callback``) the whole group is stopped, the output
+    pipe is closed and the child is reaped before control returns to the caller.
+    """
+    argv = split_command(command)
+    safe_prefix = validate_argv(argv)
     workdir = _resolve_workspace_path(workspace_path)
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
 
-    try:
-        args = shlex.split(command)
-    except ValueError as exc:
-        raise CommandExecutionError("Unable to parse command string.") from exc
-
     start = time.monotonic()
+    deadline = start + timeout
     try:
         process = subprocess.Popen(
-            args,
+            argv,
             cwd=str(workdir),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1,
+            bufsize=0,
             env=env,
+            **_OWN_GROUP,
         )
     except OSError as exc:
         raise CommandExecutionError(f"Unable to start command: {exc}") from exc
 
-    queue: Queue[str] = Queue()
-
-    def _reader() -> None:
-        assert process.stdout is not None
-        for raw_line in process.stdout:
-            queue.put(raw_line)
-        process.stdout.close()
-
-    reader = threading.Thread(target=_reader, daemon=True)
-    reader.start()
-
+    # Undecodable bytes are replaced instead of aborting the run.
+    decoder = codecs.getincrementaldecoder(_output_encoding())(errors="replace")
+    pending = ""
     output_lines = 0
-    deadline = time.monotonic() + timeout
     timed_out = False
-
-    while True:
-        remaining = deadline - time.monotonic()
-        wait_time = 0.2
-        if remaining < wait_time:
-            wait_time = max(0.05, remaining)
-        try:
-            line = queue.get(timeout=max(wait_time, 0.05))
-        except Empty:
-            line = None
-        if line is not None:
-            cleaned = line.rstrip("\r\n")
-            log_callback(cleaned)
+    try:
+        _prepare_stream(process.stdout)
+        end_of_output = False
+        while not end_of_output:
+            if time.monotonic() >= deadline:
+                timed_out = True
+                break
+            chunk = _read_available(process.stdout)
+            if chunk is None:
+                time.sleep(_POLL_INTERVAL)
+                continue
+            end_of_output = chunk == b""
+            pending += decoder.decode(chunk, final=end_of_output)
+            *lines, pending = pending.split("\n")
+            for line in lines:
+                log_callback(line.rstrip("\r"))
+                output_lines += 1
+        if pending:
+            log_callback(pending.rstrip("\r"))
             output_lines += 1
-        process_done = process.poll() is not None
-        if process_done and queue.empty():
-            break
-        if not timed_out and time.monotonic() > deadline:
-            timed_out = True
+        # A command may close its output and keep running; the deadline still applies.
+        while not timed_out and not _leader_exited(process):
+            if time.monotonic() >= deadline:
+                timed_out = True
+            else:
+                time.sleep(_POLL_INTERVAL)
+        if timed_out:
             log_callback(f"Timeout reached ({timeout}s). Terminating command.")
-            process.kill()
+    finally:
+        _stop_and_reap(process)
 
-    reader.join(timeout=0.5)
-
-    if process.returncode is None:
-        exit_code = process.wait()
-    else:
-        exit_code = process.returncode
-
-    duration = time.monotonic() - start
     return CommandResult(
-        exit_code=exit_code,
-        duration=duration,
+        exit_code=process.returncode,
+        duration=time.monotonic() - start,
         output_lines=output_lines,
         safe_prefix=safe_prefix,
         timed_out=timed_out,

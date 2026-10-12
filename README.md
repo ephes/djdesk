@@ -113,6 +113,27 @@ returns the persisted command outcome, or `{skipped: true, status: ...}` while a
 run is in progress or has no outcome. It never resets logs or timestamps and
 holds no database transaction open while executing a command.
 
+Workspace commands are checked by one guard that sees the argv list exactly as it is
+executed. An argv is accepted only when it is `<interpreter> manage.py <command>` from
+`INSPECTOR_SAFE_COMMANDS` followed by arguments that the command's policy in
+`djdesk.inspector.command_runner` lists: app labels and the read-only options of `check`,
+`showmigrations`, `diffsettings`, `sqlmigrate`, `inspectdb`, and `dumpdata` (for example
+`--database`, `--format`, `--indent`, `--exclude`, `--pks`, `--deploy`, `--tag`). Everything
+else is refused before a process starts, including `dumpdata --output`/`-o` in every
+spelling, abbreviated or grouped options, `--settings`, `--pythonpath`, and
+`diffsettings --default`. Presets therefore cannot direct writes to disk, and an allowlist
+entry of any other shape never matches.
+
+Each command runs without stdin in its own process group. When it finishes, times out, or
+its log callback fails, DJDesk sends `SIGTERM` to the whole group, follows up with
+`SIGKILL` after a two second grace period, closes the output pipe, and reaps the child, so
+processes the command started do not outlive it. A command whose descendants keep its
+output open is treated as still running until the timeout. On Windows the tree is stopped
+with `taskkill /T /F`, which only finds descendants while the direct child is still
+running. Known limitation: the Windows code path is not exercised by the automated tests
+(they run on Linux and macOS), so process-tree cleanup there is unverified. A run whose execution fails unexpectedly (for instance while saving its log) is
+recorded as failed with the original error, and that error is passed on to the task backend.
+
 Data Lab exports exclusively claim a fresh filename on every export: the template
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
 manual edits are preserved. The export API returns `data_lab.selected_notebook`

@@ -12,6 +12,13 @@ install:
 lint:
     uv run ruff check .
 
+# Run the same quality checks as .github/workflows/ci.yml (locked install, Ruff, Django and Electron guard tests).
+ci:
+    uv sync --locked --extra dev
+    uv run --no-sync ruff check .
+    DJANGO_SETTINGS_MODULE=djdesk.settings.test uv run --no-sync python manage.py test tests
+    cd electron && npm test
+
 # Run the Django development server.
 dev:
     DJANGO_SETTINGS_MODULE=djdesk.settings.local uv run python manage.py runserver

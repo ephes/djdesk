@@ -156,9 +156,21 @@ Windows:
 8. ``actions/upload-artifact`` publishes ``djdesk-macos``, ``djdesk-linux``, and
    ``djdesk-windows`` packages from ``electron/dist/``.
 
-The workflow is currently **manual-only** (trigger: ``workflow_dispatch``). Launch it
-via the GitHub UI or run ``just electron-workflow-run`` locally. To build on pushes,
-extend the ``on:`` block with the desired paths.
+The packaging workflow is **manual-only** (trigger: ``workflow_dispatch``). Launch it
+via the GitHub UI or run ``just electron-workflow-run`` locally.
+
+Quality checks run separately. ``.github/workflows/ci.yml`` triggers on every push to
+``main`` and every pull request with a read-only ``contents: read`` token, no secrets,
+and no artifact uploads:
+
+1. ``uv sync --locked --extra dev`` installs the dependencies pinned in ``uv.lock``.
+2. ``uv run ruff check .`` lints the project (``just lint``).
+3. ``python manage.py test tests`` runs with ``DJANGO_SETTINGS_MODULE=djdesk.settings.test``
+   (``just test``), so the suite uses in-memory SQLite and never touches a real workspace.
+4. ``npm test`` in ``electron/`` runs the main-process guard tests (``just electron-test``).
+
+``just ci`` runs the same four steps locally. Keep signing or upload credentials in the
+packaging workflow only; the quality workflow must stay read-only.
 
 Alternatives
 ------------

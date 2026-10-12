@@ -107,3 +107,15 @@ PYTHON=$(command -v python3.14 || command -v python3) npm start
 ```
 
 `npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
+
+Workspace commands use the configured argv allowlist, read-only option allowlists, and Django's
+supported argument parser. Module-loading overrides (settings, pythonpath, and
+diffsettings default) are refused. Custom non-management entries require exact argv matches.
+Dumpdata filters and check options remain available; presets cannot use ``--output``
+or ``-o`` to write dumps to disk. Output callback failures terminate and reap the
+command and record a failed task with the original diagnostic.
+
+Commands own a POSIX session; timeout and callback cleanup kill its process group.
+On Windows DJDesk creates a new process group and uses `taskkill /T /F` to stop
+its tree. Cleanup reaps the direct process and closes the output reader. The
+Django CI suite exercises actual process fixtures on Linux, macOS, and Windows.

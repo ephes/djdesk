@@ -88,6 +88,30 @@ def execute_workspace_task(task_run_id: int) -> dict[str, Any]:
         return _fail_run(run, str(exc))
     except CommandExecutionError as exc:
         return _fail_run(run, str(exc), safe_prefix=safe_prefix)
+    except Exception as exc:
+        message = f"{type(exc).__name__}: {exc}"
+        try:
+            return _fail_run(run, message, safe_prefix=safe_prefix)
+        except Exception:
+            # Bypass a broken callback/buffer; preserve buffered output and the error.
+            from django.utils import timezone
+
+            payload = {
+                "raw": command,
+                "workspace_path": run.workspace.project_path,
+                "safe_prefix": safe_prefix,
+                "error": message,
+            }
+            metadata = {**(run.metadata or {}), "command": payload}
+            log = "\n".join([run.log, *getattr(run, "_log_buffer", []), message])
+            WorkspaceTaskRun.objects.filter(pk=run.pk).update(
+                status=WorkspaceTaskRun.Status.FAILED,
+                progress=100,
+                completed_at=timezone.now(),
+                metadata=metadata,
+                log=log,
+            )
+            return payload
 
     run.progress = 95
     run.save(update_fields=["progress"])

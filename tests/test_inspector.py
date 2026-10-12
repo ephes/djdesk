@@ -236,9 +236,7 @@ class InspectorAPIViewTests(TestCase):
         )
 
     def test_workspace_status_payload(self) -> None:
-        response = Client().get(
-            reverse("inspector:workspace-status", args=[self.workspace.slug])
-        )
+        response = Client().get(reverse("inspector:workspace-status", args=[self.workspace.slug]))
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["workspace"], self.workspace.slug)
@@ -407,6 +405,7 @@ class OfflineDocsViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "font/woff2")
 
+
 class TaskExecutionIntegrationTests(TestCase):
     def setUp(self) -> None:
         self.project_root = Path(__file__).resolve().parents[1]
@@ -492,9 +491,7 @@ class TaskExecutionIntegrationTests(TestCase):
         "djdesk.inspector.tasks.run_command",
         side_effect=CommandExecutionError("boom"),
     )
-    def test_handles_command_execution_errors(
-        self, mock_run_command: mock.MagicMock
-    ) -> None:
+    def test_handles_command_execution_errors(self, mock_run_command: mock.MagicMock) -> None:
         run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
 
         execute_workspace_task.call(run.pk)
@@ -502,3 +499,22 @@ class TaskExecutionIntegrationTests(TestCase):
 
         self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
         self.assertIn("boom", run.log)
+
+    def test_unexpected_callback_failure_marks_failed(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        with (
+            mock.patch.object(
+                WorkspaceTaskRun,
+                "append_log",
+                autospec=True,
+                side_effect=[None, RuntimeError("sink failed"), None],
+            ),
+            mock.patch(
+                "djdesk.inspector.tasks.run_command",
+                side_effect=lambda **kwargs: kwargs["log_callback"]("collected"),
+            ),
+        ):
+            execute_workspace_task.call(run.pk)
+        run.refresh_from_db()
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertIn("sink failed", run.metadata["command"]["error"])

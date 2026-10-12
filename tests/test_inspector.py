@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
 from django import forms
 from django.core.exceptions import ValidationError
-from django.test import Client, RequestFactory, TestCase, override_settings
+from django.db import close_old_connections, connections
+from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
+from djdesk.inspector import data_lab
 from djdesk.inspector import forms as inspector_forms
 from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm, WorkspaceWizardForm
@@ -236,9 +241,7 @@ class InspectorAPIViewTests(TestCase):
         )
 
     def test_workspace_status_payload(self) -> None:
-        response = Client().get(
-            reverse("inspector:workspace-status", args=[self.workspace.slug])
-        )
+        response = Client().get(reverse("inspector:workspace-status", args=[self.workspace.slug]))
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertEqual(data["workspace"], self.workspace.slug)
@@ -351,6 +354,45 @@ class DataLabAPITests(TestCase):
         self.assertTrue(notebooks)
         self.assertEqual(notebooks[0]["slug"], "schema-audit")
 
+    def test_reexport_preserves_edits_and_existing_suffix(self):
+        first = data_lab.export_notebook(self.workspace, "schema-audit")
+        first.write_text('{"cells": [], "metadata": {"edited": true}}')
+        original = first.read_bytes()
+        existing = first.with_name("schema-audit-2.ipynb")
+        existing.write_text('{"cells": [], "metadata": {}}')
+        existing_bytes = existing.read_bytes()
+        response = self.client.post(
+            reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+            data={"template": "schema-audit"},
+        )
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(first.read_bytes(), original)
+        self.assertEqual(existing.read_bytes(), existing_bytes)
+        payload = response.json()["data_lab"]
+        self.assertEqual(payload["selected_notebook"], "schema-audit-3")
+        self.assertEqual(len(payload["notebooks"]), 3)
+        fresh = next(nb for nb in payload["notebooks"] if nb["slug"] == "schema-audit-3")
+        self.assertContains(self.client.get(fresh["viewer_url"]), "Schema audit starter")
+        self.assertNotEqual(
+            first.read_bytes(), first.with_name("schema-audit-3.ipynb").read_bytes()
+        )
+
+    def test_edited_notebook_metadata_does_not_break_viewer(self):
+        path = data_lab.export_notebook(self.workspace, "schema-audit")
+        suffixed = path.with_name("schema-audit-2.ipynb")
+        for metadata in (None, [], "edited", {"djdesk_template": []}):
+            with self.subTest(metadata=metadata):
+                suffixed.write_text(json.dumps({"cells": [], "metadata": metadata}))
+                response = self.client.get(
+                    reverse(
+                        "inspector:data-lab-notebook", args=[self.workspace.slug, "schema-audit-2"]
+                    )
+                )
+                self.assertContains(response, "Schema audit starter")
+                listing = data_lab.list_workspace_exports(self.workspace)
+                entry = next(nb for nb in listing if nb["slug"] == "schema-audit-2")
+                self.assertEqual(response.context["notebook_title"], entry["title"])
+
     def test_notebook_view_renders(self) -> None:
         self.client.post(
             reverse("inspector:data-lab-export", args=[self.workspace.slug]),
@@ -406,6 +448,7 @@ class OfflineDocsViewTests(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Content-Type"], "font/woff2")
+
 
 class TaskExecutionIntegrationTests(TestCase):
     def setUp(self) -> None:
@@ -492,9 +535,7 @@ class TaskExecutionIntegrationTests(TestCase):
         "djdesk.inspector.tasks.run_command",
         side_effect=CommandExecutionError("boom"),
     )
-    def test_handles_command_execution_errors(
-        self, mock_run_command: mock.MagicMock
-    ) -> None:
+    def test_handles_command_execution_errors(self, mock_run_command: mock.MagicMock) -> None:
         run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
 
         execute_workspace_task.call(run.pk)
@@ -502,3 +543,56 @@ class TaskExecutionIntegrationTests(TestCase):
 
         self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
         self.assertIn("boom", run.log)
+
+    def test_duplicate_deliveries_execute_once(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        result = CommandResult(
+            exit_code=0, duration=0.1, output_lines=0, safe_prefix=self.preset.command
+        )
+        with mock.patch("djdesk.inspector.tasks.run_command", return_value=result) as command:
+            first = execute_workspace_task.call(run.pk)
+            run.refresh_from_db()
+            snapshot = (run.started_at, run.completed_at, run.log, run.metadata)
+            second = execute_workspace_task.call(run.pk)
+        self.assertEqual(first, second)
+        self.assertEqual(command.call_count, 1)
+        run.refresh_from_db()
+        self.assertEqual(snapshot, (run.started_at, run.completed_at, run.log, run.metadata))
+
+    def test_already_running_delivery_is_noop(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run.mark_running()
+        snapshot = run.started_at
+        with mock.patch("djdesk.inspector.tasks.run_command") as command:
+            payload = execute_workspace_task.call(run.pk)
+        command.assert_not_called()
+        self.assertTrue(payload["skipped"])
+        run.refresh_from_db()
+        self.assertEqual(run.started_at, snapshot)
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.RUNNING)
+
+
+class ConcurrentClaimTests(TransactionTestCase):
+    def test_separate_connections_claim_once(self):
+        workspace = Workspace.objects.create(name="Claim", project_path="/tmp/claim")
+        preset = TaskPreset.objects.create(
+            key="concurrent-check",
+            label="Check",
+            description="Concurrent claim",
+            command="python manage.py check",
+        )
+        run = WorkspaceTaskRun.objects.create(workspace=workspace, preset=preset)
+        barrier = threading.Barrier(2)
+
+        def claim():
+            close_old_connections()
+            try:
+                instance = WorkspaceTaskRun.objects.get(pk=run.pk)
+                barrier.wait(timeout=5)
+                return instance.mark_running()
+            finally:
+                connections["default"].close()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            outcomes = list(executor.map(lambda _: claim(), range(2)))
+        self.assertEqual(sorted(outcomes), [False, True])

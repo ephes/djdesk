@@ -107,3 +107,13 @@ PYTHON=$(command -v python3.14 || command -v python3) npm start
 ```
 
 `npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
+
+Queued workspace tasks atomically claim only `REQUESTED` runs. Duplicate delivery
+returns the persisted command outcome, or `{skipped: true, status: ...}` while a
+run is in progress or has no outcome. It never resets logs or timestamps and
+holds no database transaction open while executing a command.
+
+Data Lab exports exclusively claim a fresh filename on every export: the template
+name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
+manual edits are preserved. The export API returns `data_lab.selected_notebook`
+with the actual filename stem, and the viewer opens that newly created export.

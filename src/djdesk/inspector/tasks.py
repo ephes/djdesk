@@ -64,13 +64,15 @@ def execute_workspace_task(task_run_id: int) -> dict[str, Any]:
     """Execute a SAFE Django management command for the selected workspace."""
 
     run = WorkspaceTaskRun.objects.select_related("workspace", "preset").get(pk=task_run_id)
+    if not run.mark_running():
+        run.refresh_from_db()
+        return (run.metadata or {}).get("command") or {"skipped": True, "status": run.status}
     command = (run.preset.command or "").strip()
     try:
         safe_prefix = validate_safe_command(command)
     except CommandExecutionError as exc:
         return _fail_run(run, str(exc))
 
-    run.mark_running()
     run.progress = 5
     run.save(update_fields=["progress"])
     run.append_log(f"Executing `{command}` inside {run.workspace.project_path}")

@@ -4,6 +4,13 @@ Documentation Changelog
 Unreleased
 ----------
 
+Fixed
+~~~~~
+
+- Preserve edited Data Lab notebooks with exclusive numeric-suffix exports and select the new file.
+
+- Atomically claim requested task runs, preserving outcomes on duplicate delivery.
+
 Added
 ~~~~~
 

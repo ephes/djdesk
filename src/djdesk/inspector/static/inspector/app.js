@@ -641,6 +641,10 @@ class InspectorUI {
       }
       return;
     }
+    const selected = data.notebooks.find((nb) => nb.slug === data.selected_notebook);
+    if (selected) {
+      this.openNotebook(selected.viewer_url, selected.slug);
+    }
     this.renderDataLabList(data.notebooks || []);
     const existing = data.notebooks.find((nb) => nb.slug === this.activeNotebookSlug);
     if (existing) {

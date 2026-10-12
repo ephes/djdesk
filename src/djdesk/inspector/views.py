@@ -48,9 +48,7 @@ class DashboardView(TemplateView):
         status_url = ""
         if workspace and workspace.slug:
             status_meta = workspace.metadata.get("status", {})
-            status_url = reverse(
-                "inspector:workspace-status", kwargs={"slug": workspace.slug}
-            )
+            status_url = reverse("inspector:workspace-status", kwargs={"slug": workspace.slug})
 
         docs_source = self._docs_source()
 
@@ -210,11 +208,12 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
         return JsonResponse({"errors": {"template": ["Template is required."]}}, status=400)
 
     try:
-        data_lab.export_notebook(workspace, template_slug)
+        path = data_lab.export_notebook(workspace, template_slug)
     except ValueError as exc:
         return JsonResponse({"errors": {"template": [str(exc)]}}, status=400)
 
     payload = workspace_status_payload(workspace)
+    payload["data_lab"]["selected_notebook"] = path.stem
     return JsonResponse(payload, status=201)
 
 
@@ -232,7 +231,7 @@ class DataLabNotebookView(TemplateView):
         except FileNotFoundError as exc:  # pragma: no cover - safety net
             raise Http404("Notebook not found.") from exc
 
-        template = data_lab.DATA_LAB_TEMPLATE_MAP.get(notebook_slug, {})
+        template = data_lab.export_template(notebook_slug)
         context.update(
             {
                 "workspace": workspace,

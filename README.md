@@ -134,6 +134,15 @@ running. Known limitation: the Windows code path is not exercised by the automat
 (they run on Linux and macOS), so process-tree cleanup there is unverified. A run whose execution fails unexpectedly (for instance while saving its log) is
 recorded as failed with the original error, and that error is passed on to the task backend.
 
+Command output is bounded by bytes, not lines. DJDesk reads at most
+`DJDESK_INSPECTOR_COMMAND_OUTPUT_BYTES` (default 1 MiB) from one command, whether that is
+many lines or one enormous line; a command that produces more is stopped like a timed-out
+one. The log kept for a task run, including timestamps and status lines, is limited to
+`DJDESK_INSPECTOR_TASK_LOG_BYTES` (default 1 MiB): the line that would exceed it is cut, a
+truncation marker is stored, and the command is stopped. In both cases the run is recorded
+as failed and its `command` metadata carries `output_limited: true`. Commands whose normal
+output fits the budgets behave as before.
+
 Data Lab exports exclusively claim a fresh filename on every export: the template
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
 manual edits are preserved. The export API returns `data_lab.selected_notebook`

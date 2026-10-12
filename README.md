@@ -130,7 +130,8 @@ its log callback fails, DJDesk sends `SIGTERM` to the whole group, follows up wi
 processes the command started do not outlive it. A command whose descendants keep its
 output open is treated as still running until the timeout. On Windows the tree is stopped
 with `taskkill /T /F`, which only finds descendants while the direct child is still
-running. A run whose execution fails unexpectedly (for instance while saving its log) is
+running. Known limitation: the Windows code path is not exercised by the automated tests
+(they run on Linux and macOS), so process-tree cleanup there is unverified. A run whose execution fails unexpectedly (for instance while saving its log) is
 recorded as failed with the original error, and that error is passed on to the task backend.
 
 Command output is bounded by bytes, not lines. DJDesk reads at most

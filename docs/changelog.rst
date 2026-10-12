@@ -20,6 +20,9 @@ Fixed
   (``DJDESK_INSPECTOR_COMMAND_OUTPUT_BYTES``, ``DJDESK_INSPECTOR_TASK_LOG_BYTES``, 1 MiB each).
   A command that floods output, including as one huge line, is stopped and its run fails with
   ``output_limited`` instead of growing memory and the stored log without limit.
+- Known limitation: process-group cleanup and output reading for workspace commands are only
+  tested on Linux and macOS. The Windows path (``taskkill /T /F``) is untested and only reaches
+  descendants while the direct child is still running.
 
 Added
 ~~~~~

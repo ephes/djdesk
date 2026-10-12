@@ -16,6 +16,9 @@ Fixed
 - Always stop and reap a workspace command and close its output pipe, including when logging its
   output fails; such runs are now recorded as failed with the original error instead of staying
   ``RUNNING``.
+- Known limitation: process-group cleanup and output reading for workspace commands are only
+  tested on Linux and macOS. The Windows path (``taskkill /T /F``) is untested and only reaches
+  descendants while the direct child is still running.
 
 Added
 ~~~~~

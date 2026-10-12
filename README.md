@@ -49,6 +49,7 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 - `just docs-bundle` – build docs and copy the HTML bundle into `var/docs_bundle` for offline use.
 - `just docs-serve` – live-reload the docs while editing reST/Markdown files.
 - `just electron-install` / `just electron-start` – install Electron deps and launch the local shell.
+- `just electron-test` – run the Electron main-process boundary-guard tests with `node --test` (no `npm install` required).
 - `just electron-bundle` / `just electron-build-*` – create the python-build-standalone bundle and packaged binaries for each OS.
 - `just electron-runs` – list recent GitHub Actions builds; `just electron-workflow-run` triggers the matrix build.
 - `just electron-download-latest` / `just electron-download-macos` / `just electron-download-windows` / `just electron-download-linux` / `just electron-download RUN_ID=<id>` – download workflow artifacts (all platforms or per platform); `just electron-clean-artifacts` removes the downloaded zips.

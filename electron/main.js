@@ -3,6 +3,12 @@ const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
+const {
+  buildTrustedOrigin,
+  createOpenExternalHandler,
+  installNavigationGuards,
+  isTrustedSender,
+} = require('./boundary-guards');
 
 const resourceBase = app.isPackaged ? process.resourcesPath : __dirname;
 const DJANGO_BUNDLE_DIR = path.join(resourceBase, 'django-bundle');
@@ -18,33 +24,24 @@ const IPC_CHANNELS = {
   NOTIFY: 'djdesk:notify',
 };
 
+function getTrustedOrigin() {
+  return buildTrustedOrigin(djangoPort);
+}
+
 function registerIpcHandlers() {
-  ipcMain.handle(IPC_CHANNELS.OPEN_EXTERNAL, async (_event, url) => {
-    if (!url || typeof url !== 'string') {
+  ipcMain.handle(
+    IPC_CHANNELS.OPEN_EXTERNAL,
+    createOpenExternalHandler({ shell, getTrustedOrigin })
+  );
+
+  ipcMain.handle(IPC_CHANNELS.NOTIFY, (event, rawOptions) => {
+    if (!isTrustedSender(event, getTrustedOrigin())) {
+      console.warn('Blocked notification request from untrusted frame');
       return false;
     }
-
-    let parsed;
-    try {
-      parsed = new URL(url);
-    } catch (error) {
-      console.warn('Invalid URL format:', url, error.message);
-      return false;
-    }
-
-    try {
-      await shell.openExternal(parsed.toString());
-      return true;
-    } catch (error) {
-      console.warn('Failed to open external URL', error);
-      return false;
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.NOTIFY, (_event, rawOptions) => {
     const options = rawOptions || {};
-    const title = options.title || 'DJDesk';
-    const body = options.body || '';
+    const title = typeof options.title === 'string' && options.title ? options.title : 'DJDesk';
+    const body = typeof options.body === 'string' ? options.body : '';
     if (typeof Notification.isSupported === 'function' && !Notification.isSupported()) {
       return false;
     }
@@ -262,7 +259,10 @@ function createWindow() {
     title: 'DJDesk'
   });
 
-  mainWindow.loadURL(`http://127.0.0.1:${djangoPort}/`);
+  // Keep the privileged window on the local Django origin (see boundary-guards.js).
+  installNavigationGuards(mainWindow.webContents, { shell, getTrustedOrigin });
+
+  mainWindow.loadURL(`${getTrustedOrigin()}/`);
 
   // Open DevTools in development
   if (process.env.NODE_ENV === 'development') {

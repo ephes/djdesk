@@ -127,7 +127,7 @@ Electron unlocks workflows that browsers restrict. DJDesk layers three native to
 
 * **Drag & drop wizard priming** – ``.workspace-dropzone`` captures ``File.path`` when running inside Electron. The preload script fires a ``djdesk:workspace-drop`` custom event, normalizes the path, and stores it under ``djdesk.wizard.projectPath`` so the wizard can auto-fill ``project_path``. Browsers fall back to showing the filename and asking users to paste the path manually.
 * **System notifications** – ``app.js`` watches polling responses and calls ``window.djdeskNative.notify`` when tasks finish. Electron routes the request through ``Notification`` in the main process; browsers fall back to the standard Web Notifications API.
-* **Doc drawer deep links** – ``data-doc-link`` anchors now also call ``window.djdeskNative.openExternal`` so every click mirrors the same Read the Docs page in the user's default browser while the in-app drawer stays in sync.
+* **Doc drawer deep links** – ``data-doc-link`` anchors now also call ``window.djdeskNative.openExternal`` so every click mirrors the same Read the Docs page in the user's default browser while the in-app drawer stays in sync. The main process only dispatches ``http(s)`` URLs requested by the top-level DJDesk page; see the *Shell boundary* section of :doc:`../architecture`.
 * **Offline indicator** – ``data-offline-indicator`` listens to ``navigator.onLine`` to display “Offline-ready” vs “Synced”. Because docs, SQLite, and static assets ship with the build, the inspector keeps working without a network connection.
 
 Apply this to your project

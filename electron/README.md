@@ -51,6 +51,15 @@ cd electron && npm run bundle
 
 The bundle is ignored by Git and may be regenerated at any time.
 
+## Shell Boundary and Tests
+
+`boundary-guards.js` keeps the window on the local Django origin, denies popups and `<webview>` tags, validates IPC sender frames, and limits `shell.openExternal` to `http(s)` URLs. See "Shell boundary" in `docs/architecture.rst`.
+
+```bash
+cd electron
+npm test   # node --test test/ — no Electron launch or npm install needed
+```
+
 ## Running the App
 
 ```bash

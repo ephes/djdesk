@@ -5,6 +5,7 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "test": "node --test test/",
     "bundle": "node build-django.js",
     "build": "npm run bundle && electron-builder"
   },

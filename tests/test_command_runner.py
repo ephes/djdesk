@@ -693,18 +693,95 @@ class TaskOutputBudgetTests(ProcessFixtureCase, TestCase):
         self.assert_fully_cleaned_up()
 
     def test_exit_zero_with_a_truncated_log_is_not_a_success(self) -> None:
-        self.write_manage("print('ok')\n")
+        self.write_manage("print('ok' + '.' * 100)\n")
         used = len(f"[00:00:00] Executing `{self.command}` inside {self.workspace}".encode())
-        marker = len(WorkspaceTaskRun.LOG_TRUNCATION_MARKER.encode())
         # Room for the command's one line but not for the closing status line.
-        budget = used + 1 + len("[00:00:00] ok") + marker + 1
+        budget = used + 1 + len("[00:00:00] ok") + 100
         with override_settings(INSPECTOR_TASK_LOG_BYTES=budget):
             payload = self.execute()
         self.assertEqual(payload["exit_code"], 0)
         self.assertTrue(payload["output_limited"])
         self.assertEqual(self.run_record.status, WorkspaceTaskRun.Status.FAILED)
         self.assertIn("] ok", self.run_record.log)
+        self.assertLessEqual(len(self.run_record.log.encode()), budget)
         self.assertTrue(self.run_record.log.endswith(WorkspaceTaskRun.LOG_TRUNCATION_MARKER))
+
+    def test_complete_log_that_fits_the_budget_exactly_succeeds(self) -> None:
+        self.write_manage("print('ok')\n")
+        used = len(f"[00:00:00] Executing `{self.command}` inside {self.workspace}".encode())
+        closing = len("[00:00:00] Command finished with exit code 0.")
+        budget = used + 1 + len("[00:00:00] ok") + 1 + closing
+        with override_settings(INSPECTOR_TASK_LOG_BYTES=budget):
+            payload = self.execute()
+        self.assertFalse(payload["output_limited"])
+        self.assertEqual(self.run_record.status, WorkspaceTaskRun.Status.SUCCEEDED)
+        self.assertEqual(len(self.run_record.log.encode()), budget)
+        self.assertNotIn(WorkspaceTaskRun.LOG_TRUNCATION_MARKER, self.run_record.log)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=100)
+    def test_command_is_not_started_when_the_first_log_entry_is_truncated(self) -> None:
+        self.write_manage("record(os.getpid())\ntime.sleep(120)\n")
+        self.assertGreater(len(f"Executing `{self.command}` inside {self.workspace}"), 100)
+        started = time.monotonic()
+        with override_settings(INSPECTOR_TASK_TIMEOUT=5):
+            payload = self.execute()
+        self.assertLess(time.monotonic() - started, 4)
+        self.assertEqual(self.spawned, [])
+        self.assertEqual(self._recorded_pids(), [])
+        self.assertEqual(self.run_record.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertTrue(payload["output_limited"])
+        self.assertIn("Command not started", payload["error"])
+        self.assertNotIn("exit_code", payload)
+        self.assertLessEqual(len(self.run_record.log.encode()), 100)
+
+    def _fail_logging_with(self, error: BaseException):
+        real_append = WorkspaceTaskRun.append_log
+
+        def sink(instance, message):
+            if message == "ready":
+                raise error
+            return real_append(instance, message)
+
+        return mock.patch.object(WorkspaceTaskRun, "append_log", autospec=True, side_effect=sink)
+
+    def _write_nearly_full_log_fixture(self, budget: int) -> None:
+        """Print one line that leaves 20 bytes of the log budget, then ``ready``."""
+        used = len(f"[00:00:00] Executing `{self.command}` inside {self.workspace}".encode())
+        filler = budget - 20 - used - 1 - len("[00:00:00] ")
+        self.assertGreater(filler, 0)
+        self.write_manage(
+            f"print('p' * {filler}, flush=True)\nprint('ready', flush=True)\ntime.sleep(120)\n"
+        )
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=1024)
+    def test_unexpected_failure_log_stays_within_the_log_budget(self) -> None:
+        self._write_nearly_full_log_fixture(1024)
+        with (
+            self._fail_logging_with(RuntimeError("e" * 5000)),
+            self.assertRaises(RuntimeError),
+        ):
+            self.execute()
+        self.run_record.refresh_from_db()
+        self.assertEqual(self.run_record.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertLessEqual(len(self.run_record.log.encode()), 1024)
+        self.assertIn("failed unexpectedly: RuntimeError: eee", self.run_record.log)
+        self.assertTrue(self.run_record.log.endswith(WorkspaceTaskRun.LOG_TRUNCATION_MARKER))
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=1024)
+    def test_unexpected_failure_keeps_the_error_and_truncates_earlier_output(self) -> None:
+        self._write_nearly_full_log_fixture(1024)
+        with (
+            self._fail_logging_with(RuntimeError("sink failed")),
+            self.assertRaisesMessage(RuntimeError, "sink failed"),
+        ):
+            self.execute()
+        self.run_record.refresh_from_db()
+        self.assertEqual(self.run_record.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertLessEqual(len(self.run_record.log.encode()), 1024)
+        self.assertGreater(len(self.run_record.log.encode()), 1024 - 8)
+        self.assertTrue(self.run_record.log.endswith("RuntimeError: sink failed"))
+        self.assertIn(WorkspaceTaskRun.LOG_TRUNCATION_MARKER, self.run_record.log)
+        self.assertIn("Executing", self.run_record.log)
 
     def test_unexpected_error_text_is_bounded(self) -> None:
         self.write_manage("print('ready', flush=True)\ntime.sleep(120)\n")

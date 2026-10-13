@@ -98,5 +98,5 @@ building future CLI tooling:
 
 If a command fails (non-zero exit code, timeout, or workspace validation error) the response keeps
 the same structure but the ``command`` payload adds an ``error`` string summarizing the root cause.
-``output_limited`` is ``true`` when the command was stopped because its output or the retained log
-exceeded the byte budget; such runs always have the status ``failed``.
+``output_limited`` is ``true`` when the command was stopped, or not started at all, because its
+output or the retained log exceeded the byte budget; such runs always have the status ``failed``.

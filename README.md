@@ -138,10 +138,14 @@ Command output is bounded by bytes, not lines. DJDesk reads at most
 `DJDESK_INSPECTOR_COMMAND_OUTPUT_BYTES` (default 1 MiB) from one command, whether that is
 many lines or one enormous line; a command that produces more is stopped like a timed-out
 one. The log kept for a task run, including timestamps and status lines, is limited to
-`DJDESK_INSPECTOR_TASK_LOG_BYTES` (default 1 MiB): the line that would exceed it is cut, a
-truncation marker is stored, and the command is stopped. In both cases the run is recorded
-as failed and its `command` metadata carries `output_limited: true`. Commands whose normal
-output fits the budgets behave as before.
+`DJDESK_INSPECTOR_TASK_LOG_BYTES` (default 1 MiB): a log that fits is kept whole, and only
+the line that would exceed the limit truncates it, with the end of the log cut just far
+enough to hold a truncation marker; the command is then stopped. If the budget cannot even
+hold the first log entry, the command is not started. The log of a run that fails
+unexpectedly obeys the same limit, giving up earlier output before the error line. In all
+these cases the run is recorded as failed and its `command` metadata carries
+`output_limited: true`, except for unexpected failures, which record the error instead.
+Commands whose normal output fits the budgets behave as before.
 
 Data Lab exports exclusively claim a fresh filename on every export: the template
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and

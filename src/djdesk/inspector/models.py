@@ -261,17 +261,38 @@ class WorkspaceTaskRun(models.Model):
         """Whether the retained log hit ``INSPECTOR_TASK_LOG_BYTES`` and dropped output."""
         return getattr(self, "_log_truncated", False)
 
+    @classmethod
+    def clamp_log(cls, text: str, limit: int) -> str:
+        """
+        Return ``text`` unchanged when it fits ``limit`` bytes, else its head plus the marker.
+
+        The result never exceeds ``limit`` bytes; the head is cut on a character boundary and
+        only as far as needed for the marker line to fit.
+        """
+        raw = text.encode("utf-8", errors="replace")
+        if len(raw) <= limit:
+            return text
+        limit = max(limit, 0)
+        marker = cls.LOG_TRUNCATION_MARKER
+        keep = max(limit - len(marker.encode("utf-8")) - 1, 0)
+        head = raw[:keep].decode("utf-8", errors="ignore").rstrip("\n")
+        clamped = f"{head}\n{marker}" if head else marker
+        # A budget smaller than the marker itself still holds.
+        return clamped.encode("utf-8")[:limit].decode("utf-8", errors="ignore")
+
     def append_log(self, message: str) -> None:
         """
         Buffer one timestamped line, keeping the whole log within ``INSPECTOR_TASK_LOG_BYTES``.
 
-        The line that would exceed the budget is cut, the truncation marker is stored in its
-        place and every later line is dropped; callers check ``log_truncated``.
+        A line is stored whole whenever the complete log still fits the budget. Only the line
+        that really exceeds it truncates the log: the tail is cut just far enough to end with
+        the truncation marker and every later line is dropped; callers check ``log_truncated``.
         """
         if self.log_truncated:
             return
         stamp = timezone.now().strftime("%H:%M:%S")
-        new_line = f"[{stamp}] {message}".encode("utf-8", errors="replace")
+        new_line = f"[{stamp}] {message}".encode("utf-8", errors="replace").decode("utf-8")
+        size = len(new_line.encode("utf-8"))
         buffer = getattr(self, "_log_buffer", None)
         if buffer is None:
             buffer = []
@@ -279,20 +300,19 @@ class WorkspaceTaskRun(models.Model):
         used = getattr(self, "_log_bytes", None)
         if used is None:
             used = len("\n".join(part for part in [self.log, *buffer] if part).encode("utf-8"))
-        marker = self.LOG_TRUNCATION_MARKER.encode("utf-8")
-        # Each stored line costs its bytes plus the newline joining it to the text before it,
-        # and room for the marker line is always held back.
-        room = settings.INSPECTOR_TASK_LOG_BYTES - used - (1 if used else 0) - len(marker) - 1
-        if len(new_line) > room:
-            kept = new_line[: max(room, 0)].decode("utf-8", errors="ignore")
-            if kept:
-                buffer.append(kept)
-            buffer.append(self.LOG_TRUNCATION_MARKER)
+        limit = settings.INSPECTOR_TASK_LOG_BYTES
+        # Each stored line costs its bytes plus the newline joining it to the text before it.
+        if size > limit - used - (1 if used else 0):
+            # Mark first so a failing save cannot lead to further appends.
             self._log_truncated = True
-            self.flush_log_buffer()
+            complete = "\n".join(part for part in [self.log, *buffer, new_line] if part)
+            self._log_buffer = []
+            self.log = self.clamp_log(complete, limit)
+            self._log_bytes = len(self.log.encode("utf-8"))
+            self.save(update_fields=["log"])
             return
-        buffer.append(new_line.decode("utf-8"))
-        self._log_bytes = used + (1 if used else 0) + len(new_line)
+        buffer.append(new_line)
+        self._log_bytes = used + (1 if used else 0) + size
         if len(buffer) >= self.LOG_BATCH_SIZE:
             self.flush_log_buffer()
 

@@ -66,6 +66,29 @@ def _success_payload(run: WorkspaceTaskRun, result: CommandResult) -> dict[str, 
     return _store_command_metadata(run, payload)
 
 
+def _fallback_log(run: WorkspaceTaskRun, message: str) -> str:
+    """
+    Return the run's stored and buffered log plus ``message``, within the retained log budget.
+
+    When everything does not fit, earlier output is truncated first so the failure line stays
+    readable; the result never exceeds ``INSPECTOR_TASK_LOG_BYTES``.
+    """
+    limit = settings.INSPECTOR_TASK_LOG_BYTES
+    stamp = timezone.now().strftime("%H:%M:%S")
+    final = f"[{stamp}] {message}".encode("utf-8", errors="replace").decode("utf-8")
+    buffered = getattr(run, "_log_buffer", None) or []
+    earlier = "\n".join(part for part in [run.log, *buffered] if part)
+    complete = f"{earlier}\n{final}" if earlier else final
+    if len(complete.encode("utf-8", errors="replace")) <= limit:
+        return complete
+    marker_bytes = len(WorkspaceTaskRun.LOG_TRUNCATION_MARKER.encode("utf-8"))
+    room = limit - len(final.encode("utf-8")) - 1
+    if room < marker_bytes:
+        # Not even the marker fits in front of the failure line: cut the failure line itself.
+        return WorkspaceTaskRun.clamp_log(final, limit)
+    return f"{WorkspaceTaskRun.clamp_log(earlier, room)}\n{final}"
+
+
 def _record_unexpected_failure(run: WorkspaceTaskRun, error: BaseException | None) -> None:
     """
     Mark ``run`` failed after an error nothing else handled, without raising.
@@ -77,9 +100,7 @@ def _record_unexpected_failure(run: WorkspaceTaskRun, error: BaseException | Non
     detail = f"{type(error).__name__}: {error}"[:_UNEXPECTED_ERROR_CHARS]
     message = f"Command execution failed unexpectedly: {detail}"
     try:
-        stamp = timezone.now().strftime("%H:%M:%S")
-        buffered = getattr(run, "_log_buffer", None) or []
-        log = "\n".join(part for part in [run.log, *buffered, f"[{stamp}] {message}"] if part)
+        log = _fallback_log(run, message)
         command = {
             "raw": run.preset.command,
             "workspace_path": run.workspace.project_path,
@@ -127,6 +148,14 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
     run.save(update_fields=["progress"])
     run.append_log(f"Executing `{command}` inside {run.workspace.project_path}")
     run.flush_log_buffer()
+    if run.log_truncated:
+        # Output could not be recorded at all, and a silent command would never be stopped
+        # by the output callback, so the command is not started.
+        return _fail_run(
+            run,
+            "Output truncated: retained log byte budget exhausted. Command not started.",
+            safe_prefix=safe_prefix,
+        )
 
     def log_output(line: str) -> None:
         run.append_log(line)

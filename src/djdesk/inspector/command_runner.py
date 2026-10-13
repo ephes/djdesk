@@ -33,6 +33,7 @@ class CommandResult:
     output_lines: int
     safe_prefix: str
     timed_out: bool = False
+    output_limited: bool = False
 
 
 def _pattern(expression: str) -> re.Pattern[str]:
@@ -218,14 +219,14 @@ if os.name == "nt":  # pragma: no cover - exercised only on Windows
     def _prepare_stream(stream) -> None:
         pass
 
-    def _read_available(stream) -> bytes | None:
+    def _read_available(stream, size: int = _READ_SIZE) -> bytes | None:
         try:
             available = _winapi.PeekNamedPipe(msvcrt.get_osfhandle(stream.fileno()), 0)[0]
         except BrokenPipeError:
             return b""
         if not available:
             return None
-        return os.read(stream.fileno(), min(available, _READ_SIZE))
+        return os.read(stream.fileno(), min(available, size, _READ_SIZE))
 
     def _leader_exited(process: subprocess.Popen) -> bool:
         # The open process handle keeps the pid reserved after the exit status is read.
@@ -249,10 +250,10 @@ else:
     def _prepare_stream(stream) -> None:
         os.set_blocking(stream.fileno(), False)
 
-    def _read_available(stream) -> bytes | None:
+    def _read_available(stream, size: int = _READ_SIZE) -> bytes | None:
         """Return pending output, ``b""`` at end of stream, or ``None`` when nothing is ready."""
         try:
-            return os.read(stream.fileno(), _READ_SIZE)
+            return os.read(stream.fileno(), min(size, _READ_SIZE))
         except BlockingIOError:
             return None
 
@@ -318,12 +319,19 @@ def run_command(
     Execute ``command`` inside ``workspace_path`` streaming output to ``log_callback``.
 
     The command runs in its own process group. However this function exits (completion,
-    timeout, or an exception from ``log_callback``) the whole group is stopped, the output
-    pipe is closed and the child is reaped before control returns to the caller.
+    timeout, output budget, or an exception from ``log_callback``) the whole group is
+    stopped, the output pipe is closed and the child is reaped before control returns.
+
+    At most ``INSPECTOR_COMMAND_OUTPUT_BYTES`` bytes of output are read, however they are
+    split into lines; a command that produces more is stopped and reported as
+    ``output_limited``. Nothing is queued, so the bytes held here never exceed that budget.
     """
     argv = split_command(command)
     safe_prefix = validate_argv(argv)
     workdir = _resolve_workspace_path(workspace_path)
+    budget = settings.INSPECTOR_COMMAND_OUTPUT_BYTES
+    if budget <= 0:
+        raise CommandExecutionError("INSPECTOR_COMMAND_OUTPUT_BYTES must be positive.")
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
 
@@ -348,6 +356,8 @@ def run_command(
     pending = ""
     output_lines = 0
     timed_out = False
+    output_limited = False
+    received = 0
     try:
         _prepare_stream(process.stdout)
         end_of_output = False
@@ -355,11 +365,15 @@ def run_command(
             if time.monotonic() >= deadline:
                 timed_out = True
                 break
-            chunk = _read_available(process.stdout)
+            # Ask for one byte more than the budget has left to tell "full" from "exceeded".
+            chunk = _read_available(process.stdout, budget - received + 1)
             if chunk is None:
                 time.sleep(_POLL_INTERVAL)
                 continue
-            end_of_output = chunk == b""
+            output_limited = len(chunk) > budget - received
+            end_of_output = chunk == b"" or output_limited
+            chunk = chunk[: budget - received]
+            received += len(chunk)
             pending += decoder.decode(chunk, final=end_of_output)
             *lines, pending = pending.split("\n")
             for line in lines:
@@ -369,13 +383,17 @@ def run_command(
             log_callback(pending.rstrip("\r"))
             output_lines += 1
         # A command may close its output and keep running; the deadline still applies.
-        while not timed_out and not _leader_exited(process):
+        while not (timed_out or output_limited or _leader_exited(process)):
             if time.monotonic() >= deadline:
                 timed_out = True
             else:
                 time.sleep(_POLL_INTERVAL)
         if timed_out:
             log_callback(f"Timeout reached ({timeout}s). Terminating command.")
+        if output_limited:
+            log_callback(
+                f"Output truncated: byte budget ({budget}) exhausted. Terminating command."
+            )
     finally:
         _stop_and_reap(process)
 
@@ -385,4 +403,5 @@ def run_command(
         output_lines=output_lines,
         safe_prefix=safe_prefix,
         timed_out=timed_out,
+        output_limited=output_limited,
     )

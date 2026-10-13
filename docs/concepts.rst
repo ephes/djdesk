@@ -54,3 +54,10 @@ Each command owns a process group. On completion, timeout, or a failure while it
 logged, the whole group receives ``SIGTERM`` and, two seconds later, ``SIGKILL``; the output pipe is
 closed and the child is reaped. On Windows ``taskkill /T /F`` stops the tree below a still-running
 child. Unexpected failures mark the run as failed and keep the original error.
+
+Output is budgeted in bytes: at most ``DJDESK_INSPECTOR_COMMAND_OUTPUT_BYTES`` (default 1 MiB) is
+read from a command and at most ``DJDESK_INSPECTOR_TASK_LOG_BYTES`` (default 1 MiB) of log text is
+retained per run. Exceeding either stops the command and fails the run with
+``output_limited`` set in its ``command`` metadata. A log that fits the budget exactly is kept
+whole; a budget too small for the first log entry fails the run without starting the command, and
+the log written for an unexpected failure stays within the same budget.

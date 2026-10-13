@@ -86,6 +86,95 @@ class WorkspaceTaskRunLogTests(TestCase):
         self.assertIn("Line 0", run.log)
 
 
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_retained_log_budget_counts_timestamps_and_newlines(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        for _ in range(100):
+            run.append_log("tiny line")
+        self.assertTrue(run.log_truncated)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+        self.assertGreater(len(run.log.encode()), 256 - 40)
+        self.assertTrue(run.log.endswith(WorkspaceTaskRun.LOG_TRUNCATION_MARKER))
+        self.assertEqual(run.log.count(WorkspaceTaskRun.LOG_TRUNCATION_MARKER), 1)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_single_large_log_line_is_cut_on_a_character_boundary(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run.append_log("é" * 1_000_000)
+        self.assertTrue(run.log_truncated)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+        self.assertIn("é", run.log)
+        self.assertTrue(run.log.endswith(WorkspaceTaskRun.LOG_TRUNCATION_MARKER))
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_log_budget_includes_text_stored_before_this_instance(self) -> None:
+        run = WorkspaceTaskRun.objects.create(
+            workspace=self.workspace, preset=self.preset, log="x" * 200
+        )
+        run = WorkspaceTaskRun.objects.get(pk=run.pk)
+        run.append_log("y" * 100)
+        self.assertTrue(run.log_truncated)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_line_that_fits_the_budget_is_stored_whole(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        message = "x" * (210 - len("[00:00:00] "))
+        run.append_log(message)
+        run.flush_log_buffer()
+        self.assertFalse(run.log_truncated)
+        run.refresh_from_db()
+        self.assertEqual(len(run.log.encode()), 210)
+        self.assertTrue(run.log.endswith(message))
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_log_filling_the_budget_exactly_is_not_truncated(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        stamp = len("[00:00:00] ")
+        run.append_log("a" * (100 - stamp))
+        run.append_log("b" * (155 - stamp))
+        run.flush_log_buffer()
+        self.assertFalse(run.log_truncated)
+        run.refresh_from_db()
+        self.assertEqual(len(run.log.encode()), 256)
+        self.assertNotIn(WorkspaceTaskRun.LOG_TRUNCATION_MARKER, run.log)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
+    def test_overflow_after_a_full_log_makes_room_for_the_marker(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        stamp = len("[00:00:00] ")
+        run.append_log("a" * (100 - stamp))
+        run.append_log("b" * (155 - stamp))
+        run.flush_log_buffer()
+        run.append_log("c")
+        self.assertTrue(run.log_truncated)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 256)
+        self.assertTrue(run.log.endswith(WorkspaceTaskRun.LOG_TRUNCATION_MARKER))
+        self.assertEqual(run.log.count(WorkspaceTaskRun.LOG_TRUNCATION_MARKER), 1)
+        self.assertIn("a" * (100 - stamp), run.log)
+
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=20)
+    def test_budget_smaller_than_the_marker_still_holds(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run.append_log("a line longer than the budget")
+        self.assertTrue(run.log_truncated)
+        run.refresh_from_db()
+        self.assertLessEqual(len(run.log.encode()), 20)
+
+    def test_log_within_budget_is_not_truncated(self) -> None:
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        for index in range(12):
+            run.append_log(f"Line {index}")
+        run.flush_log_buffer()
+        self.assertFalse(run.log_truncated)
+        run.refresh_from_db()
+        self.assertEqual(len(run.log.splitlines()), 12)
+
+
 class WorkspaceWizardFormTests(TestCase):
     def test_creates_workspace_and_seeds_scans(self) -> None:
         with TemporaryDirectory() as temp:

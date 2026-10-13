@@ -718,10 +718,11 @@ class TaskOutputBudgetTests(ProcessFixtureCase, TestCase):
         self.assertEqual(len(self.run_record.log.encode()), budget)
         self.assertNotIn(WorkspaceTaskRun.LOG_TRUNCATION_MARKER, self.run_record.log)
 
-    @override_settings(INSPECTOR_TASK_LOG_BYTES=100)
+    # Smaller than the first log entry whatever the interpreter and workspace paths are.
+    @override_settings(INSPECTOR_TASK_LOG_BYTES=40)
     def test_command_is_not_started_when_the_first_log_entry_is_truncated(self) -> None:
         self.write_manage("record(os.getpid())\ntime.sleep(120)\n")
-        self.assertGreater(len(f"Executing `{self.command}` inside {self.workspace}"), 100)
+        self.assertGreater(len("[00:00:00] Executing `manage.py check` inside "), 40)
         started = time.monotonic()
         with override_settings(INSPECTOR_TASK_TIMEOUT=5):
             payload = self.execute()
@@ -732,7 +733,7 @@ class TaskOutputBudgetTests(ProcessFixtureCase, TestCase):
         self.assertTrue(payload["output_limited"])
         self.assertIn("Command not started", payload["error"])
         self.assertNotIn("exit_code", payload)
-        self.assertLessEqual(len(self.run_record.log.encode()), 100)
+        self.assertLessEqual(len(self.run_record.log.encode()), 40)
 
     def _fail_logging_with(self, error: BaseException):
         real_append = WorkspaceTaskRun.append_log

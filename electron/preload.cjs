@@ -1,5 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
-const path = require('path');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const WIZARD_STORAGE_KEY = 'djdesk.wizard.projectPath';
 const DROP_EVENT = 'djdesk:workspace-drop';
@@ -14,12 +13,7 @@ const sanitizePath = (rawPath) => {
   if (!rawPath || typeof rawPath !== 'string') {
     return null;
   }
-  try {
-    const normalized = path.normalize(rawPath);
-    return normalized || null;
-  } catch {
-    return null;
-  }
+  return rawPath;
 };
 
 const stageProjectPath = (rawPath) => {
@@ -78,7 +72,7 @@ window.addEventListener('drop', (event) => {
   event.preventDefault();
   const files = Array.from(event.dataTransfer?.files ?? []);
   const sanitized = files
-    .map((file) => file?.path || '')
+    .map((file) => webUtils.getPathForFile(file))
     .map(stageProjectPath)
     .filter(Boolean);
   if (sanitized.length) {

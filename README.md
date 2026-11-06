@@ -173,3 +173,26 @@ The backend requires Django >=5.2.19,<5.3 and sqlparse >=0.6.0, including packag
 Run `just audit` to audit a frozen production-only export with pip-audit 2.10.0.
 The read-only quality workflow and `just ci` run the same audit and fail on findings;
 no advisory ignores are used. Auditor dependencies are optional and not shipped.
+
+### Electron security and download limits
+
+The shell uses Electron >=45.2.3 and electron-builder >=26.18.0; the bundler's
+TOML parser requires >=5.0.1. Run npm ci and npm audit in electron/ after lock changes.
+The refreshed lock removes the targeted Electron and tar advisories. As of 2026-11-06,
+npm audit still reports six moderate entries from builder's transitive minimatch
+GHSA-g3hv-75wg-m249 (including dependent packages); no supported builder update resolves
+that tree yet. No overrides or advisory ignores are used.
+
+Interpreter archives use verified cache entries only. Downloads stage beside the cache,
+allow at most five HTTPS redirects and 256 MiB, and have a two minute total deadline.
+Only a matching registered SHA256 is published. Failed attempts remove their own
+partials and preserve the prior cache; a stale or interrupted cache is retried automatically.
+
+Node.js >=22.12.0 is required by the refreshed shell toolchain. The read-only
+electron-smoke workflow builds the Python bundle and an unsigned unpacked app,
+then launches the shell with an empty temporary profile under Xvfb to verify the
+backend, renderer isolation and preload bridge. It publishes no artifacts. Locally,
+run npm run bundle, build with electron-builder --dir --publish never, then pass the
+unpacked executable to npm run smoke -- <executable> inside electron/. The smoke
+uses Playwright to assert app.isPackaged and loads the real asar/preload and bundled
+resources. Installers remain manual; smoke scripts are excluded from packages.

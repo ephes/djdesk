@@ -48,9 +48,19 @@ Added
 Security
 ~~~~~~~~
 
+- Keep the sandboxed preload bridge compatible with current Electron APIs, using
+  ``webUtils.getPathForFile`` for drops without importing unsupported Node modules.
+- Refresh Electron to >=45.2.3, electron-builder to >=26.18.0 and TOML to >=5.0.1.
+  Targeted Electron/tar findings are removed; six moderate transitive minimatch
+  audit entries remain in builder (GHSA-g3hv-75wg-m249), without ignores or overrides.
+- Publish interpreter download caches only after SHA256 verification, with a two minute
+  deadline, 256 MiB ceiling, five HTTPS redirects and automatic partial cleanup/retry.
+
 - Refresh Django to the supported 5.2.19 security floor and sqlparse to >=0.6.0.
 - Audit the frozen production lock in read-only CI with pinned pip-audit;
   ``just audit`` runs the same failing-on-findings check locally.
+- Add a read-only unsigned unpacked-package and shell/preload smoke workflow with
+  a synthetic bundled database and temporary profile; no artifacts are published.
 
 - Restrict Data Lab listings and reads to regular exports in the workspace directory; refuse
   notebook and workspace-directory symlinks, including links within the export root.

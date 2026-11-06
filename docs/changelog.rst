@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Align Electron setup documentation with the implemented standalone Python bundle
+  and Node.js >=22.12.0 requirement; clarify the system-Python development fallback.
+
 - Stage forced sample refreshes before replacing the existing tree, restoring the old sample
   on publication failure and retaining a recovery copy if rollback fails.
 - Correct settings-template braces and indentation so the sample generator loads and emits
@@ -34,6 +37,12 @@ Fixed
 
 Added
 ~~~~~
+
+- Exercise generated bundle launchers, runtime dependency selection, collectstatic
+  paths and interpreter/Django verification in synthetic build-contract tests.
+  Normal PR CI installs only runtime npm dependencies for these tests, with no
+  Electron installation or interpreter downloads. Local test recipes reuse
+  installed modules and bootstrap runtime dependencies only when missing.
 
 - Introduced the Inspector workspace explorer with workspaces, scan jobs, task presets, curated
   doc links, services, and tests so the desktop shell can analyze and orchestrate local Django

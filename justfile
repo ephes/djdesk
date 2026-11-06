@@ -18,7 +18,7 @@ ci:
     uv run --no-sync python scripts/audit_dependencies.py
     uv run --no-sync ruff check .
     DJANGO_SETTINGS_MODULE=djdesk.settings.test uv run --no-sync python manage.py test tests
-    cd electron && npm test
+    just electron-test
 
 # Run the Django development server.
 dev:
@@ -36,8 +36,9 @@ test:
 electron-install:
     cd electron && npm install
 
-# Run the Electron main-process guard tests (plain Node, no Electron launch needed).
+# Reuse installed modules; bootstrap runtime modules only when TOML is missing.
 electron-test:
+    cd electron && if ! node -e "require.resolve('toml')" >/dev/null 2>&1; then npm ci --omit=dev --ignore-scripts; fi
     cd electron && npm test
 
 # Build the bundled Django payload used by the Electron shell.

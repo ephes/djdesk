@@ -4,17 +4,15 @@ This directory contains the Electron desktop application wrapper for DJDesk.
 
 ## Current Implementation
 
-DJDesk has progressed to **Phase 2 — Option B (bundled virtualenv)**:
+DJDesk uses **Phase 3 — bundled python-build-standalone**:
 
-- Phase 1 remains available as the fallback: when no bundle exists we spawn your system Python and run `manage.py runserver` exactly as before.
-- Phase 2 adds `electron/django-bundle/`, a self-contained virtual environment that includes Django, collected static files, and the project source code. `npm start` now prefers this bundle so the Electron shell can run even without globally installed dependencies.
-
-Phase 3 (fully relocatable python-build-standalone interpreters) will build on top of this structure.
+- `electron/django-bundle/` contains a standalone Python interpreter, runtime dependencies, collected static files, and the project sources. `npm start` prefers this bundle.
+- System Python remains the development fallback when no bundle exists; it needs the backend dependencies installed separately.
 
 ## Prerequisites
 
-1. **Node.js v18+**.
-2. **[uv](https://github.com/astral-sh/uv)** installed on your PATH (needed for dependency installs).
+1. **Node.js >=22.12.0**, matching `package.json` engines.
+2. **[uv](https://github.com/astral-sh/uv)** for backend development and documentation dependencies. Bundling installs runtime dependencies with the downloaded interpreter's pip.
 3. **tar** available in your shell. (This is mandatory—`build-django.js` shells out to `tar` to unpack python-build-standalone archives. Windows 10+ ships `tar` by default; older versions need an external install.)
 
 > The Phase 3 bundle **downloads its own Python 3.14 interpreter** via
@@ -42,7 +40,7 @@ cd electron && npm run bundle
 1. Creates a fresh `django-bundle/` directory.
 2. Downloads the appropriate **python-build-standalone Python 3.14.0+20251031 interpreter** for your platform and unpacks it into `django-bundle/python/` (verifying SHA256 checksums before extraction).
 3. Installs Django dependencies into that interpreter via `pip install` using the dependencies declared in `pyproject.toml`.
-4. Copies `manage.py` and `src/djdesk` into `django-bundle/src/`.
+4. Copies `manage.py` into `django-bundle/` and `src/djdesk` into `django-bundle/src/`.
 5. Runs `collectstatic --clear` with `DJANGO_STATIC_ROOT` pointed at `django-bundle/staticfiles`.
 6. Writes `run_django.py` (the launcher Electron calls) and a `VERSION` file with the current Git SHA.
 7. Verifies the bundled interpreter by importing Django before exiting.
@@ -51,14 +49,28 @@ cd electron && npm run bundle
 
 The bundle is ignored by Git and may be regenerated at any time.
 
-## Shell Boundary and Tests
+## Shell Boundary and Build Tests
 
 `boundary-guards.js` keeps the window on the local Django origin, denies popups and `<webview>` tags, validates IPC sender frames, and limits `shell.openExternal` to `http(s)` URLs. See "Shell boundary" in `docs/architecture.rst`.
 
 ```bash
 cd electron
-npm test   # node --test test/*.test.js — no Electron launch or npm install needed
+npm ci --omit=dev --ignore-scripts  # runtime modules only; does not install Electron
+npm test                          # node --test test/*.test.js
 ```
+
+The build-contract tests import `build-django.js` without running its build entrypoint.
+They generate a launcher in a temporary bundle and execute it with a synthetic Django
+management module, checking migrations before serving and failure propagation. Other
+tests read invented TOML projects and replace subprocesses to check pip/collectstatic
+arguments, bundle paths, interpreter versions, and Django import failures. They use an
+existing Python 3 from `PYTHON` or PATH; no pip installation, interpreter download,
+Electron launch, real service or account is used. These tests run in normal PR CI.
+`just electron-test` runs these tests from the repo root, reusing installed modules
+and bootstrapping runtime modules only when TOML is missing. An existing full
+development install is preserved, and repeat test runs need no registry access.
+After a runtime-only install, run `npm install` to restore development dependencies
+before launching or packaging Electron.
 
 ## Running the App
 

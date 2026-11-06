@@ -58,6 +58,10 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install runtime npm dependencies only
+        run: npm ci --omit=dev --ignore-scripts
+        working-directory: electron
+
       - name: Run guard tests
         run: npm test
         working-directory: electron

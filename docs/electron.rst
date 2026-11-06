@@ -28,6 +28,11 @@ renderer at the local server.
 Local workflow
 --------------
 
+The current Phase 3 bundle contains python-build-standalone Python 3.14, runtime
+dependencies and project assets. Node.js >=22.12.0 is required, matching
+``electron/package.json``. The system-Python path is a development fallback and
+requires separately installed backend dependencies.
+
 1. **Install Node dependencies**
 
    ``just electron-install`` (runs ``npm install`` inside ``electron/``).
@@ -44,7 +49,8 @@ Local workflow
    ``electron/django-bundle/python/bin/python3`` on macOS/Linux or
    ``electron/django-bundle/python/python.exe`` on Windows. If neither exists it tries
    ``python3.14``, ``python3``, or ``python`` from your PATH. Override the interpreter
-   via ``PYTHON=/custom/python npm start`` when needed.
+   for the fallback via ``PYTHON=/custom/python npm start`` when needed; an existing
+   bundle takes precedence.
 
 Bundler internals
 -----------------
@@ -58,8 +64,8 @@ The script produces a reproducible Python payload in seven stages:
 3. Install every dependency listed under ``[project].dependencies`` using
    ``python -m pip install --no-cache-dir …`` inside the bundled interpreter. Optional
    extras/dev dependencies are ignored.
-4. Copy ``manage.py`` plus ``src/djdesk`` (excluding ``__pycache__``) into
-   ``django-bundle/src/``.
+4. Copy ``manage.py`` into ``django-bundle/`` and ``src/djdesk`` (excluding
+   ``__pycache__``) into ``django-bundle/src/``.
 5. Run ``python manage.py collectstatic --no-input --clear`` with
    ``DJANGO_STATIC_ROOT`` pointing to ``django-bundle/staticfiles/``.
 6. Write ``run_django.py`` (the in-bundle launcher) and a ``VERSION`` file containing
@@ -83,8 +89,9 @@ Bundle layout
    └── VERSION
 
 ``run_django.py`` augments ``PYTHONPATH`` so ``django-bundle/src`` takes precedence,
-sets ``DJANGO_ENV``/``DJANGO_SETTINGS_MODULE`` defaults, and then executes
-``manage.py runserver --noreload`` on the host/port provided by Electron.
+sets ``DJANGO_ENV``/``DJANGO_SETTINGS_MODULE`` defaults, applies
+``manage.py migrate --noinput``, and then executes ``manage.py runserver --noreload``
+on the host/port provided by Electron. A migration failure prevents server startup.
 
 Runtime behavior
 ----------------
@@ -146,7 +153,8 @@ Windows:
 
 1. Jobs run on ``macos-latest``, ``ubuntu-latest``, and ``windows-latest``.
 2. ``actions/setup-node`` installs Node.js 22 with npm caching.
-3. ``astral-sh/setup-uv`` provides the ``uv`` CLI required by ``build-django.js``.
+3. ``astral-sh/setup-uv`` makes ``uv`` available; the current bundler itself uses
+   the downloaded interpreter's pip and does not require ``uv``.
 4. Ubuntu installs ``libfuse2`` so AppImage packaging succeeds.
 5. ``npm ci`` installs dependencies in ``electron/``.
 6. ``npm run bundle`` creates ``electron/django-bundle/`` (``npm run build`` runs
@@ -168,10 +176,24 @@ and no artifact uploads:
 3. ``uv run ruff check .`` lints the project (``just lint``).
 4. ``python manage.py test tests`` runs with ``DJANGO_SETTINGS_MODULE=djdesk.settings.test``
    (``just test``), so the suite uses in-memory SQLite and never touches a real workspace.
-5. ``npm test`` in ``electron/`` runs the main-process guard tests (``just electron-test``).
+5. ``npm ci --omit=dev --ignore-scripts`` then ``npm test`` in ``electron/`` runs
+   shell guards and build-contract tests (``just electron-test``), without installing Electron.
 
 ``just ci`` runs the same five steps locally. Keep signing or upload credentials in the
 packaging workflow only; the quality workflow must stay read-only.
+Locally, ``just electron-test`` (also called by ``just ci``) reuses installed npm
+modules and installs runtime modules only when TOML is missing. Existing Electron
+development installs are preserved; repeat test runs need no registry access.
+
+The build-contract tests generate and execute ``run_django.py`` against a synthetic
+Django management module in a temporary bundle with spaces in its path. They check
+migration ordering, failure handling, host/port and source-path setup. Invented
+``pyproject.toml`` files exercise runtime dependency selection; fake subprocesses
+verify pip, collectstatic, interpreter-version and Django-import checks. An existing
+Python 3 interpreter (``PYTHON`` or PATH) is required to execute the launcher fixture.
+The suite installs no pip packages, downloads no interpreters, and uses no real
+services, devices or accounts. Run ``npm install`` after a runtime-only install to
+restore development dependencies before launching or packaging Electron.
 
 Alternatives
 ------------

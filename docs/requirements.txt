@@ -4,5 +4,5 @@ myst-parser>=2.0,<4.0
 sphinx-autobuild>=2024.4,<2025.0
 sphinx-copybutton>=0.5,<0.6
 sphinxcontrib-mermaid>=0.8,<0.9
-django>=5.2.8
+django>=5.2.19,<5.3
 django-tasks>=0.9.0

@@ -389,7 +389,18 @@ function runCommand(command, args, options = {}) {
   });
 }
 
-main().catch((error) => {
-  console.error('\nFailed to build django-bundle:', error.message);
-  process.exit(1);
-});
+module.exports = {
+  writeLauncherScript,
+  readProjectDependencies,
+  installPythonDeps,
+  collectStatic,
+  ensurePythonVersion,
+  verifyBundle
+};
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error('\nFailed to build django-bundle:', error.message);
+    process.exit(1);
+  });
+}

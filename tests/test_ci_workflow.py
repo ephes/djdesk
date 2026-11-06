@@ -61,6 +61,14 @@ class QualityWorkflowTests(TestCase):
     def test_runs_electron_guard_tests(self) -> None:
         self.assertRegex(self.text, r"run: npm test\n\s+working-directory: electron")
 
+    def test_electron_runtime_install_precedes_tests_without_binary_downloads(self) -> None:
+        install = re.search(
+            r"run: npm ci --omit=dev --ignore-scripts\n\s+working-directory: electron",
+            self.text,
+        )
+        self.assertIsNotNone(install)
+        self.assertLess(install.start(), self.text.index("run: npm test"))
+
     def test_npm_test_passes_files_not_a_directory(self) -> None:
         """Node 22 (the CI version) treats a directory argument to --test as a module path."""
         package = json.loads((WORKFLOWS.parents[1] / "electron" / "package.json").read_text())

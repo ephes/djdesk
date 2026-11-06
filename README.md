@@ -50,7 +50,7 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 - `just docs-bundle` – build docs and copy the HTML bundle into `var/docs_bundle` for offline use.
 - `just docs-serve` – live-reload the docs while editing reST/Markdown files.
 - `just electron-install` / `just electron-start` – install Electron deps and launch the local shell.
-- `just electron-test` – run the Electron main-process boundary-guard tests with `node --test` (no `npm install` required).
+- `just electron-test` – run shell guards and synthetic bundle-contract tests with `node --test`, installing runtime npm modules only if missing (no Electron installation; existing development installs are preserved).
 - `just electron-bundle` / `just electron-build-*` – create the python-build-standalone bundle and packaged binaries for each OS.
 - `just electron-runs` – list recent GitHub Actions builds; `just electron-workflow-run` triggers the matrix build.
 - `just electron-download-latest` / `just electron-download-macos` / `just electron-download-windows` / `just electron-download-linux` / `just electron-download RUN_ID=<id>` – download workflow artifacts (all platforms or per platform); `just electron-clean-artifacts` removes the downloaded zips.
@@ -78,7 +78,7 @@ The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just
 2. `uv run --no-sync python scripts/audit_dependencies.py` – audit the frozen production lock.
 3. `uv run ruff check .` – the same lint as `just lint`.
 4. `python manage.py test tests` with `DJANGO_SETTINGS_MODULE=djdesk.settings.test` – in-memory SQLite, no real workspace or home database.
-5. `npm test` in `electron/` – the main-process boundary-guard tests (`node --test`, no `npm install`).
+5. `npm ci --omit=dev --ignore-scripts` then `npm test` in `electron/` – shell guards and synthetic build-contract tests using an existing Python 3, without installing Electron or downloading an interpreter.
 
 Run `just ci` locally before opening a pull request; a change is only ready for review once both CI jobs are green. Cross-platform packaging stays in the manual `electron-desktop` workflow and is not part of these checks.
 
@@ -99,9 +99,10 @@ export DJANGO_ALLOWED_HOSTS="example.com"
 uv run python manage.py migrate
 ```
 
-### Electron desktop shell (Phase 1)
+### Electron desktop shell
 
-You can exercise the minimal Electron wrapper that spawns the Django dev server with your local interpreter:
+The shell prefers the Phase 3 standalone Python bundle built by `just electron-bundle`.
+Without a bundle, you can run the development fallback using your local interpreter:
 
 ```bash
 # 1. Ensure backend deps are installed (from repo root)

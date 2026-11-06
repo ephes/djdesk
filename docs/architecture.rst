@@ -48,7 +48,7 @@ Renderer data flow
 Native hooks
 ------------
 
-* **Drag/drop wizard priming** – the preload script fires ``djdesk:workspace-drop`` events whenever a region tagged with ``data-dropzone`` receives a file drop and stores the normalized path under ``djdesk.wizard.projectPath``. ``app.js`` listens for the event to update the sidebar dropzone, while the wizard form reads/clears the staged path on load.
+* **Drag/drop wizard priming** – the preload script fires ``djdesk:workspace-drop`` events whenever a region tagged with ``data-dropzone`` receives a file drop and stores the native path under ``djdesk.wizard.projectPath``. ``app.js`` listens for the event to update the sidebar dropzone, while the wizard form reads/clears the staged path on load.
 * **Notifications** – ``app.js`` calls ``window.djdeskNative.notify`` when task runs finish so Electron's main process can raise an OS notification. Browsers fall back to the Web Notifications API when the bridge is absent.
 * **Doc deep links** – links annotated with ``data-doc-link`` still open the in-app drawer, but they also call ``window.djdeskNative.openExternal`` so the system browser mirrors the same Read the Docs location. Only ``http(s)`` URLs are dispatched (see *Shell boundary*).
 * **Offline indicator** – templates expose ``data-offline-indicator`` so ``navigator.onLine`` updates the status bar.

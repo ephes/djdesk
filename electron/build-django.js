@@ -4,7 +4,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const https = require('https');
+const { downloadPython } = require('./python-download');
 const crypto = require('crypto');
 const toml = require('toml');
 const { spawn, spawnSync, execSync } = require('child_process');
@@ -102,12 +102,7 @@ async function prepareStandalonePython({ assetName, pythonRelative }) {
   const archivePath = path.join(downloadDir, assetName);
   const downloadUrl = `${PYTHON_DOWNLOAD_BASE}/${PYTHON_BUILD_RELEASE}/${assetName}`;
 
-  if (!fs.existsSync(archivePath)) {
-    console.log(`Downloading ${assetName}...`);
-    await downloadFile(downloadUrl, archivePath);
-  } else {
-    console.log(`Reusing cached interpreter archive ${archivePath}`);
-  }
+  await downloadPython(downloadUrl, archivePath, PYTHON_SHA256[assetName]);
 
   const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'djdesk-python-'));
   await verifyChecksum(archivePath, assetName);
@@ -146,33 +141,6 @@ async function prepareStandalonePython({ assetName, pythonRelative }) {
   ensurePythonVersion(pythonExecutable);
   console.log(`Standalone interpreter ready at ${pythonExecutable}`);
   return pythonExecutable;
-}
-
-async function downloadFile(url, destination) {
-  await fsp.mkdir(path.dirname(destination), { recursive: true });
-  return new Promise((resolve, reject) => {
-    const request = https.get(url, (response) => {
-      if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-        response.destroy();
-        downloadFile(response.headers.location, destination).then(resolve).catch(reject);
-        return;
-      }
-
-      if (response.statusCode !== 200) {
-        reject(new Error(`Failed to download ${url} (status ${response.statusCode})`));
-        return;
-      }
-
-      const file = fs.createWriteStream(destination);
-      response.pipe(file);
-      file.on('finish', () => {
-        file.close(resolve);
-      });
-      file.on('error', reject);
-    });
-
-    request.on('error', reject);
-  });
 }
 
 async function extractArchive(archivePath, destination) {

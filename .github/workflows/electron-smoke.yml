@@ -1,0 +1,31 @@
+name: electron-smoke
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unpacked-shell:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: electron
+      - run: npm run bundle
+        working-directory: electron
+      - run: npx --no-install electron-builder --dir --linux --publish never
+        working-directory: electron
+      - run: xvfb-run -a npm run smoke -- dist/linux-unpacked/djdesk-electron --no-sandbox
+        working-directory: electron

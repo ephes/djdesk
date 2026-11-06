@@ -98,8 +98,17 @@ Runtime behavior
   ``manage.py runserver`` otherwise.
 * Sets ``DJANGO_ENV=local`` and ``DJANGO_SETTINGS_MODULE=djdesk.settings.local`` unless
   they are already defined.
-* Polls ``http://127.0.0.1:<port>/`` up to 30 times before showing an error, ensuring
-  the renderer window connects only after Django responds.
+* Polls ``http://127.0.0.1:<port>/`` up to 30 times and accepts only HTTP 200.
+  Each probe settles once, including timeout followed by error. Startup has a 76 second
+  total deadline, a two second per-probe limit, a one second initial delay and 500 ms retries.
+  Success, backend exit and quit cancel outstanding requests and timers.
+* Uses one shutdown path for startup failure, backend exit and quit. Quit waits for
+  tree termination and direct-child reaping; late startup callbacks cannot open a window.
+  POSIX starts a separate process group, sends TERM to the group, then KILL after a
+  two second grace period, and allows up to one second for child reaping. Windows uses
+  ``taskkill /PID <pid> /T /F`` with a three second command limit and one second reap limit.
+  Shutdown failures are logged. Normal exits return as soon as cleanup completes.
+* Keeps single-instance behavior; activation opens a window only after backend readiness.
 * Opens DevTools automatically when ``NODE_ENV=development``.
 
 Building platform installers
@@ -160,7 +169,7 @@ The packaging workflow is **manual-only** (trigger: ``workflow_dispatch``). Laun
 via the GitHub UI or run ``just electron-workflow-run`` locally.
 
 Quality checks run separately. ``.github/workflows/ci.yml`` triggers on every push to
-``main`` and every pull request with a read-only ``contents: read`` token, no secrets,
+all branches and every pull request with a read-only ``contents: read`` token, no secrets,
 and no artifact uploads:
 
 1. ``uv sync --locked --extra dev --extra audit`` installs the dependencies pinned in ``uv.lock``.
@@ -251,3 +260,16 @@ run npm run bundle, build with electron-builder --dir --publish never, then pass
 unpacked executable to npm run smoke -- <executable> inside electron/. The smoke
 uses Playwright to assert app.isPackaged and loads the real asar/preload and bundled
 resources. Installers remain manual; smoke scripts are excluded from packages.
+
+Lifecycle tests use synthetic requests, timers and child/process APIs to exercise both
+POSIX and Windows branches on every test host. A native synthetic backend/helper fixture
+ignores TERM and is run by CI on Linux, macOS and Windows; the unpacked shell smoke runs
+on Linux. Taskkill requires a live leader to find descendants, so helpers remaining after
+an already-exited leader may not be found; that Windows orphan case is unverified.
+Process groups likewise do not contain descendants that deliberately create a new session.
+
+Terminal INT/TERM signals (and POSIX HUP) request the same graceful shutdown path.
+Repeated OS signals during cleanup remain unverified: if Electron exits early,
+the detached backend can remain alive. A hard crash or SIGKILL can also orphan
+the detached backend group: there is no parent-death containment. The packaged Linux
+smoke sends a real SIGINT and verifies the backend port is closed after the app exits.

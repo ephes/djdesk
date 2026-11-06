@@ -1,11 +1,10 @@
 name: ci
 
-# Read-only quality checks for every push to main and every pull request.
+# Read-only quality checks for every push and every pull request.
 # Packaging lives in electron-desktop.yml and stays manual; this workflow must
 # not gain secrets, artifact uploads, or write permissions.
 on:
   push:
-    branches: [main]
   pull_request:
 
 permissions:
@@ -44,8 +43,11 @@ jobs:
         run: uv run --no-sync python manage.py test tests
 
   electron-guards:
-    name: Electron guard tests
-    runs-on: ubuntu-latest
+    name: Electron guard tests (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - name: Checkout repository

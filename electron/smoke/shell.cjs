@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
+const net = require('node:net');
 const { _electron: electron } = require('playwright-core');
 
 async function main() {
@@ -27,7 +28,17 @@ async function main() {
     assert.equal(result.native, true);
     assert.equal(result.node, 'undefined');
     assert.match(result.version, /^45\./);
-    console.log('Unpacked shell smoke passed: bundled backend, isolated renderer and preload');
+    const port = Number(new URL(window.url()).port);
+    const closed = app.waitForEvent('close', { timeout: 10000 });
+    process.kill(app.process().pid, 'SIGINT');
+    await closed;
+    await new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1');
+      socket.setTimeout(2000, () => { socket.destroy(); reject(new Error('Backend port check timed out')); });
+      socket.once('connect', () => { socket.destroy(); reject(new Error('Backend survived shell quit')); });
+      socket.once('error', (error) => error.code === 'ECONNREFUSED' ? resolve() : reject(error));
+    });
+    console.log('Unpacked shell smoke passed: backend, isolated renderer, preload and signal shutdown');
   } finally {
     try { await app?.close(); }
     finally { await fs.rm(profile, { recursive: true, force: true }); }

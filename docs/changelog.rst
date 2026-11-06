@@ -7,6 +7,18 @@ Unreleased
 Fixed
 ~~~~~
 
+- Settle each shell readiness probe once, require HTTP 200, cap startup at 30 probes
+  and 76 seconds, and cancel timers/requests on readiness, backend exit and quit.
+- Share bounded backend-tree shutdown between startup failure and app quit, waiting
+  before exit: POSIX group TERM/KILL and direct-child reaping, or Windows taskkill /T /F.
+  Activation and late startup callbacks cannot open a window after shutdown starts.
+  Terminal signals request this path; repeated OS signals during cleanup remain
+  unverified and may orphan the detached backend. Hard crashes/SIGKILL still have
+  no parent-death containment.
+  Both platform API paths have synthetic tests, plus a native TERM-ignoring backend/helper
+  fixture in CI on Linux, macOS and Windows. Taskkill's inability to discover helpers
+  after their leader has exited remains a limitation.
+
 - Stage forced sample refreshes before replacing the existing tree, restoring the old sample
   on publication failure and retaining a recovery copy if rollback fails.
 - Correct settings-template braces and indentation so the sample generator loads and emits
@@ -34,6 +46,9 @@ Fixed
 
 Added
 ~~~~~
+
+- Run quality checks on every branch push and exercise Electron lifecycle tests on
+  Linux, macOS and Windows, including a synthetic native backend/helper tree.
 
 - Introduced the Inspector workspace explorer with workspaces, scan jobs, task presets, curated
   doc links, services, and tests so the desktop shell can analyze and orchestrate local Django

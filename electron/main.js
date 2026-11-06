@@ -2,7 +2,9 @@ const { app, BrowserWindow, ipcMain, Notification, shell } = require('electron')
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const http = require('http');
+const getAvailablePort = require('./backend-port');
+const { waitForBackend } = require('./backend-readiness');
+const { stopBackend } = require('./backend-shutdown');
 const {
   buildTrustedOrigin,
   createOpenExternalHandler,
@@ -14,10 +16,20 @@ const resourceBase = app.isPackaged ? process.resourcesPath : __dirname;
 const DJANGO_BUNDLE_DIR = path.join(resourceBase, 'django-bundle');
 const BUNDLE_RUNNER = path.join(DJANGO_BUNDLE_DIR, 'run_django.py');
 
-let mainWindow;
+let mainWindow = null;
 let djangoProcess;
 let djangoPort;
-let getPortModule;
+let quitting = false;
+let backendReady = false;
+let quitAllowed = false;
+let shutdown;
+const startup = new AbortController();
+const quitOnSignal = () => app.quit();
+const quitSignals = process.platform === 'win32' ? ['SIGINT', 'SIGTERM'] : ['SIGINT', 'SIGTERM', 'SIGHUP'];
+for (const signal of quitSignals) process.on(signal, quitOnSignal);
+app.on('will-quit', () => {
+  for (const signal of quitSignals) process.removeListener(signal, quitOnSignal);
+});
 
 const IPC_CHANNELS = {
   OPEN_EXTERNAL: 'djdesk:open-external',
@@ -116,9 +128,7 @@ if (!gotTheLock) {
 
 async function startDjango() {
   try {
-    if (!getPortModule) {
-      ({ default: getPortModule } = await import('get-port'));
-    }
+    if (quitting) return;
 
     // Find Python interpreter and determine run mode
     const pythonInfo = resolvePython();
@@ -128,7 +138,8 @@ async function startDjango() {
     );
 
     // Get an available port
-    djangoPort = await getPortModule({ port: 8000 });
+    djangoPort = await getAvailablePort({ port: 8000 });
+    if (quitting) return;
     console.log(`Starting Django on port ${djangoPort}...`);
 
     const managePyPath = app.isPackaged
@@ -160,7 +171,10 @@ async function startDjango() {
     // Spawn Django dev server
     djangoProcess = spawn(pythonInfo.interpreter, djangoArgs, {
       cwd: djangoCwd,
-      env: djangoEnv
+      env: djangoEnv,
+      detached: process.platform !== 'win32',
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     djangoProcess.stdout.on('data', (data) => {
@@ -176,21 +190,27 @@ async function startDjango() {
       killDjangoAndQuit();
     });
 
-    djangoProcess.on('close', (code) => {
+    djangoProcess.on('exit', (code) => {
+      startup.abort();
+      backendReady = false;
       console.log(`Django process exited with code ${code}`);
-      if (code !== 0 && code !== null) {
+      if (!quitting) {
         app.quit();
       }
     });
 
     // Wait for Django to be ready
-    await waitForDjango();
+    await waitForBackend(`${getTrustedOrigin()}/`, { signal: startup.signal });
+    if (quitting || startup.signal.aborted) return;
+    backendReady = true;
 
     // Create the Electron window
     createWindow();
   } catch (error) {
-    console.error('Error starting Django:', error);
-    killDjangoAndQuit();
+    if (!quitting) {
+      console.error('Error starting Django:', error);
+      killDjangoAndQuit();
+    }
   }
 }
 
@@ -199,52 +219,7 @@ async function startDjango() {
  * Used for startup failures before app is fully ready
  */
 function killDjangoAndQuit() {
-  if (djangoProcess) {
-    console.log('Terminating Django process...');
-    djangoProcess.kill('SIGTERM');
-  }
-  app.quit();
-}
-
-function waitForDjango() {
-  return new Promise((resolve, reject) => {
-    const maxAttempts = 30;
-    let attempts = 0;
-
-    const checkServer = () => {
-      attempts++;
-
-      const req = http.get(`http://127.0.0.1:${djangoPort}/`, (res) => {
-        // Consume the response to free the socket
-        res.resume();
-        console.log(`Django server responded with status: ${res.statusCode}`);
-        resolve();
-      });
-
-      // Add timeout to prevent hanging
-      req.setTimeout(2000, () => {
-        req.destroy();
-        if (attempts >= maxAttempts) {
-          reject(new Error('Django server failed to start (timeout)'));
-        } else {
-          setTimeout(checkServer, 500);
-        }
-      });
-
-      req.on('error', (err) => {
-        if (attempts >= maxAttempts) {
-          reject(new Error('Django server failed to start'));
-        } else {
-          setTimeout(checkServer, 500);
-        }
-      });
-
-      req.end();
-    };
-
-    // Give Django a moment to start before first check
-    setTimeout(checkServer, 1000);
-  });
+  if (!quitting) app.quit();
 }
 
 function createWindow() {
@@ -275,13 +250,22 @@ function createWindow() {
 }
 
 // Cleanup on quit
-app.on('before-quit', () => {
-  if (djangoProcess) {
-    console.log('Shutting down Django server...');
-    djangoProcess.kill('SIGTERM');
-  }
+app.on('before-quit', (event) => {
+  if (quitAllowed) return;
+  event.preventDefault();
+  quitting = true;
+  backendReady = false;
+  startup.abort();
   ipcMain.removeHandler(IPC_CHANNELS.OPEN_EXTERNAL);
   ipcMain.removeHandler(IPC_CHANNELS.NOTIFY);
+  if (!shutdown) {
+    shutdown = stopBackend(djangoProcess)
+      .catch((error) => console.error('Backend tree shutdown failed:', error))
+      .finally(() => {
+        quitAllowed = true;
+        app.quit();
+      });
+  }
 });
 
 app.on('window-all-closed', () => {
@@ -289,7 +273,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('activate', () => {
-  if (mainWindow === null) {
+  if (!quitting && backendReady && mainWindow === null) {
     createWindow();
   }
 });

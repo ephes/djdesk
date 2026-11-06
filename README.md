@@ -72,7 +72,7 @@ The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just
 
 ### Continuous integration
 
-`.github/workflows/ci.yml` runs on every push to `main` and on every pull request with a read-only token and no secrets:
+`.github/workflows/ci.yml` runs on every push and on every pull request with a read-only token and no secrets:
 
 1. `uv sync --locked --extra dev --extra audit` – install exactly what `uv.lock` pins (the job fails if the lock is stale).
 2. `uv run --no-sync python scripts/audit_dependencies.py` – audit the frozen production lock.
@@ -115,7 +115,7 @@ npm install
 PYTHON=$(command -v python3.14 || command -v python3) npm start
 ```
 
-`npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
+`npm start` starts Django on an open port, waits for HTTP 200, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
 
 Queued workspace tasks atomically claim only `REQUESTED` runs. Duplicate delivery
 returns the persisted command outcome, or `{skipped: true, status: ...}` while a
@@ -196,3 +196,18 @@ run npm run bundle, build with electron-builder --dir --publish never, then pass
 unpacked executable to npm run smoke -- <executable> inside electron/. The smoke
 uses Playwright to assert app.isPackaged and loads the real asar/preload and bundled
 resources. Installers remain manual; smoke scripts are excluded from packages.
+
+Shell startup uses at most 30 probes within 76 seconds, with one retry per failed
+probe. Success, backend exit and quit cancel polling. Startup failure and quit share
+one shutdown owner: POSIX group TERM, then KILL after two seconds and bounded child
+reaping; Windows uses bounded taskkill /T /F. Quit waits for cleanup and cannot open
+a late window. Synthetic tests cover both API paths, and CI runs a native TERM-ignoring backend/helper
+fixture on Linux, macOS and Windows. Taskkill cannot reliably discover helpers after
+the leader has exited;
+POSIX helpers that deliberately leave the process group are also outside its reach.
+
+Terminal INT/TERM signals (and POSIX HUP) request the same graceful shutdown path.
+Repeated OS signals during cleanup remain unverified: if Electron exits early,
+the detached backend can remain alive. A hard crash or SIGKILL can also orphan
+the detached backend group: there is no parent-death containment. The packaged Linux
+smoke sends a real SIGINT and verifies the backend port is closed after the app exits.

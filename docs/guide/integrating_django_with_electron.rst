@@ -115,6 +115,14 @@ Screenshot parity depends on everyone importing the same sample projects. DJDesk
 
 Behind the scenes ``scripts/fetch_samples.py`` writes the ``django-polls``, ``djdesk`` (Atlas Telemetry), and ``generated`` projects into ``INSPECTOR_SAMPLE_ROOT`` (defaults to ``sample_projects/``). ``content.py`` references these repo-relative paths so seeds, migrations, and screenshots always point at real files. Override ``DJDESK_SAMPLE_ROOT`` if you prefer to stash the bundles elsewhere.
 
+Use ``uv run python scripts/fetch_samples.py --force`` to replace existing samples, including
+all local edits, tutorial state and databases. Replacements are staged beside the destination
+before publication. Write failures leave the previous sample untouched; publication failures
+restore it. If rollback itself fails, recover the previous tree from
+``.sample-slug-*/backup`` under the sample root.
+Cleanup failures after publication report an error with the new sample already installed;
+any leftover backup may be incomplete.
+
 .. _guide-desktop-affordances:
 
 Add desktop-only affordances (optional)
@@ -188,6 +196,14 @@ DJDesk treats the Data Lab as an export-first experience:
 2. Users pick a notebook template (schema audit, log study, etc.).
 3. ``django-tasks`` exports a deterministic ``.ipynb`` file into ``INSPECTOR_DATA_LAB_ROOT/<slug>`` and surfaces it in the panel.
 4. Selecting an export opens a static HTML preview rendered by ``inspector/data_lab.py``. Live kernels remain optional—``--with-data-lab`` installs ``jupyter_server`` and enforces the same SAFE command allowlist.
+
+Listings and previews accept regular notebook files directly inside the workspace export
+directory. Notebook symlinks, even internal ones, and symlinked workspace export directories
+are refused. On systems supporting directory-relative opens and no-follow flags, validation
+is bound to the opened descriptors. The portable fallback checks file identity around opening.
+Malformed UTF-8, JSON, cells or text outputs produce an HTTP 422 repair page with no notebook
+content or parser traceback. Repair the export in your editor and reload. The preview does
+not rewrite or execute it, and rendered source and output text remain HTML-escaped.
 
 Apply this to your project
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

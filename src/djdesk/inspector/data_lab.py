@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -111,9 +114,52 @@ def _data_lab_root() -> Path:
 def workspace_data_lab_dir(workspace: Workspace) -> Path:
     """Return the directory where notebooks for ``workspace`` live."""
     slug = workspace.slug or f"workspace-{workspace.pk}"
-    path = _data_lab_root() / slug
+    root = _data_lab_root().resolve()
+    path = root / slug
+    if path.parent != root or path.is_symlink():
+        raise ValueError("Workspace notebook directory must be directly inside the export root.")
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+@contextmanager
+def _open_notebook(workspace: Workspace, filename: str):
+    """Open a regular export, refusing symlinks, including directory symlinks."""
+    try:
+        workspace_dir = workspace_data_lab_dir(workspace)
+        if Path(filename).name != filename:
+            raise ValueError("Invalid notebook filename.")
+        with ExitStack() as stack:
+            flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+            if os.open in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW"):
+                directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                root_fd = os.open(workspace_dir.parent, directory_flags)
+                stack.callback(os.close, root_fd)
+                workspace_fd = os.open(workspace_dir.name, directory_flags, dir_fd=root_fd)
+                stack.callback(os.close, workspace_fd)
+                fd = os.open(filename, flags | os.O_NOFOLLOW, dir_fd=workspace_fd)
+                stack.callback(os.close, fd)
+            else:
+                path = workspace_dir / filename
+                before = path.lstat()
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError("Notebook must be a regular file.")
+                fd = os.open(path, flags)
+                stack.callback(os.close, fd)
+                if (
+                    workspace_dir.is_symlink()
+                    or not os.path.samestat(before, os.fstat(fd))
+                    or not os.path.samestat(before, path.lstat())
+                ):
+                    raise ValueError("Notebook changed while opening.")
+            with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    raise ValueError("Notebook must be a regular file.")
+                yield handle
+    except UnicodeError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise FileNotFoundError("Notebook export is unavailable.") from exc
 
 
 def template_summary() -> list[dict[str, Any]]:
@@ -193,9 +239,17 @@ def export_template(slug: str) -> dict[str, Any]:
 
 
 def list_workspace_exports(workspace: Workspace) -> list[dict[str, Any]]:
-    workspace_dir = workspace_data_lab_dir(workspace)
+    try:
+        workspace_dir = workspace_data_lab_dir(workspace)
+    except ValueError:
+        return []
     exports: list[dict[str, Any]] = []
     for path in sorted(workspace_dir.glob("*.ipynb")):
+        try:
+            with _open_notebook(workspace, path.name) as handle:
+                modified_at = os.fstat(handle.fileno()).st_mtime
+        except FileNotFoundError:
+            continue
         slug = path.stem
         template = export_template(slug)
         exports.append(
@@ -205,18 +259,42 @@ def list_workspace_exports(workspace: Workspace) -> list[dict[str, Any]]:
                 "description": template["description"] if template else "",
                 "path": str(path),
                 "display_path": path.name,
-                "modified_at": path.stat().st_mtime,
+                "modified_at": modified_at,
             }
         )
     return exports
 
 
+class InvalidNotebookError(ValueError):
+    """The edited export cannot be rendered by the notebook viewer."""
+
+
+def _is_notebook_text(value: Any) -> bool:
+    return isinstance(value, str) or (
+        isinstance(value, list) and all(isinstance(line, str) for line in value)
+    )
+
+
 def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
-    path = workspace_data_lab_dir(workspace) / f"{slug}.ipynb"
-    if not path.exists():
-        msg = f"Notebook '{slug}' has not been exported for workspace '{workspace.slug}'."
-        raise FileNotFoundError(msg)
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        with _open_notebook(workspace, f"{slug}.ipynb") as handle:
+            content = handle.read()
+        notebook = json.loads(content)
+    except (ValueError, RecursionError) as exc:
+        raise InvalidNotebookError("Notebook is not valid UTF-8 JSON.") from exc
+    if not isinstance(notebook, dict) or not isinstance(notebook.get("cells", []), list):
+        raise InvalidNotebookError("Notebook cells must be a list.")
+    for cell in notebook.get("cells", []):
+        if not isinstance(cell, dict) or not _is_notebook_text(cell.get("source", [])):
+            raise InvalidNotebookError("Notebook cell source must be text or a list of text.")
+        if cell.get("cell_type") == "code":
+            outputs = cell.get("outputs", [])
+            if not isinstance(outputs, list) or any(
+                not isinstance(output, dict) or not _is_notebook_text(output.get("text", []))
+                for output in outputs
+            ):
+                raise InvalidNotebookError("Notebook outputs must contain text objects.")
+    return notebook
 
 
 def render_notebook_html(notebook: dict[str, Any]) -> str:

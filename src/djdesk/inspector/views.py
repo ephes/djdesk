@@ -222,6 +222,22 @@ class DataLabNotebookView(TemplateView):
 
     template_name = "inspector/data_lab_viewer.html"
 
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            return super().get(request, *args, **kwargs)
+        except data_lab.InvalidNotebookError:
+            return self.render_to_response(
+                {
+                    "notebook_title": "Notebook needs repair",
+                    "live_enabled": settings.INSPECTOR_DATA_LAB_LIVE,
+                    "notebook_error": (
+                        "This export is not valid notebook JSON. Repair the file in your "
+                        "editor and reload. Your file has not been changed."
+                    ),
+                },
+                status=422,
+            )
+
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         workspace = get_object_or_404(Workspace, slug=kwargs["slug"])

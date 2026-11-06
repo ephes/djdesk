@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,7 +50,7 @@ def _render_manage_py(project_name: str) -> str:
 
 
 def _render_settings(project_name: str, *, slug: str, extra_apps: Iterable[str]) -> str:
-    installed = ",\n    ".join(f'"{app}"' for app in [*DJANGO_APPS, *extra_apps])
+    installed = ",\n            ".join(f'"{app}"' for app in [*DJANGO_APPS, *extra_apps])
     return textwrap.dedent(
         f"""\
         from pathlib import Path
@@ -79,19 +80,19 @@ def _render_settings(project_name: str, *, slug: str, extra_apps: Iterable[str])
         ROOT_URLCONF = "{project_name}.urls"
 
         TEMPLATES = [
-            {
+            {{
                 "BACKEND": "django.template.backends.django.DjangoTemplates",
                 "DIRS": [BASE_DIR / "templates"],
                 "APP_DIRS": True,
-                "OPTIONS": {
+                "OPTIONS": {{
                     "context_processors": [
                         "django.template.context_processors.debug",
                         "django.template.context_processors.request",
                         "django.contrib.auth.context_processors.auth",
                         "django.contrib.messages.context_processors.messages",
                     ],
-                },
-            },
+                }},
+            }},
         ]
 
         WSGI_APPLICATION = "{project_name}.wsgi.application"
@@ -659,12 +660,28 @@ def ensure_sample_projects(
         if project_dir.exists() and not force:
             results.append((project.slug, project_dir, False))
             continue
-        if project_dir.exists():
-            shutil.rmtree(project_dir)
-        project_dir.mkdir(parents=True, exist_ok=True)
-        for relative_path, content in project.files.items():
-            full_path = project_dir / relative_path
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+        staging = Path(tempfile.mkdtemp(prefix=f".{project.slug}-", dir=target_root))
+        replacement = staging / "replacement"
+        backup = staging / "backup"
+        try:
+            replacement.mkdir()
+            for relative_path, content in project.files.items():
+                full_path = replacement / relative_path
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+            if project_dir.exists():
+                project_dir.rename(backup)
+            try:
+                replacement.rename(project_dir)
+            except BaseException:
+                if backup.exists():
+                    backup.rename(project_dir)
+                raise
+            if backup.exists():
+                shutil.rmtree(backup)
+        finally:
+            # Retain the last copy at this path if rollback itself fails.
+            if not backup.exists():
+                shutil.rmtree(staging)
         results.append((project.slug, project_dir, True))
     return results

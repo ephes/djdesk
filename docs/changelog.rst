@@ -7,6 +7,12 @@ Unreleased
 Fixed
 ~~~~~
 
+- Stage forced sample refreshes before replacing the existing tree, restoring the old sample
+  on publication failure and retaining a recovery copy if rollback fails.
+- Correct settings-template braces and indentation so the sample generator loads and emits
+  valid Python settings.
+- Show a bounded HTTP 422 repair page for malformed edited notebooks without changing the file.
+
 - Preserve edited Data Lab notebooks with exclusive numeric-suffix exports and select the new file.
 
 - Atomically claim requested task runs, preserving outcomes on duplicate delivery.
@@ -41,6 +47,9 @@ Added
 
 Security
 ~~~~~~~~
+
+- Restrict Data Lab listings and reads to regular exports in the workspace directory; refuse
+  notebook and workspace-directory symlinks, including links within the export root.
 
 - Workspace commands are validated as the exact argv that is executed against a per-command
   allowlist of arguments. ``dumpdata --output``/``-o`` and every other option outside the

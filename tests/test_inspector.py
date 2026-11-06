@@ -495,6 +495,146 @@ class DataLabAPITests(TestCase):
         )
         self.assertContains(response, "Schema audit starter")
 
+    def _symlink(self, path, target, *, directory=False):
+        try:
+            path.symlink_to(target, target_is_directory=directory)
+        except (NotImplementedError, OSError) as exc:
+            self.skipTest(f"Filesystem symlinks unavailable: {type(exc).__name__}")
+
+    def test_notebook_symlinks_and_nonregular_exports_are_unavailable(self):
+        directory = data_lab.workspace_data_lab_dir(self.workspace)
+        outside = Path(self.temp_dir.name) / "outside.json"
+        outside.write_text('{"cells": [], "private": "synthetic secret"}')
+        internal = directory / "ordinary.ipynb"
+        internal.write_text('{"cells": []}')
+        self._symlink(directory / "external.ipynb", outside)
+        self._symlink(directory / "internal.ipynb", internal)
+        (directory / "directory.ipynb").mkdir()
+        for fallback in (False, True):
+            with self.subTest(fallback=fallback):
+                with mock.patch.object(
+                    data_lab.os,
+                    "supports_dir_fd",
+                    set() if fallback else data_lab.os.supports_dir_fd,
+                ):
+                    self.assertEqual(
+                        [
+                            entry["slug"]
+                            for entry in data_lab.list_workspace_exports(self.workspace)
+                        ],
+                        ["ordinary"],
+                    )
+                    for slug in ("external", "internal", "directory", "missing", "../outside"):
+                        with self.assertRaises(FileNotFoundError):
+                            data_lab.load_notebook(self.workspace, slug)
+                    self.assertEqual(
+                        data_lab.load_notebook(self.workspace, "ordinary"), {"cells": []}
+                    )
+        response = self.client.get(
+            reverse("inspector:data-lab-notebook", args=[self.workspace.slug, "external"])
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertNotIn(b"synthetic secret", response.content)
+
+    def test_workspace_directory_symlink_cannot_escape_root(self):
+        with TemporaryDirectory() as other:
+            outside = Path(other)
+            notebook = outside / "schema-audit.ipynb"
+            notebook.write_text('{"cells": [], "private": "synthetic secret"}')
+            original = notebook.read_bytes()
+            self._symlink(Path(self.temp_dir.name) / self.workspace.slug, outside, directory=True)
+            self.assertEqual(data_lab.list_workspace_exports(self.workspace), [])
+            with self.assertRaises(FileNotFoundError):
+                data_lab.load_notebook(self.workspace, "schema-audit")
+            response = self.client.get(
+                reverse("inspector:data-lab-notebook", args=[self.workspace.slug, "schema-audit"])
+            )
+            self.assertEqual(response.status_code, 404)
+            response = self.client.post(
+                reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                data={"template": "schema-audit"},
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(notebook.read_bytes(), original)
+            self.assertEqual(list(outside.iterdir()), [notebook])
+
+    def test_portable_open_rejects_substituted_file_descriptor(self):
+        path = data_lab.export_notebook(self.workspace, "schema-audit")
+        outside = Path(self.temp_dir.name) / "outside.json"
+        outside.write_text('{"cells": [], "private": "synthetic secret"}')
+        open_file = data_lab.os.open
+
+        def substitute_file(target, flags, *args, **kwargs):
+            return open_file(outside if target == path else target, flags, *args, **kwargs)
+
+        with (
+            mock.patch.object(data_lab.os, "supports_dir_fd", set()),
+            mock.patch.object(data_lab.os, "open", side_effect=substitute_file),
+            mock.patch.object(data_lab.json, "loads") as decode,
+        ):
+            with self.assertRaises(FileNotFoundError):
+                data_lab.load_notebook(self.workspace, path.stem)
+            decode.assert_not_called()
+
+    @override_settings(INSPECTOR_DATA_LAB_LIVE=True)
+    def test_malformed_edited_notebooks_show_repair_page_without_changing_bytes(self):
+        path = data_lab.export_notebook(self.workspace, "schema-audit")
+        url = reverse("inspector:data-lab-notebook", args=[self.workspace.slug, path.stem])
+        invalid = [
+            b"",
+            b'{"cells": [',
+            b"\xff",
+            b"[]",
+            b"null",
+            b'{"cells": null}',
+            b'{"cells": {}}',
+            b'{"cells": [1]}',
+            b'{"cells": [{"source": [1]}]}',
+            b'{"cells": [{"source": null}]}',
+            b'{"cells": [{"cell_type": "code", "outputs": {}}]}',
+            b'{"cells": [{"cell_type": "code", "outputs": [null]}]}',
+            b'{"cells": [{"cell_type": "code", "outputs": [{"text": [2]}]}]}',
+            b'{"cells": [{"cell_type": "code", "outputs": [{"text": null}]}]}',
+        ]
+        for content in invalid:
+            with self.subTest(content=content):
+                path.write_bytes(content)
+                response = self.client.get(url)
+                self.assertContains(response, "Notebook needs repair", status_code=422)
+                self.assertContains(response, "Repair the file", status_code=422)
+                self.assertNotContains(response, "Live kernels are disabled", status_code=422)
+                self.assertNotIn(b"Traceback", response.content)
+                self.assertLess(len(response.content), 6000)
+                self.assertEqual(path.read_bytes(), content)
+
+    def test_valid_user_edits_render_text_and_escape_html(self):
+        path = data_lab.export_notebook(self.workspace, "schema-audit")
+        path.write_text(
+            json.dumps(
+                {
+                    "cells": [
+                        {"cell_type": "markdown", "source": "<script>edited</script>"},
+                        {
+                            "cell_type": "code",
+                            "source": ["print('edited')"],
+                            "outputs": [
+                                {"text": "<b>output</b>"},
+                                {"data": {"text/html": "<script>ignored</script>"}},
+                            ],
+                        },
+                    ]
+                }
+            )
+        )
+        original = path.read_bytes()
+        response = self.client.get(
+            reverse("inspector:data-lab-notebook", args=[self.workspace.slug, path.stem])
+        )
+        self.assertContains(response, "&lt;script&gt;edited&lt;/script&gt;")
+        self.assertContains(response, "&lt;b&gt;output&lt;/b&gt;")
+        self.assertNotIn(b"<script>", response.content)
+        self.assertEqual(path.read_bytes(), original)
+
 
 class OfflineDocsViewTests(TestCase):
     def setUp(self) -> None:

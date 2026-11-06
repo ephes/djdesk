@@ -60,6 +60,14 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 
 The tutorial relies on reproducible sample workspaces so screenshots and wizard defaults stay in sync. Run `just fetch-samples` after cloning (or whenever the bundles change) to populate `sample_projects/` with the `django-polls`, `djdesk`, and `generated` fixtures referenced throughout the inspector. Seed migrations expect these directories to exist, so run the recipe before applying migrations or capturing docs/screenshots.
 
+To replace existing samples, run `uv run python scripts/fetch_samples.py --force`.
+This replaces the entire sample directory, including local edits, tutorial state and databases.
+Each replacement is fully written beside the destination first. A write failure leaves the old
+sample intact; a publication failure restores it. If restoration itself fails, the last copy
+remains under `.sample-slug-*/backup` inside the sample root for manual recovery.
+If cleanup fails after publication, the command reports an error with the new sample already
+installed; any leftover backup may be incomplete.
+
 The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
 
 ### Continuous integration
@@ -151,3 +159,9 @@ Data Lab exports exclusively claim a fresh filename on every export: the templat
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
 manual edits are preserved. The export API returns `data_lab.selected_notebook`
 with the actual filename stem, and the viewer opens that newly created export.
+The listing and viewer accept only regular files directly inside the workspace export
+directory. Notebook symlinks (including internal links) and symlinked workspace export
+directories are refused. Where supported, directory-relative opens with no symlink following
+bind these checks to the opened descriptors; other systems check file identity around the open.
+Invalid UTF-8, JSON or viewer cell/output shapes return a bounded HTTP 422 repair page.
+Edit the original file and reload; the viewer preserves its bytes and escapes rendered text.

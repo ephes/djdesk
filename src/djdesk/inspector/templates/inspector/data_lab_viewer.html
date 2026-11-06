@@ -69,7 +69,11 @@
         {% endif %}
     </header>
     <main>
+        {% if notebook_error %}
+        <p role="alert">{{ notebook_error }}</p>
+        {% else %}
         {{ notebook_html|safe }}
+        {% endif %}
     </main>
 </body>
 </html>

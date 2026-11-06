@@ -14,7 +14,8 @@ lint:
 
 # Run the same quality checks as .github/workflows/ci.yml (locked install, Ruff, Django and Electron guard tests).
 ci:
-    uv sync --locked --extra dev
+    uv sync --locked --extra dev --extra audit
+    uv run --no-sync python scripts/audit_dependencies.py
     uv run --no-sync ruff check .
     DJANGO_SETTINGS_MODULE=djdesk.settings.test uv run --no-sync python manage.py test tests
     cd electron && npm test
@@ -185,3 +186,7 @@ fetch-samples:
 docs-bundle:
     just docs-html
     uv run python scripts/bundle_docs.py
+
+# Audit the frozen production lock with the explicitly pinned auditor.
+audit:
+    uv run --locked --extra audit python scripts/audit_dependencies.py

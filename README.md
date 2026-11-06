@@ -74,10 +74,11 @@ The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just
 
 `.github/workflows/ci.yml` runs on every push to `main` and on every pull request with a read-only token and no secrets:
 
-1. `uv sync --locked --extra dev` – install exactly what `uv.lock` pins (the job fails if the lock is stale).
-2. `uv run ruff check .` – the same lint as `just lint`.
-3. `python manage.py test tests` with `DJANGO_SETTINGS_MODULE=djdesk.settings.test` – in-memory SQLite, no real workspace or home database.
-4. `npm test` in `electron/` – the main-process boundary-guard tests (`node --test`, no `npm install`).
+1. `uv sync --locked --extra dev --extra audit` – install exactly what `uv.lock` pins (the job fails if the lock is stale).
+2. `uv run --no-sync python scripts/audit_dependencies.py` – audit the frozen production lock.
+3. `uv run ruff check .` – the same lint as `just lint`.
+4. `python manage.py test tests` with `DJANGO_SETTINGS_MODULE=djdesk.settings.test` – in-memory SQLite, no real workspace or home database.
+5. `npm test` in `electron/` – the main-process boundary-guard tests (`node --test`, no `npm install`).
 
 Run `just ci` locally before opening a pull request; a change is only ready for review once both CI jobs are green. Cross-platform packaging stays in the manual `electron-desktop` workflow and is not part of these checks.
 
@@ -165,3 +166,10 @@ directories are refused. Where supported, directory-relative opens with no symli
 bind these checks to the opened descriptors; other systems check file identity around the open.
 Invalid UTF-8, JSON or viewer cell/output shapes return a bounded HTTP 422 repair page.
 Edit the original file and reload; the viewer preserves its bytes and escapes rendered text.
+
+### Python dependency security
+
+The backend requires Django >=5.2.19,<5.3 and sqlparse >=0.6.0, including packaged installs.
+Run `just audit` to audit a frozen production-only export with pip-audit 2.10.0.
+The read-only quality workflow and `just ci` run the same audit and fail on findings;
+no advisory ignores are used. Auditor dependencies are optional and not shipped.

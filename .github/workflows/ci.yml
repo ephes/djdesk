@@ -32,7 +32,10 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install locked dependencies
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra audit
+
+      - name: Audit frozen production dependencies
+        run: uv run --no-sync python scripts/audit_dependencies.py
 
       - name: Ruff lint
         run: uv run --no-sync ruff check .

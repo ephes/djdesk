@@ -163,13 +163,14 @@ Quality checks run separately. ``.github/workflows/ci.yml`` triggers on every pu
 ``main`` and every pull request with a read-only ``contents: read`` token, no secrets,
 and no artifact uploads:
 
-1. ``uv sync --locked --extra dev`` installs the dependencies pinned in ``uv.lock``.
-2. ``uv run ruff check .`` lints the project (``just lint``).
-3. ``python manage.py test tests`` runs with ``DJANGO_SETTINGS_MODULE=djdesk.settings.test``
+1. ``uv sync --locked --extra dev --extra audit`` installs the dependencies pinned in ``uv.lock``.
+2. ``uv run --no-sync python scripts/audit_dependencies.py`` audits the frozen production lock.
+3. ``uv run ruff check .`` lints the project (``just lint``).
+4. ``python manage.py test tests`` runs with ``DJANGO_SETTINGS_MODULE=djdesk.settings.test``
    (``just test``), so the suite uses in-memory SQLite and never touches a real workspace.
-4. ``npm test`` in ``electron/`` runs the main-process guard tests (``just electron-test``).
+5. ``npm test`` in ``electron/`` runs the main-process guard tests (``just electron-test``).
 
-``just ci`` runs the same four steps locally. Keep signing or upload credentials in the
+``just ci`` runs the same five steps locally. Keep signing or upload credentials in the
 packaging workflow only; the quality workflow must stay read-only.
 
 Alternatives
@@ -218,3 +219,11 @@ Utility recipes
 * ``just electron-clean-artifacts`` – remove downloaded artifacts.
 
 Run ``just -l`` to explore every helper available in the repository.
+
+Python dependency security
+--------------------------
+
+The backend requires Django >=5.2.19,<5.3 and sqlparse >=0.6.0, including packaged installs.
+Run ``just audit`` to audit a frozen production-only export with pip-audit 2.10.0.
+The read-only quality workflow and ``just ci`` run the same audit and fail on findings;
+no advisory ignores are used. Auditor dependencies are optional and not shipped.

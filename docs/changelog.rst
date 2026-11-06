@@ -48,6 +48,10 @@ Added
 Security
 ~~~~~~~~
 
+- Refresh Django to the supported 5.2.19 security floor and sqlparse to >=0.6.0.
+- Audit the frozen production lock in read-only CI with pinned pip-audit;
+  ``just audit`` runs the same failing-on-findings check locally.
+
 - Restrict Data Lab listings and reads to regular exports in the workspace directory; refuse
   notebook and workspace-directory symlinks, including links within the export root.
 

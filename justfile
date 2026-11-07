@@ -6,7 +6,7 @@ help:
 
 # Install project dependencies (and the package itself) via uv.
 install:
-    uv sync
+    uv sync --locked --extra dev
 
 # Run Ruff lint checks against the whole project.
 lint:

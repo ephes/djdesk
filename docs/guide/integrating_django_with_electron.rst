@@ -37,9 +37,12 @@ Bootstrap commands
 
 .. code-block:: bash
 
-    just install            # uv sync + editable djdesk install
+    just install            # uv sync --locked --extra dev + editable djdesk install
     just electron-install   # npm install inside ./electron
     just electron-start     # boots Django + Electron together
+
+``dev`` is an optional extra containing Ruff and pre-commit, not a default dependency group.
+For a runtime-only environment, use ``uv sync --locked`` without extras instead.
 
 ``electron/main.js`` detects the bundled Python interpreter (``electron/django-bundle/python``) and falls back to ``python3``/``python`` on PATH. It selects an open port via :mod:`get-port`, applies ``DJANGO_SETTINGS_MODULE=djdesk.settings.local`` when unset, and waits until ``/`` responds before loading the renderer window.
 
@@ -170,10 +173,16 @@ Demonstrate how Electron can launch vetted Django commands without turning into 
 Flow summary
 ~~~~~~~~~~~~
 
-1. ``TaskPreset`` rows define the allowlisted commands (label, key, docs URL, icon, confirmation requirement).
-2. The assistant drawer posts to ``POST /api/task-runs/`` with ``workspace``, ``preset``, optional note, and ``confirm_safe``.
-3. ``execute_workspace_task`` (decorated with ``@django_tasks.task``) simulates work, streams log lines, and updates ``WorkspaceTaskRun`` rows.
+1. ``TaskPreset`` rows provide command templates, labels, keys, docs URLs and icons.
+2. The assistant drawer posts to ``POST /api/task-runs/`` with ``workspace``, ``preset``, optional ``notes``, and required ``confirm_safe`` confirmation. The form persists the approved command and workspace identity/path on a new ``WorkspaceTaskRun``.
+3. ``execute_workspace_task`` (decorated with ``@django_tasks.task``) atomically claims the persisted run and executes the real management command in the approved workspace directory. It validates the snapshot against the current ``INSPECTOR_SAFE_COMMANDS`` and per-command argument policy before starting a subprocess, streams output into the run log, and records its outcome. This is real execution against the selected project; use a disposable synthetic workspace for demos. Legacy runs without approval snapshots are refused.
 4. ``app.js`` merges the response into local UI state, fires desktop notifications when runs finish, and refreshes the status payload without waiting for the next poll.
+
+Nonzero exits, timeouts, output limits and validation failures produce a failed run. Unexpected
+execution errors are recorded and propagate to the task backend. An enqueue error cancels only
+an unclaimed run; a running or completed outcome survives. Check task history before submitting
+again after an uncertain dispatch. See :doc:`../concepts` for the command allowlist, read-only
+argument rules, process cleanup and output limits, and :doc:`../api/rest_endpoints` for payloads.
 
 Apply this to your project
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

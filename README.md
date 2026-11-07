@@ -29,10 +29,12 @@ just install
 uv run pre-commit install
 ```
 
-The `just install` recipe wraps `uv sync` so dependency installs stay consistent across contributors.
+The `just install` recipe wraps `uv sync --locked --extra dev` so developer installs include
+Ruff and pre-commit from the committed lockfile.
 
-> `uv sync` installs dev dependencies by default. Use `uv sync --no-dev` if you intentionally want a
-> leaner environment. Activating `.venv/bin/activate` is optional—`uv run …` automatically executes
+> `dev` is an optional extra, not a default dependency group. For a runtime-only installation,
+> use `uv sync --locked` without extras; this excludes Ruff and pre-commit.
+> Activating `.venv/bin/activate` is optional—`uv run …` automatically executes
 > commands inside the managed environment.
 >
 > Using a different workflow? Run `pip install --editable .` (or `uv pip install -e .`) inside your
@@ -41,7 +43,7 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 ### Everyday commands
 
 - `just dev` – start the Django development server (`manage.py runserver`) using `djdesk.settings.local`.
-- `just install` – install/update dependencies via `uv sync`.
+- `just install` – install runtime and developer dependencies via `uv sync --locked --extra dev`.
 - `just test` – run Django's test suite (`manage.py test tests`) using `djdesk.settings.test`.
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
 - `just ci` – run everything the push/PR workflow runs: locked install with the `dev` extra, Ruff, the Django tests, and the Electron guard tests.

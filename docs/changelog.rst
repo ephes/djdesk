@@ -112,6 +112,9 @@ Changed
 Documentation
 ~~~~~~~~~~~~~
 
+- Install the explicit developer extra in ``just install`` and document runtime-only setup.
+- Describe real confirmed workspace task execution and dispatch failure semantics in the tutorial.
+
 - Expanded the tutorial and reference material with the full Inspector flow (tutorial chapters,
   concepts, architecture, and API/WebSocket docs) so the documentation matches the product surface.
 - Rewrote the Electron packaging guide and ensured the Read the Docs requirements install

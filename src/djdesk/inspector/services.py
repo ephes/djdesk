@@ -5,6 +5,7 @@ from datetime import timezone as datetime_timezone
 from typing import Any
 
 from django.conf import settings
+from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
 
@@ -31,12 +32,13 @@ def format_timestamp(value: timezone.datetime | None = None) -> str:
     return value.strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
+@transaction.atomic
 def bootstrap_workspace_scans(
     workspace: Workspace,
     *,
     auto_run: bool = True,
 ) -> None:
-    """Seed a predictable set of scans for tutorial screenshots."""
+    """Seed all initial scans atomically; leave existing user-managed scans alone."""
     if workspace.scans.exists():
         return
 

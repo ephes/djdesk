@@ -12,7 +12,7 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-function harness() {
+function harness({ respectAbort = true } = {}) {
   const requests = [], timers = new Map();
   let timerId = 0;
   const clock = {
@@ -26,7 +26,7 @@ function harness() {
     fetch(url, options) {
       const request = { url, options, ...deferred() };
       requests.push(request);
-      options.signal?.addEventListener('abort', () => request.reject(new Error('aborted')));
+      if (respectAbort) options.signal?.addEventListener('abort', () => request.reject(new Error('aborted')));
       return request.promise;
     },
   });
@@ -106,4 +106,55 @@ test('a stalled status request is aborted before scheduling the next request', a
   assert.equal(h.payloads.length, 0);
   h.fire(6000);
   assert.equal(h.requests.length, 2);
+});
+
+function drawerHarness() {
+  const h = harness({ respectAbort: false });
+  const visible = new Set();
+  h.ui.taskDrawer = { classList: {
+    add(value) { visible.add(value); }, remove(value) { visible.delete(value); },
+  } };
+  h.ui.taskDetailTemplate = '/tasks/0/';
+  h.ui.setTaskDrawerLoading = () => {};
+  h.ui.renderTaskDrawer = (data) => h.payloads.push(data);
+  return { ...h, visible };
+}
+
+test('drawer ignores old task successes, failures and timers after switching', async () => {
+  for (const failure of [false, true]) {
+    const h = drawerHarness();
+    h.ui.openTaskDrawer('A');
+    h.ui.openTaskDrawer('B');
+    assert.equal(h.requests[0].options.signal.aborted, true);
+    h.requests[1].resolve({ ok: true, json: async () => ({ label: 'B', status: 'running' }) });
+    await flush();
+    if (failure) h.requests[0].reject(new Error('late failure'));
+    else h.requests[0].resolve({ ok: true, json: async () => ({ label: 'A', status: 'running' }) });
+    await flush();
+    assert.deepEqual(h.payloads.map((p) => p.label), ['B']);
+    assert.equal(h.errors.length, 0);
+    assert.equal(h.visible.has('is-visible'), true);
+    assert.equal(h.timers.size, 1);
+    h.fire(3000);
+    assert.equal(h.requests[2].url, '/tasks/B/');
+  }
+});
+
+test('closing invalidates pending drawer requests and already queued refresh callbacks', async () => {
+  const h = drawerHarness();
+  h.ui.openTaskDrawer('A');
+  h.ui.closeTaskDrawer();
+  assert.equal(h.requests[0].options.signal.aborted, true);
+  h.requests[0].resolve({ ok: true, json: async () => ({ label: 'A', status: 'running' }) });
+  await flush();
+  assert.equal(h.payloads.length, 0);
+  assert.equal(h.timers.size, 0);
+  h.ui.openTaskDrawer('B');
+  h.requests[1].resolve({ ok: true, json: async () => ({ label: 'B', status: 'running' }) });
+  await flush();
+  const queued = [...h.timers.values()][0].fn;
+  h.ui.closeTaskDrawer(); queued();
+  assert.equal(h.requests.length, 2);
+  assert.equal(h.timers.size, 0);
+  assert.equal(h.visible.has('is-visible'), false);
 });

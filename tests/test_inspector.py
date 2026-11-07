@@ -13,7 +13,7 @@ from django.db import close_old_connections, connections
 from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
-from djdesk.inspector import data_lab
+from djdesk.inspector import data_lab, services
 from djdesk.inspector import forms as inspector_forms
 from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm, WorkspaceWizardForm
@@ -212,6 +212,63 @@ class WorkspaceWizardFormTests(TestCase):
             self.assertTrue(workspace.manage_py_detected)
             self.assertEqual(workspace.scans.count(), len(ScanJob.Kind.choices))
             self.assertEqual(workspace.metadata["recent_activity"][0]["kind"], "onboarding")
+
+    def test_failed_scan_insert_rolls_back_workspace_and_retry_seeds_all(self):
+        for auto_run in (False, True):
+            with self.subTest(auto_run=auto_run), TemporaryDirectory() as temp:
+                (Path(temp) / "manage.py").write_text("# synthetic project")
+                data = {
+                    "name": "Atomic",
+                    "project_path": temp,
+                    "python_version": "3.14",
+                    "confirm_readonly": True,
+                    "auto_run_scan": auto_run,
+                }
+                form = WorkspaceWizardForm(data=data)
+                self.assertTrue(form.is_valid(), form.errors)
+                count = 0
+                original = ScanJob.save
+
+                def save(scan, *args, **kwargs):
+                    nonlocal count
+                    count += 1
+                    if count == 2:
+                        raise RuntimeError("second insert")
+                    return original(scan, *args, **kwargs)
+
+                with mock.patch.object(ScanJob, "save", save):
+                    with self.assertRaisesMessage(RuntimeError, "second insert"):
+                        form.save()
+                self.assertEqual(count, 2)
+                self.assertFalse(Workspace.objects.filter(project_path=temp).exists())
+                retry = WorkspaceWizardForm(data=data)
+                self.assertTrue(retry.is_valid(), retry.errors)
+                workspace = retry.save()
+                self.assertEqual(workspace.scans.count(), 4)
+                self.assertEqual(
+                    workspace.scans.filter(status=ScanJob.Status.RUNNING).count(), int(auto_run)
+                )
+
+    def test_scan_helper_rolls_back_its_own_partial_set_and_preserves_existing_scans(self):
+        workspace = Workspace.objects.create(name="Atomic scans", project_path="/synthetic")
+        original = ScanJob.save
+        count = 0
+
+        def save(scan, *args, **kwargs):
+            nonlocal count
+            count += 1
+            if count == 2:
+                raise RuntimeError("second insert")
+            return original(scan, *args, **kwargs)
+
+        with mock.patch.object(ScanJob, "save", save):
+            with self.assertRaises(RuntimeError):
+                services.bootstrap_workspace_scans(workspace)
+        self.assertEqual(count, 2)
+        self.assertEqual(workspace.scans.count(), 0)
+        existing = workspace.scans.create(kind=ScanJob.Kind.LOGS, summary="User scan")
+        services.bootstrap_workspace_scans(workspace)
+        self.assertEqual(list(workspace.scans.values_list("pk", flat=True)), [existing.pk])
 
     def test_rejects_protected_directories(self) -> None:
         with TemporaryDirectory() as temp:

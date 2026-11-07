@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Discard stale drawer responses on task switch/close and abort superseded requests.
+- Commit workspace onboarding and initial scans atomically, including direct scan seeding.
+
 - Guard task submissions against double dispatch and serialize status polling with a deadline;
   retain valid dashboard evidence on HTTP or network failure.
 

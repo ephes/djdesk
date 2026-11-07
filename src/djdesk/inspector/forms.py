@@ -4,6 +4,7 @@ from pathlib import Path
 
 from django import forms
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from . import services
@@ -111,11 +112,12 @@ class WorkspaceWizardForm(forms.ModelForm):
         workspace.metadata = metadata
 
         if commit:
-            workspace.save()
-            services.bootstrap_workspace_scans(
-                workspace,
-                auto_run=self.cleaned_data.get("auto_run_scan", True),
-            )
+            with transaction.atomic():
+                workspace.save()
+                services.bootstrap_workspace_scans(
+                    workspace,
+                    auto_run=self.cleaned_data.get("auto_run_scan", True),
+                )
         return workspace
 
 

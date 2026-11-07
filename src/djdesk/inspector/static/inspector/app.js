@@ -908,15 +908,20 @@ class InspectorUI {
 
   openTaskDrawer(taskId) {
     if (!this.taskDrawer || !taskId) return;
+    this.clearTaskDrawerPolling();
+    this.taskDrawerController?.abort();
+    this.taskDrawerOwner = { taskId };
     this.taskDrawer.classList.add('is-visible');
     this.setTaskDrawerLoading();
-    this.loadTaskDetails(taskId);
+    this.loadTaskDetails(taskId, this.taskDrawerOwner);
   }
 
   closeTaskDrawer() {
+    this.taskDrawerOwner = null;
+    this.taskDrawerController?.abort();
+    this.clearTaskDrawerPolling();
     if (!this.taskDrawer) return;
     this.taskDrawer.classList.remove('is-visible');
-    this.clearTaskDrawerPolling();
   }
 
   setTaskDrawerLoading() {
@@ -930,23 +935,30 @@ class InspectorUI {
     this.taskDrawerLog.innerHTML = '<p class="empty-note">Preparing log stream…</p>';
   }
 
-  loadTaskDetails(taskId) {
+  loadTaskDetails(taskId, owner) {
+    if (!owner || this.taskDrawerOwner !== owner) return;
     const url = this.getTaskDetailUrl(taskId);
     if (!url) return;
-    fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+    const controller = new AbortController();
+    this.taskDrawerController = controller;
+    fetch(url, {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' }, signal: controller.signal,
+    })
       .then((response) => {
         if (!response.ok) throw new Error('Request failed');
         return response.json();
       })
       .then((data) => {
+        if (this.taskDrawerOwner !== owner) return;
         this.renderTaskDrawer(data);
         if (['running', 'requested'].includes(data.status)) {
-          this.scheduleTaskDrawerRefresh(taskId);
+          this.scheduleTaskDrawerRefresh(taskId, owner);
         } else {
           this.clearTaskDrawerPolling();
         }
       })
       .catch(() => {
+        if (this.taskDrawerOwner !== owner) return;
         this.showToast('Unable to load task log.', 'danger');
         this.closeTaskDrawer();
       });
@@ -969,9 +981,10 @@ class InspectorUI {
     }
   }
 
-  scheduleTaskDrawerRefresh(taskId) {
+  scheduleTaskDrawerRefresh(taskId, owner) {
+    if (this.taskDrawerOwner !== owner) return;
     this.clearTaskDrawerPolling();
-    this.taskDrawerPoll = window.setTimeout(() => this.loadTaskDetails(taskId), 3000);
+    this.taskDrawerPoll = window.setTimeout(() => this.loadTaskDetails(taskId, owner), 3000);
   }
 
   clearTaskDrawerPolling() {

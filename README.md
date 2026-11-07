@@ -118,6 +118,12 @@ PYTHON=$(command -v python3.14 || command -v python3) npm start
 
 `npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
 
+Opening or closing a task drawer invalidates and aborts its prior request. Only the currently
+open task may render logs, report failures or schedule another refresh.
+Workspace onboarding commits the workspace and all four initial scans in one transaction.
+The auto-run checkbox controls whether the first scan starts in the running state; existing
+user-managed scan sets are left untouched, and failed initialization can be retried.
+
 Each task form permits one submission in flight, restoring submit controls after success or
 failure and retaining input on failure. Status polling is serialized: each request has a ten
 second deadline and the next starts six seconds after completion. HTTP/network failures mark

@@ -166,32 +166,34 @@ class InspectorUI {
     const form = this.root.querySelector('[data-task-form]');
     if (!form || !this.taskEndpoint) return;
 
-    form.addEventListener('submit', (event) => {
+    let inFlight = false;
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const formData = new FormData(form);
-      fetch(this.taskEndpoint, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'X-CSRFToken': this.getCsrfToken(),
-        },
-      })
-        .then((response) => {
-          if (!response.ok) {
-            return response.json().then((data) => {
-              throw new Error(this.formatErrors(data.errors));
-            });
-          }
-          return response.json();
-        })
-        .then((payload) => {
-          this.updateFromPayload(payload);
-          form.reset();
-        })
-        .catch((error) => {
-          this.showToast(error.message || 'Unable to run task.', 'danger');
+      if (inFlight) return;
+      inFlight = true;
+      const controls = Array.from(form.querySelectorAll('button[type="submit"], input[type="submit"], button:not([type])'));
+      const disabled = controls.map((control) => control.disabled);
+      try {
+        const formData = new FormData(form);
+        controls.forEach((control) => { control.disabled = true; });
+        const response = await fetch(this.taskEndpoint, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRFToken': this.getCsrfToken(),
+          },
         });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(this.formatErrors(payload.errors));
+        this.updateFromPayload(payload);
+        form.reset();
+      } catch (error) {
+        this.showToast(error.message || 'Unable to run task.', 'danger');
+      } finally {
+        controls.forEach((control, index) => { control.disabled = disabled[index]; });
+        inFlight = false;
+      }
     });
   }
 
@@ -323,19 +325,28 @@ class InspectorUI {
   }
 
   startPolling() {
-    if (!this.statusUrl) return;
-    const fetchStatus = () => {
-      fetch(this.statusUrl, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      })
-        .then((response) => response.json())
-        .then((payload) => this.updateFromPayload(payload))
-        .catch(() => {
-          this.toggleConnection(false);
+    if (!this.statusUrl || this.pollingStarted) return;
+    this.pollingStarted = true;
+    const fetchStatus = async () => {
+      const controller = new AbortController();
+      const deadline = window.setTimeout(() => controller.abort(), 10000);
+      try {
+        const response = await fetch(this.statusUrl, {
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          signal: controller.signal,
         });
+        if (!response.ok) throw new Error('Status request failed');
+        const payload = await response.json();
+        if (controller.signal.aborted) throw new Error('Status request timed out');
+        this.updateFromPayload(payload);
+      } catch {
+        this.toggleConnection(false);
+      } finally {
+        clearTimeout(deadline);
+        this.polling = window.setTimeout(fetchStatus, 6000);
+      }
     };
     fetchStatus();
-    this.polling = window.setInterval(fetchStatus, 6000);
   }
 
   updateFromPayload(payload) {

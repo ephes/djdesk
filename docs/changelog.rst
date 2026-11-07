@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Guard task submissions against double dispatch and serialize status polling with a deadline;
+  retain valid dashboard evidence on HTTP or network failure.
+
 - Snapshot approved task commands and workspace paths; refuse legacy queues without approval.
 - Preserve claimed outcomes on enqueue errors and completely finish unclaimed failures.
 

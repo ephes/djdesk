@@ -118,6 +118,11 @@ PYTHON=$(command -v python3.14 || command -v python3) npm start
 
 `npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
 
+Each task form permits one submission in flight, restoring submit controls after success or
+failure and retaining input on failure. Status polling is serialized: each request has a ten
+second deadline and the next starts six seconds after completion. HTTP/network failures mark
+the connection unhealthy while retaining the last valid dashboard state.
+
 Task confirmation stores the command and workspace identity/path on the run. Workers execute and
 log that snapshot even if the preset or workspace is edited later, applying the current safety
 policy again. Legacy queued runs without a snapshot fail without execution: inspect them and

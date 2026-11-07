@@ -7,28 +7,50 @@ import argparse
 import json
 import os
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+from filelock import FileLock
+
 
 def _prepare_destination(source: Path, dest: Path) -> None:
-    temp_dest = dest.parent / f".{dest.name}.tmp"
-    backup_dest = dest.parent / f".{dest.name}.old"
-
-    if temp_dest.exists():
-        shutil.rmtree(temp_dest)
-    shutil.copytree(source, temp_dest)
-
-    if backup_dest.exists():
-        shutil.rmtree(backup_dest)
-
-    if dest.exists():
-        os.replace(dest, backup_dest)
-
-    os.replace(temp_dest, dest)
-
-    if backup_dest.exists():
-        shutil.rmtree(backup_dest)
+    dest = dest.resolve()
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    work = Path(tempfile.mkdtemp(prefix=f".{dest.name}-publish-", dir=dest.parent))
+    staging = work / "staging"
+    backup = work / "backup"
+    promoted = False
+    try:
+        shutil.copytree(source, staging)
+        # Leave this lock file in place: unlinking it can split waiting writers.
+        with FileLock(dest.parent / f".{dest.name}.lock", timeout=10):
+            if dest.exists():
+                os.replace(dest, backup)
+            try:
+                os.replace(staging, dest)
+            except BaseException as error:
+                if backup.exists():
+                    try:
+                        os.replace(backup, dest)
+                    except BaseException as restore_error:
+                        error.add_note(f"Restoration failed: {restore_error}")
+                raise
+            promoted = True
+            shutil.rmtree(work)
+    except BaseException as error:
+        if promoted:
+            error.add_note(
+                f"New bundle installed at {dest}; leftover workspace {work} may be incomplete"
+            )
+        elif backup.exists():
+            error.add_note(f"Recovery copy retained at {backup}")
+        else:
+            try:
+                shutil.rmtree(work)
+            except OSError as cleanup_error:
+                error.add_note(f"Could not clean staging directory {work}: {cleanup_error}")
+        raise
 
 
 def parse_args() -> argparse.Namespace:

@@ -156,6 +156,9 @@ async function startDjango() {
       DJANGO_ENV: process.env.DJANGO_ENV || 'local',
       DJANGO_SETTINGS_MODULE: process.env.DJANGO_SETTINGS_MODULE || 'djdesk.settings.local'
     };
+    if (app.isPackaged) {
+      djangoEnv.DJDESK_STATE_ROOT = app.getPath('userData');
+    }
 
     // Spawn Django dev server
     djangoProcess = spawn(pythonInfo.interpreter, djangoArgs, {

@@ -47,7 +47,12 @@ cd electron && npm run bundle
 
 > Only the packages listed under `[project].dependencies` in `pyproject.toml` are installed. Optional extras/dev dependencies are ignored.
 
-The bundle is ignored by Git and may be regenerated at any time.
+The bundle is ignored by Git. Packaged launches store SQLite and exports under
+`app.getPath('userData')`, passed as `DJDESK_STATE_ROOT`, outside this replaceable tree.
+Before regenerating an older bundle, close DJDesk and back up `django-bundle/db.sqlite3`
+(and SQLite companions) and `django-bundle/var/data_lab/`. Follow the legacy recovery
+instructions in `docs/guide/integrating_django_with_electron.rst`; do not overwrite an
+existing destination. There is no automatic legacy-state migration.
 
 ## Shell Boundary and Build Tests
 

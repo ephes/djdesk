@@ -5,6 +5,10 @@ from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parents[3]
+_STATE_ROOT_OVERRIDE = os.environ.get("DJDESK_STATE_ROOT")
+STATE_ROOT = Path(_STATE_ROOT_OVERRIDE).expanduser().resolve() if _STATE_ROOT_OVERRIDE else BASE_DIR
+if _STATE_ROOT_OVERRIDE:
+    STATE_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 # Quick-start development settings - unsuitable for production
@@ -67,7 +71,7 @@ WSGI_APPLICATION = "djdesk.wsgi.application"
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "NAME": STATE_ROOT / "db.sqlite3",
     }
 }
 
@@ -151,7 +155,7 @@ INSPECTOR_COMMAND_OUTPUT_BYTES = int(
 INSPECTOR_TASK_LOG_BYTES = int(os.environ.get("DJDESK_INSPECTOR_TASK_LOG_BYTES", str(1024 * 1024)))
 
 INSPECTOR_DATA_LAB_ROOT = Path(
-    os.environ.get("DJDESK_DATA_LAB_ROOT", BASE_DIR / "var" / "data_lab")
+    os.environ.get("DJDESK_DATA_LAB_ROOT", STATE_ROOT / "var" / "data_lab")
 ).expanduser()
 INSPECTOR_DATA_LAB_LIVE = _env_flag("DJDESK_FLAG_DATA_LAB_LIVE", False)
 

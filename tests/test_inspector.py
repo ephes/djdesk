@@ -630,6 +630,40 @@ class DataLabAPITests(TestCase):
                 entry = next(nb for nb in listing if nb["slug"] == "schema-audit-2")
                 self.assertEqual(response.context["notebook_title"], entry["title"])
 
+    def test_live_indicator_never_executes_exported_cells(self):
+        marker = Path(self.temp_dir.name) / "must-not-exist"
+        for live in (False, True):
+            with self.subTest(live=live), override_settings(INSPECTOR_DATA_LAB_LIVE=live):
+                with mock.patch("subprocess.Popen", side_effect=AssertionError("kernel launch")):
+                    response = self.client.post(
+                        reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                        data={"template": "schema-audit"},
+                    )
+                    self.assertEqual(response.status_code, 201)
+                    payload = response.json()["data_lab"]
+                    self.assertEqual(payload["live_enabled"], live)
+                    slug = payload["selected_notebook"]
+                    path = Path(self.temp_dir.name) / self.workspace.slug / f"{slug}.ipynb"
+                    notebook = json.loads(path.read_text())
+                    notebook["cells"] = [
+                        {
+                            "cell_type": "code",
+                            "source": [
+                                    "from pathlib import Path\n",
+                                    f"Path({str(marker)!r}).write_text('executed')",
+                            ],
+                            "outputs": [],
+                        }
+                    ]
+                    path.write_text(json.dumps(notebook))
+                    saved = path.read_bytes()
+                    preview = self.client.get(
+                        reverse("inspector:data-lab-notebook", args=[self.workspace.slug, slug])
+                    )
+                self.assertContains(preview, "write_text")
+                self.assertEqual(path.read_bytes(), saved)
+                self.assertFalse(marker.exists())
+
     def test_notebook_view_renders(self) -> None:
         self.client.post(
             reverse("inspector:data-lab-export", args=[self.workspace.slug]),

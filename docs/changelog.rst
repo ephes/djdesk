@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Keep packaged SQLite and exports under Electron's per-user data root, outside the bundle;
+  document manual legacy-state recovery without overwriting existing data.
+
 - Discard stale drawer responses on task switch/close and abort superseded requests.
 - Commit workspace onboarding and initial scans atomically, including direct scan seeding.
 
@@ -111,6 +114,9 @@ Changed
 
 Documentation
 ~~~~~~~~~~~~~
+
+- Describe Data Lab's synchronous notebook export/static preview and actual settings;
+  remove unavailable stage and kernel-install switches.
 
 - Install the explicit developer extra in ``just install`` and document runtime-only setup.
 - Describe real confirmed workspace task execution and dispatch failure semantics in the tutorial.

@@ -201,10 +201,16 @@ Concept
 
 DJDesk treats the Data Lab as an export-first experience:
 
-1. The sidebar exposes a **Data Lab** panel (currently gated behind the legacy ``DJDESK_FLAG_STAGE_5`` feature flag).
+1. The dashboard exposes a **Data Lab** panel without a stage feature flag.
 2. Users pick a notebook template (schema audit, log study, etc.).
-3. ``django-tasks`` exports a deterministic ``.ipynb`` file into ``INSPECTOR_DATA_LAB_ROOT/<slug>`` and surfaces it in the panel.
-4. Selecting an export opens a static HTML preview rendered by ``inspector/data_lab.py``. Live kernels remain optional—``--with-data-lab`` installs ``jupyter_server`` and enforces the same SAFE command allowlist.
+3. ``POST /api/workspaces/<slug>/data-lab/export/`` synchronously writes a template-based ``.ipynb`` into ``INSPECTOR_DATA_LAB_ROOT/<slug>`` and returns the updated listing. Existing files are preserved with numeric suffixes; ``data_lab.selected_notebook`` identifies the fresh export.
+4. Selecting an export opens a static HTML preview rendered by ``inspector/data_lab.py``. No code cells are executed and no Jupyter kernel or server is launched.
+
+``DJDESK_DATA_LAB_ROOT`` overrides the export root. By default it is ``var/data_lab`` under
+the development project root, or under the packaged app's per-user state root (see below).
+``DJDESK_FLAG_DATA_LAB_LIVE`` sets ``INSPECTOR_DATA_LAB_LIVE`` for the payload/viewer indicator
+only; live execution is unfinished and enabling this flag does not start a kernel. There is
+no ``--with-data-lab`` installer option.
 
 Listings and previews accept regular notebook files directly inside the workspace export
 directory. Notebook symlinks, even internal ones, and symlinked workspace export directories
@@ -218,8 +224,8 @@ Apply this to your project
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Decide whether rich exports are static (HTML snapshots) or interactive (kernels, sandboxes).
-2. Store artifacts under a repo-ignored directory (e.g., ``var/data_lab/``) so contributors can reset between runs.
-3. Reuse your task orchestration pipeline so notebook exports appear alongside other background jobs.
+2. Store user exports outside replaceable application files; use a repo-ignored directory only for development fixtures.
+3. Add separate execution infrastructure and policy if your application needs live kernels; DJDesk's shipped viewer is static.
 
 .. _guide-package:
 
@@ -230,6 +236,24 @@ Objective
 ~~~~~~~~~
 
 Bundle the Django payload with Electron so contributors can install/run DJDesk without managing Python. This section summarizes the workflow and points to :doc:`../electron` for exhaustive reference.
+
+Packaged state and legacy recovery
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The packaged shell passes Electron's ``app.getPath('userData')`` as ``DJDESK_STATE_ROOT``.
+Django stores ``db.sqlite3`` and, by default, ``var/data_lab/`` under that root, outside the
+replaceable bundle. ``DJDESK_DATA_LAB_ROOT`` still overrides exports. Source development
+keeps its project-local defaults unless ``DJDESK_STATE_ROOT`` is explicitly set. Offline
+docs and static assets remain in the application payload.
+
+Before rebuilding or replacing an older bundle, close DJDesk and back up its legacy
+``electron/django-bundle/db.sqlite3`` and ``electron/django-bundle/var/data_lab/``
+(installed copies use the same paths under the app's ``django-bundle`` resource). The builder
+removes the entire old bundle. To recover, copy the closed database and exports into the
+corresponding paths under the new per-user root before launch. Preserve any SQLite ``-wal``
+and ``-shm`` companions with the database. If a destination already exists, back it up and
+resolve the two datasets manually; do not overwrite it. DJDesk does not silently migrate or
+merge legacy state. The new launcher applies migrations to the chosen database on startup.
 
 Checklist
 ~~~~~~~~~

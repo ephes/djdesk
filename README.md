@@ -103,6 +103,15 @@ uv run python manage.py migrate
 
 ### Electron desktop shell
 
+Packaged apps pass Electron's public `app.getPath('userData')` as `DJDESK_STATE_ROOT`.
+SQLite (`db.sqlite3`) and exports (`var/data_lab/`, unless `DJDESK_DATA_LAB_ROOT` overrides it)
+live there, outside replaceable application files. Development keeps project-local defaults
+unless `DJDESK_STATE_ROOT` is explicitly set. Before rebuilding an old bundle, close the app
+and back up `electron/django-bundle/db.sqlite3` (plus SQLite companions) and
+`electron/django-bundle/var/data_lab/`; rebuilding deletes the bundle. No automatic copy or
+overwrite occurs. See [legacy recovery instructions](docs/guide/integrating_django_with_electron.rst)
+before moving old state into the new per-user root, especially if it already contains data.
+
 The shell prefers the Phase 3 standalone Python bundle built by `just electron-bundle`.
 Without a bundle, you can run the development fallback using your local interpreter:
 

@@ -127,10 +127,15 @@ payload alongside ``resources/app.asar``.
 Production checklist
 --------------------
 
-* **Database location.** ``djdesk.settings.base`` points SQLite at ``BASE_DIR /
-  "db.sqlite3"``. Inside an installer this resolves to ``django-bundle/db.sqlite3``,
-  which may be read-only. Override ``DATABASES['default']['NAME']`` via environment
-  variables to a writable path under ``app.getPath('userData')``.
+* **Writable state.** The packaged shell passes ``app.getPath('userData')`` as
+  ``DJDESK_STATE_ROOT``. Settings use it for ``db.sqlite3`` and ``var/data_lab/``;
+  ``DJDESK_DATA_LAB_ROOT`` can still override exports. Source development retains
+  project-local defaults unless a state root is explicitly set. Offline docs and
+  static assets remain in the payload. Before rebuilding an older bundle, close
+  DJDesk and back up ``django-bundle/db.sqlite3`` (including SQLite companions)
+  and ``django-bundle/var/data_lab/``. See the packaged-state recovery section in
+  :doc:`guide/integrating_django_with_electron` before copying to the new root;
+  existing destinations are never silently replaced or merged.
 * **Migrations.** The bundled launcher applies ``manage.py migrate`` on startup (see
   ``run_django.py``). If you require migrations to run during bundling instead, extend
   ``build-django.js`` accordingly; the reference build performs them when the Electron

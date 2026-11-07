@@ -7,6 +7,10 @@ Unreleased
 Fixed
 ~~~~~
 
+- Refuse equal or nested offline docs source/destination trees, including symlink and
+  case aliases, before changing files. Stage provenance metadata with the HTML so a failed
+  manifest write leaves the previous complete generation intact.
+
 - Restore the previous offline docs bundle on promotion failure and report a recovery
   copy if restoration fails. Give concurrent publishers unique staging/backup paths
   and a bounded same-destination writer lock, preserving other publishers' files.

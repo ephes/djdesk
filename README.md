@@ -70,6 +70,19 @@ installed; any leftover backup may be incomplete.
 
 The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
 
+Offline docs publishers copy into unique sibling staging directories and wait up to ten
+seconds for a same-destination writer lock. A failed promotion restores the previous bundle.
+If restoration also fails, the original error reports the retained
+`.docs_bundle-publish-*/backup` recovery path beside the destination. With publishers stopped,
+move that backup back to the destination before retrying. Never remove the sibling lock file
+while publishers may be running. Copying happens outside the lock; successful publications
+are serialized, with the last completed publication winning. This is a recoverable swap,
+not a crash-atomic directory exchange: a killed publisher can leave the destination absent
+and its backup in the reported directory pattern. Cleanup failure after promotion reports an
+error with the new bundle installed; a leftover backup may be incomplete.
+The publisher uses `filelock>=4.2.1`, included in the normal Python dependencies so
+`uv run python scripts/bundle_docs.py` works without selecting a development extra.
+
 ### Continuous integration
 
 `.github/workflows/ci.yml` runs on every push to `main` and on every pull request with a read-only token and no secrets:

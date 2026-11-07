@@ -7,6 +7,10 @@ Unreleased
 Fixed
 ~~~~~
 
+- Restore the previous offline docs bundle on promotion failure and report a recovery
+  copy if restoration fails. Give concurrent publishers unique staging/backup paths
+  and a bounded same-destination writer lock, preserving other publishers' files.
+
 - Align Electron setup documentation with the implemented standalone Python bundle
   and Node.js >=22.12.0 requirement; clarify the system-Python development fallback.
 

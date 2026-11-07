@@ -408,10 +408,7 @@ class ProcessTreeTests(ProcessFixtureCase):
 
     def test_command_that_closes_output_and_keeps_running_times_out(self) -> None:
         self.write_manage(
-            "print('closing', flush=True)\n"
-            "os.close(1)\n"
-            "os.close(2)\n"
-            "time.sleep(120)\n"
+            "print('closing', flush=True)\nos.close(1)\nos.close(2)\ntime.sleep(120)\n"
         )
         result = self.run_fixture(timeout=1)
         self.assertTrue(result.timed_out)
@@ -517,7 +514,17 @@ class TaskFailureRecordingTests(ProcessFixtureCase, TestCase):
         return mock.patch.object(WorkspaceTaskRun, "append_log", autospec=True, side_effect=sink)
 
     def test_callback_failure_fails_the_run_and_keeps_the_original_error(self) -> None:
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace_record, preset=self.preset)
+        run = WorkspaceTaskRun.objects.create(
+            workspace=self.workspace_record,
+            preset=self.preset,
+            metadata={
+                "approval": {
+                    "command": self.preset.command,
+                    "workspace_id": self.workspace_record.pk,
+                    "workspace_path": self.workspace_record.project_path,
+                }
+            },
+        )
         with self._failing_sink(), self.assertRaisesMessage(RuntimeError, "sink failed"):
             execute_workspace_task.call(run.pk)
         run.refresh_from_db()
@@ -531,7 +538,17 @@ class TaskFailureRecordingTests(ProcessFixtureCase, TestCase):
         self.assert_fully_cleaned_up()
 
     def test_failure_to_record_does_not_replace_the_original_error(self) -> None:
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace_record, preset=self.preset)
+        run = WorkspaceTaskRun.objects.create(
+            workspace=self.workspace_record,
+            preset=self.preset,
+            metadata={
+                "approval": {
+                    "command": self.preset.command,
+                    "workspace_id": self.workspace_record.pk,
+                    "workspace_path": self.workspace_record.project_path,
+                }
+            },
+        )
         database_down = mock.patch(
             "django.db.models.query.QuerySet.update", side_effect=OSError("db down")
         )
@@ -555,7 +572,17 @@ class TaskFailureRecordingTests(ProcessFixtureCase, TestCase):
 
     def test_buffered_output_survives_a_failing_log_save(self) -> None:
         self.write_manage("print('first')\nprint('second', flush=True)\ntime.sleep(120)\n")
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace_record, preset=self.preset)
+        run = WorkspaceTaskRun.objects.create(
+            workspace=self.workspace_record,
+            preset=self.preset,
+            metadata={
+                "approval": {
+                    "command": self.preset.command,
+                    "workspace_id": self.workspace_record.pk,
+                    "workspace_path": self.workspace_record.project_path,
+                }
+            },
+        )
         real_append = WorkspaceTaskRun.append_log
 
         def sink(instance, message):
@@ -575,7 +602,17 @@ class TaskFailureRecordingTests(ProcessFixtureCase, TestCase):
 
     def test_unexpected_error_after_the_outcome_is_stored_keeps_that_outcome(self) -> None:
         self.write_manage("print('ok')\n")
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace_record, preset=self.preset)
+        run = WorkspaceTaskRun.objects.create(
+            workspace=self.workspace_record,
+            preset=self.preset,
+            metadata={
+                "approval": {
+                    "command": self.preset.command,
+                    "workspace_id": self.workspace_record.pk,
+                    "workspace_path": self.workspace_record.project_path,
+                }
+            },
+        )
         with (
             mock.patch(
                 "djdesk.inspector.tasks.transaction.on_commit", side_effect=RuntimeError("late")
@@ -654,7 +691,15 @@ class TaskOutputBudgetTests(ProcessFixtureCase, TestCase):
             key="fixture-check", label="Fixture", description="Fixture", command=self.command
         )
         self.run_record = WorkspaceTaskRun.objects.create(
-            workspace=self.workspace_record, preset=self.preset
+            workspace=self.workspace_record,
+            preset=self.preset,
+            metadata={
+                "approval": {
+                    "command": self.preset.command,
+                    "workspace_id": self.workspace_record.pk,
+                    "workspace_path": self.workspace_record.project_path,
+                }
+            },
         )
 
     def execute(self) -> dict:

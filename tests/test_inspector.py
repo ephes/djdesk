@@ -22,6 +22,20 @@ from djdesk.inspector.tasks import execute_workspace_task
 from djdesk.inspector.views import DashboardView
 
 
+def _approved_run(workspace, preset):
+    return WorkspaceTaskRun.objects.create(
+        workspace=workspace,
+        preset=preset,
+        metadata={
+            "approval": {
+                "command": preset.command,
+                "workspace_id": workspace.pk,
+                "workspace_path": workspace.project_path,
+            }
+        },
+    )
+
+
 class WorkspaceModelTests(TestCase):
     def test_retries_slug_generation_on_collision(self) -> None:
         Workspace.objects.create(
@@ -84,7 +98,6 @@ class WorkspaceTaskRunLogTests(TestCase):
         for index in range(run.LOG_BATCH_SIZE):
             run.append_log(f"Line {index}")
         self.assertIn("Line 0", run.log)
-
 
     @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
     def test_retained_log_budget_counts_timestamps_and_newlines(self) -> None:
@@ -275,6 +288,79 @@ class TaskRunFormTests(TestCase):
         self.assertFalse(form.is_valid())
         self.assertIn("confirm_safe", form.errors)
 
+    def confirmed_form(self):
+        form = TaskRunForm(
+            data={
+                "workspace": self.workspace.slug,
+                "preset": self.preset.key,
+                "confirm_safe": "on",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        return form
+
+    def test_queue_uses_approved_command_and_path_after_edits(self):
+        with mock.patch("djdesk.inspector.forms.execute_workspace_task") as dispatch:
+            dispatch.enqueue.return_value.id = "queued"
+            run = self.confirmed_form().save()
+        original_path = self.workspace.project_path
+        TaskPreset.objects.filter(pk=self.preset.pk).update(
+            command="python manage.py showmigrations"
+        )
+        Workspace.objects.filter(pk=self.workspace.pk).update(project_path="/changed")
+        result = CommandResult(
+            exit_code=0, duration=0, output_lines=0, safe_prefix="python manage.py check"
+        )
+        with mock.patch("djdesk.inspector.tasks.run_command", return_value=result) as command:
+            execute_workspace_task.call(run.pk)
+        self.assertEqual(command.call_args.kwargs["command"], "python manage.py check")
+        self.assertEqual(command.call_args.kwargs["workspace_path"], original_path)
+        run.refresh_from_db()
+        self.assertEqual(run.metadata["command"]["raw"], "python manage.py check")
+        self.assertEqual(run.metadata["command"]["workspace_path"], original_path)
+
+    def test_legacy_queue_without_approval_is_refused(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        with mock.patch("djdesk.inspector.tasks.run_command") as command:
+            execute_workspace_task.call(run.pk)
+        command.assert_not_called()
+        run.refresh_from_db()
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertIn("Missing task approval", run.log)
+
+    @override_settings(INSPECTOR_SAFE_COMMANDS=[])
+    def test_snapshot_still_obeys_current_safety_policy(self):
+        run = _approved_run(self.workspace, self.preset)
+        with mock.patch("djdesk.inspector.tasks.run_command") as command:
+            execute_workspace_task.call(run.pk)
+        command.assert_not_called()
+        run.refresh_from_db()
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+
+    def test_enqueue_error_preserves_claimed_and_completed_runs(self):
+        for complete in (False, True):
+            with self.subTest(complete=complete):
+                captured = []
+
+                def dispatch(pk):
+                    run = WorkspaceTaskRun.objects.get(pk=pk)
+                    self.assertTrue(run.mark_running())
+                    run.append_log("Worker claimed")
+                    run.flush_log_buffer()
+                    if complete:
+                        run.mark_finished(success=True)
+                    captured.append((run.status, run.started_at, run.completed_at, run.log))
+                    raise RuntimeError("Lost acknowledgement")
+
+                with mock.patch("djdesk.inspector.forms.execute_workspace_task") as task:
+                    task.enqueue.side_effect = dispatch
+                    with self.assertRaises(forms.ValidationError):
+                        self.confirmed_form().save()
+                run = WorkspaceTaskRun.objects.latest("pk")
+                self.assertEqual(
+                    (run.status, run.started_at, run.completed_at, run.log), captured[0]
+                )
+
     def test_surface_enqueue_failures(self) -> None:
         form = TaskRunForm(
             data={
@@ -298,6 +384,11 @@ class TaskRunFormTests(TestCase):
         assert run is not None
         self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
         self.assertIn("Unable to enqueue", run.log)
+        self.assertEqual(run.progress, 100)
+        self.assertIsNotNone(run.completed_at)
+        with mock.patch("djdesk.inspector.tasks.run_command") as command:
+            execute_workspace_task.call(run.pk)
+        command.assert_not_called()
 
 
 class InspectorAPIViewTests(TestCase):
@@ -681,7 +772,10 @@ class OfflineDocsViewTests(TestCase):
 
 class TaskExecutionIntegrationTests(TestCase):
     def setUp(self) -> None:
-        self.project_root = Path(__file__).resolve().parents[1]
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.project_root = Path(temporary.name)
+        (self.project_root / "manage.py").write_text("print('synthetic check')")
         self.workspace = Workspace.objects.create(
             name="Repo Workspace",
             project_path=str(self.project_root),
@@ -697,7 +791,7 @@ class TaskExecutionIntegrationTests(TestCase):
         )
 
     def test_execute_workspace_task_runs_safe_command(self) -> None:
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run = _approved_run(self.workspace, self.preset)
 
         execute_workspace_task.call(run.pk)
         run.refresh_from_db()
@@ -721,7 +815,7 @@ class TaskExecutionIntegrationTests(TestCase):
             ]
         )
         preset = TaskPreset.objects.get(key="unsafe-migrate")
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=preset)
+        run = _approved_run(self.workspace, preset)
 
         execute_workspace_task.call(run.pk)
         run.refresh_from_db()
@@ -735,7 +829,7 @@ class TaskExecutionIntegrationTests(TestCase):
             project_path="/tmp/djdesk/missing",
             metadata={"recent_activity": [], "schema": {"nodes": []}},
         )
-        run = WorkspaceTaskRun.objects.create(workspace=broken_workspace, preset=self.preset)
+        run = _approved_run(broken_workspace, self.preset)
 
         execute_workspace_task.call(run.pk)
         run.refresh_from_db()
@@ -752,7 +846,7 @@ class TaskExecutionIntegrationTests(TestCase):
             safe_prefix="python manage.py check",
             timed_out=True,
         )
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run = _approved_run(self.workspace, self.preset)
 
         execute_workspace_task.call(run.pk)
         run.refresh_from_db()
@@ -765,7 +859,7 @@ class TaskExecutionIntegrationTests(TestCase):
         side_effect=CommandExecutionError("boom"),
     )
     def test_handles_command_execution_errors(self, mock_run_command: mock.MagicMock) -> None:
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run = _approved_run(self.workspace, self.preset)
 
         execute_workspace_task.call(run.pk)
         run.refresh_from_db()
@@ -774,7 +868,7 @@ class TaskExecutionIntegrationTests(TestCase):
         self.assertIn("boom", run.log)
 
     def test_duplicate_deliveries_execute_once(self):
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run = _approved_run(self.workspace, self.preset)
         result = CommandResult(
             exit_code=0, duration=0.1, output_lines=0, safe_prefix=self.preset.command
         )
@@ -789,7 +883,7 @@ class TaskExecutionIntegrationTests(TestCase):
         self.assertEqual(snapshot, (run.started_at, run.completed_at, run.log, run.metadata))
 
     def test_already_running_delivery_is_noop(self):
-        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        run = _approved_run(self.workspace, self.preset)
         run.mark_running()
         snapshot = run.started_at
         with mock.patch("djdesk.inspector.tasks.run_command") as command:

@@ -38,8 +38,8 @@ def _fail_run(
     run.append_log(message)
     run.flush_log_buffer()
     payload: dict[str, Any] = {
-        "raw": run.preset.command,
-        "workspace_path": run.workspace.project_path,
+        "raw": (run.metadata.get("approval") or {}).get("command"),
+        "workspace_path": (run.metadata.get("approval") or {}).get("workspace_path"),
         "error": message,
         "output_limited": run.log_truncated,
     }
@@ -54,8 +54,8 @@ def _fail_run(
 
 def _success_payload(run: WorkspaceTaskRun, result: CommandResult) -> dict[str, Any]:
     payload = {
-        "raw": run.preset.command,
-        "workspace_path": run.workspace.project_path,
+        "raw": run.metadata["approval"]["command"],
+        "workspace_path": run.metadata["approval"]["workspace_path"],
         "safe_prefix": result.safe_prefix,
         "exit_code": result.exit_code,
         "duration_seconds": result.duration,
@@ -102,8 +102,8 @@ def _record_unexpected_failure(run: WorkspaceTaskRun, error: BaseException | Non
     try:
         log = _fallback_log(run, message)
         command = {
-            "raw": run.preset.command,
-            "workspace_path": run.workspace.project_path,
+            "raw": (run.metadata.get("approval") or {}).get("command"),
+            "workspace_path": (run.metadata.get("approval") or {}).get("workspace_path"),
             "error": message,
         }
         WorkspaceTaskRun.objects.filter(pk=run.pk, status=WorkspaceTaskRun.Status.RUNNING).update(
@@ -138,7 +138,16 @@ def execute_workspace_task(task_run_id: int) -> dict[str, Any]:
 
 
 def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
-    command = (run.preset.command or "").strip()
+    approval = run.metadata.get("approval")
+    if (
+        not isinstance(approval, dict)
+        or not isinstance(approval.get("command"), str)
+        or not isinstance(approval.get("workspace_path"), str)
+        or approval.get("workspace_id") != run.workspace_id
+    ):
+        return _fail_run(run, "Missing task approval snapshot; submit a newly confirmed task.")
+    command = approval["command"].strip()
+    workspace_path = approval["workspace_path"]
     try:
         safe_prefix = validate_safe_command(command)
     except CommandExecutionError as exc:
@@ -146,7 +155,7 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
 
     run.progress = 5
     run.save(update_fields=["progress"])
-    run.append_log(f"Executing `{command}` inside {run.workspace.project_path}")
+    run.append_log(f"Executing `{command}` inside {workspace_path}")
     run.flush_log_buffer()
     if run.log_truncated:
         # Output could not be recorded at all, and a silent command would never be stopped
@@ -168,7 +177,7 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
     try:
         result = run_command(
             command=command,
-            workspace_path=run.workspace.project_path,
+            workspace_path=workspace_path,
             timeout=settings.INSPECTOR_TASK_TIMEOUT,
             log_callback=log_output,
         )

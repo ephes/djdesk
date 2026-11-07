@@ -118,6 +118,14 @@ PYTHON=$(command -v python3.14 || command -v python3) npm start
 
 `npm start` starts Django on an open port, waits for it to respond, and then shows the site in an Electron window. Close the window (or press `Ctrl+C` in the terminal) to shut down both Electron and Django.
 
+Task confirmation stores the command and workspace identity/path on the run. Workers execute and
+log that snapshot even if the preset or workspace is edited later, applying the current safety
+policy again. Legacy queued runs without a snapshot fail without execution: inspect them and
+submit a newly confirmed task. No data migration fabricates approval for existing rows.
+An enqueue error cancels only an unclaimed run with a complete failure record; a claimed or
+completed outcome is preserved. Dispatch uncertainty is reported without automatic retry:
+check task history before submitting again.
+
 Queued workspace tasks atomically claim only `REQUESTED` runs. Duplicate delivery
 returns the persisted command outcome, or `{skipped: true, status: ...}` while a
 run is in progress or has no outcome. It never resets logs or timestamps and

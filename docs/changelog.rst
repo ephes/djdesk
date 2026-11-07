@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Snapshot approved task commands and workspace paths; refuse legacy queues without approval.
+- Preserve claimed outcomes on enqueue errors and completely finish unclaimed failures.
+
 - Align Electron setup documentation with the implemented standalone Python bundle
   and Node.js >=22.12.0 requirement; clarify the system-Python development fallback.
 

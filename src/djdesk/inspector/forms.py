@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from django import forms
+from django.conf import settings
+from django.utils import timezone
 
 from . import services
 from .models import TaskPreset, Workspace, WorkspaceTaskRun
@@ -150,15 +152,31 @@ class TaskRunForm(forms.Form):
             workspace=workspace,
             preset=preset,
             requested_by=self.initial.get("requested_by", "inspector"),
-            metadata={"notes": self.cleaned_data.get("notes", "")},
+            metadata={
+                "notes": self.cleaned_data.get("notes", ""),
+                "approval": {
+                    "command": preset.command,
+                    "workspace_id": workspace.pk,
+                    "workspace_path": workspace.project_path,
+                },
+            },
         )
         try:
             result = execute_workspace_task.enqueue(run.pk)
         except Exception as exc:
-            run.status = WorkspaceTaskRun.Status.FAILED
-            run.append_log("Unable to enqueue task; please try again later.")
-            run.flush_log_buffer()
-            run.save(update_fields=["status"])
+            # Cancel only an unclaimed dispatch; a late delivery then cannot execute it.
+            WorkspaceTaskRun.objects.filter(
+                pk=run.pk, status=WorkspaceTaskRun.Status.REQUESTED, started_at__isnull=True
+            ).update(
+                status=WorkspaceTaskRun.Status.FAILED,
+                progress=100,
+                completed_at=timezone.now(),
+                log=WorkspaceTaskRun.clamp_log(
+                    "Unable to enqueue task; unclaimed dispatch cancelled.",
+                    settings.INSPECTOR_TASK_LOG_BYTES,
+                ),
+            )
+            run.refresh_from_db()
             raise forms.ValidationError(
                 {"__all__": ["Unable to dispatch the requested task."]}
             ) from exc

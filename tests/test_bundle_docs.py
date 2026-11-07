@@ -1,10 +1,13 @@
 """Synthetic filesystem and spawned-process contracts for the docs publisher."""
 
+import io
+import json
 import multiprocessing
 import os
 import shutil
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import TestCase, mock
 
 from filelock import FileLock, Timeout
@@ -182,4 +185,163 @@ class BundleDocsTests(TestCase):
         content = (self.dest / "index.html").read_text()
         self.assertIn(content, {"new", "other"})
         self.assertEqual((self.dest / "asset.txt").read_text(), content)
+        winning_source = self.source if content == "new" else other
+        self.assertEqual(
+            json.loads((self.dest / "bundle.json").read_text())["source"],
+            str(winning_source.resolve()),
+        )
         self.assert_no_staging()
+
+    def _assert_refused(self, source, dest, error=ValueError):
+        before = {
+            p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()
+        }
+        with (
+            mock.patch.object(bundle_docs.shutil, "copytree") as copy,
+            mock.patch.object(bundle_docs.os, "replace") as replace,
+            mock.patch.object(bundle_docs.shutil, "rmtree") as cleanup,
+            mock.patch.object(bundle_docs.tempfile, "mkdtemp") as staging,
+            mock.patch.object(
+                Path, "mkdir", side_effect=AssertionError("mkdir attempted before refusal")
+            ) as mkdir,
+        ):
+            with self.assertRaises(error):
+                bundle_docs._prepare_destination(source, dest)
+            copy.assert_not_called()
+            replace.assert_not_called()
+            cleanup.assert_not_called()
+            staging.assert_not_called()
+            mkdir.assert_not_called()
+        after = {
+            p.relative_to(self.root): p.read_bytes() for p in self.root.rglob("*") if p.is_file()
+        }
+        self.assertEqual(after, before)
+
+    def test_overlapping_trees_refused_before_mutation(self):
+        nested_source = self.dest / "source"
+        nested_source.mkdir()
+        (nested_source / "sentinel").write_text("keep", encoding="utf-8")
+        for source, dest in (
+            (self.source, self.source),
+            (nested_source, self.dest),
+            (self.source, self.source / "nested"),
+            (self.source, self.source / "missing" / "nested"),
+        ):
+            with self.subTest(source=source, dest=dest):
+                self._assert_refused(source, dest)
+
+    def test_case_alias_identity_refused_on_any_filesystem(self):
+        source = self.root / "logical" / "html"
+        alias = self.root / "logical" / "HTML"
+        (self.source / "child").mkdir()
+        stat = Path.stat
+        exists = Path.exists
+        is_dir = Path.is_dir
+
+        def physical_path(path):
+            for spelling in (source, alias):
+                if path == spelling or spelling in path.parents:
+                    return self.source / path.relative_to(spelling)
+            return path
+
+        def case_alias_stat(path, *args, **kwargs):
+            return stat(physical_path(path), *args, **kwargs)
+
+        # Model a filesystem where realpath preserves spelling but stat reports
+        # the same identity for case aliases. No host case-sensitivity required.
+        with (
+            mock.patch.object(Path, "resolve", autospec=True, side_effect=lambda path, **kw: path),
+            mock.patch.object(Path, "stat", autospec=True, side_effect=case_alias_stat),
+            mock.patch.object(
+                Path, "exists", autospec=True, side_effect=lambda path: exists(physical_path(path))
+            ),
+            mock.patch.object(
+                Path, "is_dir", autospec=True, side_effect=lambda path: is_dir(physical_path(path))
+            ),
+        ):
+            for tree, dest in (
+                (source, alias),
+                (source, alias / "missing" / "nested"),
+                (source / "child", alias),
+                (alias, source / "nested"),
+            ):
+                with self.subTest(source=tree, dest=dest):
+                    self._assert_refused(tree, dest)
+
+    def test_resolved_aliases_refused(self):
+        # Simulate directory-symlink resolution without requiring symlink privileges.
+        alias = self.root / "alias"
+        resolve = Path.resolve
+
+        def resolve_alias(path, *args, **kwargs):
+            return self.dest.resolve() if path == alias else resolve(path, *args, **kwargs)
+
+        with mock.patch.object(Path, "resolve", autospec=True, side_effect=resolve_alias):
+            self._assert_refused(alias, self.dest)
+            self._assert_refused(self.dest, alias)
+
+    def test_source_must_be_real_directory(self):
+        self._assert_refused(self.root / "missing", self.dest, FileNotFoundError)
+        self._assert_refused(self.source / "index.html", self.dest, NotADirectoryError)
+
+    def _run_main(self, dest=None):
+        args = SimpleNamespace(source=self.source, dest=dest or self.dest)
+        with (
+            mock.patch.object(bundle_docs, "parse_args", return_value=args),
+            mock.patch("sys.stdout", new_callable=io.StringIO),
+        ):
+            bundle_docs.main()
+
+    def test_manifest_failures_leave_old_generation_paired(self):
+        (self.dest / "bundle.json").write_text('{"generation": "old"}', encoding="utf-8")
+        write_text = Path.write_text
+        for failure in ("serialize", "write"):
+            with self.subTest(failure=failure):
+                error = OSError(f"{failure} failed")
+
+                def fail_write(path, *args, **kwargs):
+                    if path.name == "bundle.json":
+                        # Model a partial write, not just failure before opening.
+                        write_text(path, "partial", encoding="utf-8")
+                        raise error
+                    return write_text(path, *args, **kwargs)
+
+                patcher = (
+                    mock.patch.object(bundle_docs.json, "dumps", side_effect=error)
+                    if failure == "serialize"
+                    else mock.patch.object(
+                        Path, "write_text", autospec=True, side_effect=fail_write
+                    )
+                )
+                with patcher as injected:
+                    with self.assertRaises(OSError) as caught:
+                        self._run_main()
+                self.assertIs(caught.exception, error)
+                injected.assert_called_once()
+                self.assert_old()
+                self.assertEqual(
+                    json.loads((self.dest / "bundle.json").read_text()), {"generation": "old"}
+                )
+                self.assert_no_staging()
+
+    def test_custom_destination_publishes_html_and_manifest_together(self):
+        dest = (self.root / "custom" / "offline").resolve()
+        replace = os.replace
+        promotions = []
+
+        def promote(source, target):
+            if Path(target) == dest:
+                promotions.append(source)
+                self.assertEqual((Path(source) / "index.html").read_text(), "new")
+                manifest = json.loads((Path(source) / "bundle.json").read_text())
+                self.assertEqual(manifest["source"], str(self.source.resolve()))
+                self.assertTrue(manifest["generated_at"].endswith("+00:00"))
+            return replace(source, target)
+
+        with mock.patch.object(bundle_docs.os, "replace", side_effect=promote):
+            self._run_main(dest=dest)
+        self.assertEqual(len(promotions), 1)
+        self.assertEqual((dest / "index.html").read_text(), "new")
+        self.assertEqual(
+            json.loads((dest / "bundle.json").read_text())["source"], str(self.source.resolve())
+        )

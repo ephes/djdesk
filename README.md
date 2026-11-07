@@ -82,6 +82,14 @@ and its backup in the reported directory pattern. Cleanup failure after promotio
 error with the new bundle installed; a leftover backup may be incomplete.
 The publisher uses `filelock>=4.2.1`, included in the normal Python dependencies so
 `uv run python scripts/bundle_docs.py` works without selecting a development extra.
+Custom `--source` and `--dest` paths must resolve to separate directory trees:
+equal directory identities and either tree nested inside the other are refused before
+filesystem changes, including symlink and case aliases. The source must be an existing directory.
+The publisher writes `bundle.json` (UTC generation time and resolved source path) into
+staging before acquiring the lock, so HTML and provenance publish as one generation.
+A copy, serialization or manifest write failure preserves the old bundle and its manifest.
+Run `uv run python -m unittest tests.test_bundle_docs` for the synthetic publisher
+regressions, including concurrent processes and filesystem failure injection.
 
 ### Continuous integration
 

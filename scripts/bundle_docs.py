@@ -14,8 +14,17 @@ from pathlib import Path
 from filelock import FileLock
 
 
+def _contains_directory(tree: Path, path: Path) -> bool:
+    return any(ancestor.exists() and tree.samefile(ancestor) for ancestor in (path, *path.parents))
+
+
 def _prepare_destination(source: Path, dest: Path) -> None:
+    source = source.resolve(strict=True)
     dest = dest.resolve()
+    if not source.is_dir():
+        raise NotADirectoryError(f"Docs build is not a directory: {source}")
+    if _contains_directory(source, dest) or (dest.exists() and _contains_directory(dest, source)):
+        raise ValueError(f"Docs source and destination must be separate trees: {source}, {dest}")
     dest.parent.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix=f".{dest.name}-publish-", dir=dest.parent))
     staging = work / "staging"
@@ -23,6 +32,11 @@ def _prepare_destination(source: Path, dest: Path) -> None:
     promoted = False
     try:
         shutil.copytree(source, staging)
+        manifest = {
+            "generated_at": datetime.now(tz=timezone.utc).isoformat(),
+            "source": str(source),
+        }
+        (staging / "bundle.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         # Leave this lock file in place: unlinking it can split waiting writers.
         with FileLock(dest.parent / f".{dest.name}.lock", timeout=10):
             if dest.exists():
@@ -81,11 +95,6 @@ def main() -> None:
 
     _prepare_destination(source, dest)
 
-    manifest = {
-        "generated_at": datetime.now(tz=timezone.utc).isoformat(),
-        "source": str(source),
-    }
-    (dest / "bundle.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(f"Offline docs copied to {dest}")
 
 

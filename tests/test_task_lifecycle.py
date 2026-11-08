@@ -2,10 +2,12 @@ from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from unittest import mock
 
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connections, transaction
 from django.test import TransactionTestCase
+from django.urls import reverse
 
 from djdesk.inspector.command_runner import CommandResult
 from djdesk.inspector.forms import TaskRunForm
@@ -99,7 +101,9 @@ class TaskLifecycleTests(TransactionTestCase):
             "djdesk.inspector.forms.execute_workspace_task",
             new=mock.Mock(enqueue=mock.Mock(side_effect=RuntimeError)),
         ):
-            run = self.form().save()
+            with self.assertRaises(ValidationError):
+                self.form().save()
+        run = WorkspaceTaskRun.objects.get()
         self.assertEqual(run.status, "failed")
         self.assertIsNotNone(run.completed_at)
         self.assertIn("Unable to enqueue", run.log)
@@ -158,3 +162,16 @@ class TaskLifecycleTests(TransactionTestCase):
         )
         other.refresh_from_db()
         self.assertEqual(other.status, "running")
+
+    def test_view_reports_immediate_enqueue_failure(self):
+        with mock.patch(
+            "djdesk.inspector.forms.execute_workspace_task",
+            new=mock.Mock(enqueue=mock.Mock(side_effect=RuntimeError)),
+        ):
+            response = self.client.post(
+                reverse("inspector:task-run-create"),
+                {"workspace": self.workspace.slug, "preset": self.preset.key, "confirm_safe": "on"},
+            )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Unable to dispatch", response.content.decode())
+        self.assertEqual(WorkspaceTaskRun.objects.get().status, "failed")

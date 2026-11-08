@@ -155,10 +155,14 @@ class TaskRunForm(forms.Form):
             requested_by=self.initial.get("requested_by", "inspector"),
             metadata={"notes": self.cleaned_data.get("notes", "")},
         )
+        enqueue_failed = False
+
         def dispatch() -> None:
+            nonlocal enqueue_failed
             try:
                 result = execute_workspace_task.enqueue(run.pk)
             except Exception:
+                enqueue_failed = True
                 # Immediate backends can raise after claiming/executing the command.
                 # Only settle a run which no worker has claimed.
                 WorkspaceTaskRun.objects.filter(
@@ -179,4 +183,7 @@ class TaskRunForm(forms.Form):
         # Autocommit/immediate backends may already have completed. Within an outer
         # transaction the truthful response is still REQUESTED until its commit.
         run.refresh_from_db()
+        if enqueue_failed and run.status == WorkspaceTaskRun.Status.FAILED:
+            # Dispatch already ran (autocommit); the failed run is committed.
+            raise forms.ValidationError({"__all__": ["Unable to dispatch the requested task."]})
         return run

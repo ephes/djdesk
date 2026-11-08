@@ -146,6 +146,7 @@ holds no database transaction open while executing a command.
 
 Task requests dispatch only after the transaction saving the run commits; rollback
 starts no command. A response inside an outer transaction reports `requested`.
+In autocommit, an enqueue error before any worker claimed the run returns HTTP 400.
 The immediate backend executes after commit and can return a finished outcome;
 the database backend queues the committed ID for workers. An enqueue error marks
 only an unclaimed request failed, preserving a worker's running or completed outcome.

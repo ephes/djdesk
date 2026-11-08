@@ -3,6 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from django import forms
+from django.conf import settings
+from django.db import transaction
+from django.utils import timezone
 
 from . import services
 from .models import TaskPreset, Workspace, WorkspaceTaskRun
@@ -152,17 +155,28 @@ class TaskRunForm(forms.Form):
             requested_by=self.initial.get("requested_by", "inspector"),
             metadata={"notes": self.cleaned_data.get("notes", "")},
         )
-        try:
-            result = execute_workspace_task.enqueue(run.pk)
-        except Exception as exc:
-            run.status = WorkspaceTaskRun.Status.FAILED
-            run.append_log("Unable to enqueue task; please try again later.")
-            run.flush_log_buffer()
-            run.save(update_fields=["status"])
-            raise forms.ValidationError(
-                {"__all__": ["Unable to dispatch the requested task."]}
-            ) from exc
+        def dispatch() -> None:
+            try:
+                result = execute_workspace_task.enqueue(run.pk)
+            except Exception:
+                # Immediate backends can raise after claiming/executing the command.
+                # Only settle a run which no worker has claimed.
+                WorkspaceTaskRun.objects.filter(
+                    pk=run.pk, status=WorkspaceTaskRun.Status.REQUESTED
+                ).update(
+                    status=WorkspaceTaskRun.Status.FAILED,
+                    completed_at=timezone.now(),
+                    progress=100,
+                    log=WorkspaceTaskRun.clamp_log(
+                        "Unable to enqueue task; please try again later.",
+                        settings.INSPECTOR_TASK_LOG_BYTES,
+                    ),
+                )
+            else:
+                WorkspaceTaskRun.objects.filter(pk=run.pk).update(result_id=result.id)
 
-        run.result_id = result.id
-        run.save(update_fields=["result_id"])
+        transaction.on_commit(dispatch)
+        # Autocommit/immediate backends may already have completed. Within an outer
+        # transaction the truthful response is still REQUESTED until its commit.
+        run.refresh_from_db()
         return run

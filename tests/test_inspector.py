@@ -7,7 +7,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
 
-from django import forms
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections
 from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
@@ -287,7 +286,7 @@ class TaskRunFormTests(TestCase):
         self.assertTrue(form.is_valid())
         with mock.patch("djdesk.inspector.forms.execute_workspace_task") as task_mock:
             task_mock.enqueue.side_effect = RuntimeError("Queue offline")
-            with self.assertRaises(forms.ValidationError):
+            with self.captureOnCommitCallbacks(execute=True):
                 form.save()
 
         run = (

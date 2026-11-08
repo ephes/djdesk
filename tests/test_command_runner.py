@@ -576,9 +576,15 @@ class TaskFailureRecordingTests(ProcessFixtureCase, TestCase):
     def test_unexpected_error_after_the_outcome_is_stored_keeps_that_outcome(self) -> None:
         self.write_manage("print('ok')\n")
         run = WorkspaceTaskRun.objects.create(workspace=self.workspace_record, preset=self.preset)
+        real_finish = WorkspaceTaskRun.mark_finished
+
+        def finish_then_raise(instance, **kwargs):
+            real_finish(instance, **kwargs)
+            raise RuntimeError("late")
+
         with (
-            mock.patch(
-                "djdesk.inspector.tasks.transaction.on_commit", side_effect=RuntimeError("late")
+            mock.patch.object(
+                WorkspaceTaskRun, "mark_finished", autospec=True, side_effect=finish_then_raise
             ),
             self.assertRaisesMessage(RuntimeError, "late"),
         ):

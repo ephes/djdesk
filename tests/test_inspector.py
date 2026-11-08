@@ -9,8 +9,10 @@ from unittest import mock
 
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections
+from django.db.models.signals import post_init
 from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from djdesk.inspector import data_lab
 from djdesk.inspector import forms as inspector_forms
@@ -356,6 +358,86 @@ class DashboardViewTests(TestCase):
         request = self.factory.get("/")
         view.setup(request)
         return view
+
+    def test_dashboard_hydrates_only_visible_selected_history(self) -> None:
+        Workspace.objects.all().delete()
+        preset = TaskPreset.objects.first()
+        workspaces = [
+            Workspace.objects.create(name=f"Workspace {i}", project_path=f"/synthetic/{i}")
+            for i in range(3)
+        ]
+        for workspace in workspaces:
+            WorkspaceTaskRun.objects.bulk_create(
+                [
+                    WorkspaceTaskRun(workspace=workspace, preset=preset, log="hidden-log" * 1000)
+                    for _ in range(110)
+                ]
+            )
+            ScanJob.objects.bulk_create(
+                [
+                    ScanJob(workspace=workspace, kind=ScanJob.Kind.SCHEMA, summary=f"scan-{i}")
+                    for i in range(110)
+                ]
+            )
+        # Equal timestamps require the PK tie-breaker for a stable latest window.
+        now = timezone.now()
+        WorkspaceTaskRun.objects.all().update(created_at=now)
+        ScanJob.objects.all().update(created_at=now)
+        selected = workspaces[1]
+        loaded = {Workspace: [], ScanJob: [], WorkspaceTaskRun: []}
+
+        def record(sender, instance, **kwargs):
+            if sender in loaded:
+                loaded[sender].append(instance)
+
+        post_init.connect(record)
+        try:
+            response = self.client.get(reverse("inspector:dashboard"), {"workspace": selected.slug})
+        finally:
+            post_init.disconnect(record)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [run.pk for run in loaded[WorkspaceTaskRun]],
+            list(selected.task_runs.order_by("-pk").values_list("pk", flat=True)[:5]),
+        )
+        self.assertEqual(
+            [scan.pk for scan in loaded[ScanJob]],
+            list(selected.scans.order_by("-pk").values_list("pk", flat=True)[:4]),
+        )
+        self.assertTrue(all("log" in run.get_deferred_fields() for run in loaded[WorkspaceTaskRun]))
+        self.assertTrue(
+            all(
+                "metadata" in ws.get_deferred_fields()
+                for ws in loaded[Workspace]
+                if ws.pk != selected.pk
+            )
+        )
+        self.assertContains(response, 'data-task-run="%s"' % loaded[WorkspaceTaskRun][0].pk)
+        self.assertContains(response, "scan-109")
+        self.assertNotContains(response, "scan-105")
+        self.assertNotContains(response, "hidden-log")
+        payload = self.client.get(
+            reverse("inspector:workspace-status", kwargs={"slug": selected.slug})
+        ).json()
+        self.assertEqual(
+            [run["id"] for run in payload["tasks"]], [run.pk for run in loaded[WorkspaceTaskRun]]
+        )
+        self.assertEqual(
+            [scan["id"] for scan in payload["scans"]], [scan.pk for scan in loaded[ScanJob]]
+        )
+        self.assertEqual(payload["tasks"][0]["log"], "hidden-log" * 1000)
+
+    def test_unknown_workspace_loads_no_histories(self) -> None:
+        with mock.patch.object(ScanJob, "from_db", wraps=ScanJob.from_db) as scans:
+            with mock.patch.object(
+                WorkspaceTaskRun, "from_db", wraps=WorkspaceTaskRun.from_db
+            ) as runs:
+                response = self.client.get(
+                    reverse("inspector:dashboard"), {"workspace": "missing-synthetic"}
+                )
+        self.assertEqual(response.status_code, 200)
+        scans.assert_not_called()
+        runs.assert_not_called()
 
     def test_dashboard_handles_workspace_without_slug(self) -> None:
         Workspace.objects.all().delete()

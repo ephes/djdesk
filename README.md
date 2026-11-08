@@ -144,6 +144,13 @@ returns the persisted command outcome, or `{skipped: true, status: ...}` while a
 run is in progress or has no outcome. It never resets logs or timestamps and
 holds no database transaction open while executing a command.
 
+The dashboard loads four recent scans and five recent task runs for the selected
+workspace only, ordered newest first with the primary key breaking timestamp ties.
+The workspace selector loads names and paths without historical logs or metadata;
+initial task history omits log bodies. Status polling keeps the same four/five windows
+and includes those task logs. Renderer status, severity and log-level classes use
+supported values with neutral defaults; labels remain escaped text.
+
 Task requests dispatch only after the transaction saving the run commits; rollback
 starts no command. A response inside an outer transaction reports `requested`.
 In autocommit, an enqueue error before any worker claimed the run returns HTTP 400.

@@ -41,9 +41,11 @@ class DashboardView(TemplateView):
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
         workspaces = list(
-            Workspace.objects.prefetch_related("scans", "task_runs", "task_runs__preset")
+            Workspace.objects.only("id", "name", "slug", "project_path").order_by("name", "pk")
         )
         workspace = self._resolve_workspace(workspaces)
+        if workspace:
+            workspace = Workspace.objects.get(pk=workspace.pk)
         status_meta: dict[str, Any] = {}
         status_url = ""
         if workspace and workspace.slug:
@@ -56,6 +58,20 @@ class DashboardView(TemplateView):
             {
                 "workspace": workspace,
                 "workspaces": workspaces,
+                "recent_scans": (
+                    workspace.scans.defer("details", "log_excerpt").order_by("-created_at", "-pk")[
+                        :4
+                    ]
+                    if workspace
+                    else []
+                ),
+                "recent_task_runs": (
+                    workspace.task_runs.select_related("preset")
+                    .defer("log", "metadata")
+                    .order_by("-created_at", "-pk")[:5]
+                    if workspace
+                    else []
+                ),
                 "docs_base_url": docs_source["base_url"],
                 "doc_links": docs_source["links"],
                 "docs_source": docs_source,

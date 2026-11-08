@@ -65,7 +65,7 @@
                 <div class="rail-section">
                     <h3 class="rail-heading">Scan queue</h3>
                     <div id="scan-board" class="scan-board">
-                        {% for scan in workspace.scans.all|slice:":4" %}
+                        {% for scan in recent_scans %}
                         <article class="scan-card scan-card--{{ scan.status }}">
                             <header>
                                 <span class="scan-kind">
@@ -245,7 +245,7 @@ class SchemaWatcher:
                         <span>Latest runs</span>
                     </header>
                     <ul class="task-history" data-task-history>
-                        {% for run in workspace.task_runs.all|slice:":5" %}
+                        {% for run in recent_task_runs %}
                         <li class="task-history-item task-history-item--{{ run.status }}" data-task-run="{{ run.pk }}">
                             <button type="button" class="task-history-trigger" data-task-run="{{ run.pk }}">
                                 <div>

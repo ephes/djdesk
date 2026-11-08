@@ -5,7 +5,6 @@ import sys
 from typing import Any
 
 from django.conf import settings
-from django.db import transaction
 from django.utils import timezone
 from django_tasks import task
 
@@ -47,8 +46,6 @@ def _fail_run(
         payload["safe_prefix"] = safe_prefix
     _store_command_metadata(run, payload)
     run.mark_finished(success=False)
-    # Ensure the calling view gets deterministic data even inside transactions.
-    transaction.on_commit(lambda: None)
     return payload
 
 
@@ -191,6 +188,4 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
         success=(result.exit_code == 0 and not result.timed_out and not payload["output_limited"])
     )
 
-    # Ensure the calling view gets deterministic data even inside transactions.
-    transaction.on_commit(lambda: None)
     return payload

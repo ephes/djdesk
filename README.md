@@ -144,6 +144,24 @@ returns the persisted command outcome, or `{skipped: true, status: ...}` while a
 run is in progress or has no outcome. It never resets logs or timestamps and
 holds no database transaction open while executing a command.
 
+Task requests dispatch only after the transaction saving the run commits; rollback
+starts no command. A response inside an outer transaction reports `requested`.
+In autocommit, an enqueue error before any worker claimed the run returns HTTP 400.
+The immediate backend executes after commit and can return a finished outcome;
+the database backend queues the committed ID for workers. An enqueue error marks
+only an unclaimed request failed, preserving a worker's running or completed outcome.
+Poll task status for the final outcome, including deferred enqueue failures.
+
+After a worker crash, stop all workers owning the selected runs and terminate/check
+their command process trees before recovery. Age alone does not establish abandonment.
+Inspect the saved run IDs and logs, then explicitly record that ownership check:
+`uv run python manage.py recover_task_runs --run-id 123 --run-id 124 --confirm-workers-stopped --reason "Owning workers and commands stopped after crash"`.
+Use the same settings/database as those workers. The command accepts at most 100
+selected running IDs, rejects missing/terminal runs, preserves logs, and marks them
+failed with interruption metadata. It trusts the operator's shutdown confirmation;
+it cannot detect live workers. Restart workers afterward; duplicate deliveries never
+replay these commands. Any desired retry requires a new, explicitly approved request.
+
 Workspace commands are checked by one guard that sees the argv list exactly as it is
 executed. An argv is accepted only when it is `<interpreter> manage.py <command>` from
 `INSPECTOR_SAFE_COMMANDS` followed by arguments that the command's policy in

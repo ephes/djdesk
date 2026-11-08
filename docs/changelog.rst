@@ -7,6 +7,12 @@ Unreleased
 Fixed
 ~~~~~
 
+- Dispatch approved task requests after commit, preserving worker outcomes if enqueue
+  raises. Rolled-back requests start no command; deferred responses remain requested;
+  an immediate unclaimed enqueue failure still returns the dispatch error.
+- Add explicit bounded ``recover_task_runs`` recovery for operator-confirmed abandoned
+  running tasks after worker shutdown, retaining logs and never replaying commands.
+
 - Refuse equal or nested offline docs source/destination trees, including symlink and
   case aliases, before changing files. Stage provenance metadata with the HTML so a failed
   manifest write leaves the previous complete generation intact.

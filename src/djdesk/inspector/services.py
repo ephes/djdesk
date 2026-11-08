@@ -82,8 +82,11 @@ def serialize_task_run(run: WorkspaceTaskRun) -> dict[str, Any]:
 
 def workspace_status_payload(workspace: Workspace) -> dict[str, Any]:
     """Return a JSON structure consumed by the dashboard polling logic."""
-    scans = [serialize_scan(job) for job in workspace.scans.all()[:4]]
-    tasks = [serialize_task_run(run) for run in workspace.task_runs.all()[:5]]
+    scans = [serialize_scan(job) for job in workspace.scans.order_by("-created_at", "-pk")[:4]]
+    tasks = [
+        serialize_task_run(run)
+        for run in workspace.task_runs.select_related("preset").order_by("-created_at", "-pk")[:5]
+    ]
     docs = [
         {
             "title": link.title,

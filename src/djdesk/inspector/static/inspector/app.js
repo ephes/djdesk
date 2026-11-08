@@ -360,13 +360,13 @@ class InspectorUI {
     this.scanBoard.innerHTML = scans
       .map(
         (scan) => `
-        <article class="scan-card scan-card--${scan.status}">
+        <article class="scan-card scan-card--${this.allowedValue(scan.status, ['pending', 'running', 'completed', 'failed'], 'pending')}">
           <header>
             <span class="scan-kind">
               <span data-lucide="${this.getScanIcon(scan.kind)}"></span>
               <span>${this.escape(scan.kind_label)}</span>
             </span>
-            <span>${scan.progress ?? 0}%</span>
+            <span>${this.progressPercent(scan.progress)}%</span>
           </header>
           <p>${this.escape(scan.summary || '')}</p>
         </article>
@@ -385,7 +385,7 @@ class InspectorUI {
     this.insightGrid.innerHTML = insights
       .map(
         (insight) => `
-        <article class="insight-card insight-card--${insight.severity || 'info'}">
+        <article class="insight-card insight-card--${this.allowedValue(insight.severity, ['info', 'success', 'warning', 'danger'], 'info')}">
           <header>
             <span>${this.escape(insight.title)}</span>
             <small>${this.escape(insight.delta || '')}</small>
@@ -406,7 +406,7 @@ class InspectorUI {
         <li>
           <span class="activity-time">${this.escape(event.timestamp || '')}</span>
           <span class="activity-message">${this.escape(event.message || '')}</span>
-          <span class="activity-status activity-status--${event.status || 'info'}">${this.escape(
+          <span class="activity-status activity-status--${this.allowedValue(event.status, ['info', 'success', 'warning', 'danger'], 'info')}">${this.escape(
           event.kind || ''
         )}</span>
         </li>
@@ -422,8 +422,8 @@ class InspectorUI {
         (entry) => `
         <li>
           <span>${this.escape(entry.timestamp || '')}</span>
-          <span class="log-level log-level--${entry.level || 'info'}">${this.escape(
-          (entry.level || 'info').toUpperCase()
+          <span class="log-level log-level--${this.allowedValue(entry.level, ['debug', 'info', 'success', 'warning', 'error', 'critical'], 'info')}">${this.escape(
+          String(entry.level || 'info').toUpperCase()
         )}</span>
           <span>${this.escape(entry.message || '')}</span>
         </li>
@@ -442,13 +442,13 @@ class InspectorUI {
     this.taskHistory.innerHTML = tasks
       .map(
         (task) => `
-        <li class="task-history-item task-history-item--${task.status}" data-task-run="${task.id}">
-          <button type="button" class="task-history-trigger" data-task-run="${task.id}">
+        <li class="task-history-item task-history-item--${this.allowedValue(task.status, ['requested', 'running', 'succeeded', 'failed', 'cancelled'], 'requested')}" data-task-run="${this.escapeAttribute(task.id)}">
+          <button type="button" class="task-history-trigger" data-task-run="${this.escapeAttribute(task.id)}">
             <div>
               <strong>${this.escape(task.label)}</strong>
               <small>${this.escape(task.status)}</small>
             </div>
-            <div class="task-progress"><span style="width:${task.progress || 0}%"></span></div>
+            <div class="task-progress"><span style="width:${this.progressPercent(task.progress)}%"></span></div>
           </button>
         </li>
       `
@@ -545,6 +545,19 @@ class InspectorUI {
     const div = document.createElement('div');
     div.textContent = String(value);
     return div.innerHTML;
+  }
+
+  escapeAttribute(value) {
+    return this.escape(value).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  allowedValue(value, allowed, fallback) {
+    return allowed.includes(value) ? value : fallback;
+  }
+
+  progressPercent(value) {
+    return typeof value === 'number' && Number.isFinite(value)
+      ? Math.max(0, Math.min(100, value)) : 0;
   }
 
   loadInitialSchema() {
@@ -763,7 +776,7 @@ class InspectorUI {
     if (!select) return;
     const current = select.value;
     select.innerHTML = templates
-      .map((template) => `<option value="${template.slug}">${this.escape(template.title)}</option>`)
+      .map((template) => `<option value="${this.escapeAttribute(template.slug)}">${this.escape(template.title)}</option>`)
       .join('');
     if (templates.some((template) => template.slug === current)) {
       select.value = current;
@@ -783,8 +796,8 @@ class InspectorUI {
         <button
           type="button"
           class="data-lab-list-item ${notebook.slug === this.activeNotebookSlug ? 'is-active' : ''}"
-          data-notebook-url="${notebook.viewer_url}"
-          data-notebook-slug="${notebook.slug}"
+          data-notebook-url="${this.escapeAttribute(notebook.viewer_url)}"
+          data-notebook-slug="${this.escapeAttribute(notebook.slug)}"
         >
           <strong>${this.escape(notebook.title)}</strong>
           <small>${this.escape(notebook.file || '')}</small>

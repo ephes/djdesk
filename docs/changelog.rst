@@ -7,6 +7,13 @@ Unreleased
 Fixed
 ~~~~~
 
+- Load only the selected workspace's four recent scans and five task runs on the
+  dashboard, without task logs or other workspaces' metadata. Use a stable timestamp/PK
+  order in both the initial page and status polling.
+- Admit renderer status/severity/log-level classes through explicit allowlists;
+  escape dynamic attribute values and bound progress percentages so stored metadata
+  cannot create HTML elements or attributes during polling.
+
 - Dispatch approved task requests after commit, preserving worker outcomes if enqueue
   raises. Rolled-back requests start no command; deferred responses remain requested;
   an immediate unclaimed enqueue failure still returns the dispatch error.

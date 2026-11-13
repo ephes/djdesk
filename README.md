@@ -239,6 +239,10 @@ The window uses the filesystem's enumeration order, then chooses its alphabetica
 first 50 supported names. This is a partial inventory, not the globally first 50 files.
 Up to 32 directory generations (path, device/inode, mtime and ctime) are cached per
 backend process, so unchanged polls reuse the same window without enumerating history.
+A generation is cached only once its timestamps are more than three seconds old, because
+coarse filesystem clocks can leave them unchanged after a same-tick export; recent
+directories are rescanned on every poll. A scan that overlaps a directory change is
+retried (up to three attempts) before the inventory is reported as unavailable.
 Only the selected files are reopened for current regular-file admission and modification
 times. Directory changes invalidate the window; editing file contents does not require
 a new scan. `data_lab.notebooks_incomplete` and the drawer notice indicate a limited or

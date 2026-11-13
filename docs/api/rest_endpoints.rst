@@ -54,8 +54,11 @@ The ``data_lab.notebooks`` inventory offers at most 50 supported notebook filena
 sorted within a window of at most 512 directory entries (plus one lookahead).
 Hidden/unrelated entries consume this scan budget too. The window comes from filesystem
 enumeration order; it is not a global alphabetical page. Each backend caches up to 32
-directory generations by path, device/inode, mtime and ctime. Unchanged polls reuse the
-window, reopening at most 50 selected files for current admission and modification times.
+directory generations by path, device/inode, mtime and ctime, but only once those
+timestamps are more than three seconds old (coarse filesystem clocks can miss a same-tick
+change); more recent directories are rescanned. Unchanged polls reuse the window,
+reopening at most 50 selected files for current admission and modification times. A scan
+overlapping a directory change is retried up to three times.
 ``data_lab.notebooks_incomplete`` is true if either limit was reached or some entries
 could not be admitted. All exports remain on disk and direct viewer URLs still work.
 

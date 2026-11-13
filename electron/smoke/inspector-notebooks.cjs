@@ -34,8 +34,13 @@ async function main() {
   });
   try {
     const page = await browser.newPage();
-    await page.route('**/*', (route) => route.abort());
-    await page.setContent(html);
+    // Serve the document from a synthetic origin: about:blank denies document.cookie,
+    // which the CSRF lookup reads. Every other request is aborted.
+    const origin = 'http://djdesk-drawer.invalid/';
+    await page.route('**/*', (route) => (route.request().url() === origin
+      ? route.fulfill({ status: 200, contentType: 'text/html', body: html })
+      : route.abort()));
+    await page.goto(origin);
     await page.addScriptTag({ content: source + '\nwindow.InspectorUI = InspectorUI;' });
     await page.evaluate(() => {
       window.requests = [];

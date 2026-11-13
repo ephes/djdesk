@@ -194,8 +194,22 @@ DJDesk treats the Data Lab as an export-first experience:
 
 1. The sidebar exposes a **Data Lab** panel (currently gated behind the legacy ``DJDESK_FLAG_STAGE_5`` feature flag).
 2. Users pick a notebook template (schema audit, log study, etc.).
-3. ``django-tasks`` exports a deterministic ``.ipynb`` file into ``INSPECTOR_DATA_LAB_ROOT/<slug>`` and surfaces it in the panel.
+3. The export endpoint writes a complete ``.ipynb`` file into ``INSPECTOR_DATA_LAB_ROOT/<slug>`` and surfaces it in the panel. Repeated exports choose ``-2``, ``-3`` and subsequent free suffixes, preserving edits.
 4. Selecting an export opens a static HTML preview rendered by ``inspector/data_lab.py``. Live kernels remain optional—``--with-data-lab`` installs ``jupyter_server`` and enforces the same SAFE command allowlist.
+
+Filename stems must contain only ASCII letters, digits, underscores and hyphens, with
+at least one character. Other names remain untouched but are omitted from listings;
+rename them to a supported stem to make them visible in DJDesk.
+
+Exports flush an owner-only hidden ``.notebook-*.tmp`` file, then publish a hard link
+atomically without overwriting another file. Polling sees only complete exports.
+All export operations use the same opened workspace directory, so a directory rename
+cannot redirect writing or cleanup. The renamed directory may retain the export.
+Ordinary failures remove owned staging; a killed process can leave hidden temporary
+files that can be inspected and removed manually with exporters stopped.
+Systems without directory-relative no-follow opens and hard-link publication (including
+Windows) refuse exports before writing, with HTTP 400. The filesystem must support
+hard links; the portable reader remains available for existing notebooks.
 
 Listings and previews accept regular notebook files directly inside the workspace export
 directory. Notebook symlinks, even internal ones, and symlinked workspace export directories

@@ -45,9 +45,7 @@ def bootstrap_workspace_scans(
         workspace.scans.create(
             kind=kind,
             summary=summary,
-            status=(
-                ScanJob.Status.RUNNING if auto_run and index == 0 else ScanJob.Status.PENDING
-            ),
+            status=(ScanJob.Status.RUNNING if auto_run and index == 0 else ScanJob.Status.PENDING),
             progress=15 if auto_run and index == 0 else 0,
             started_at=now if auto_run and index == 0 else None,
         )

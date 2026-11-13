@@ -214,6 +214,38 @@ bind these checks to the opened descriptors; other systems check file identity a
 Invalid UTF-8, JSON or viewer cell/output shapes return a bounded HTTP 422 repair page.
 Edit the original file and reload; the viewer preserves its bytes and escapes rendered text.
 
+Notebook filename stems must match the viewer route: ASCII letters, digits, `_` and `-`,
+with at least one character. Other `.ipynb` names (spaces, dots or Unicode) stay untouched
+on disk and are omitted from the dashboard and status feed. Rename them to a supported
+stem to view them in DJDesk.
+
+Exports write and flush an owner-only (0600) `.notebook-<random>.tmp` file before
+atomically publishing a hard link under the next free `.ipynb` name. Concurrent exports
+never overwrite one another and polls never see a partly written export. Creation,
+publication and cleanup use the same opened workspace directory, even if its pathname
+is replaced. A renamed directory may therefore contain the export while it is unavailable
+at its former path. Ordinary failures clean up only this attempt's staging inode.
+A killed process may leave a hidden `.notebook-*.tmp` file; it is never listed or reused.
+With exporters stopped, inspect and remove those leftovers manually. Platforms without
+directory-relative, no-follow opens and hard-link publication (including Windows) refuse
+exports with HTTP 400 before writing; existing notebooks remain readable through the
+portable reader. The export filesystem must support hard links.
+
+Workspace saves retry slug uniqueness collisions at most five times. SQLite admission
+requires its exact single-column unique error; PostgreSQL uses SQLSTATE 23505 and the
+workspace table's `inspector_workspace_slug_key` diagnostic. Other integrity errors,
+including duplicate project paths, propagate immediately. PostgreSQL integration checks
+use a disposable `test_<PGDATABASE>` database on an explicitly selected local server:
+
+```bash
+PGHOST=/path/to/local/socket PGPORT=5432 PGDATABASE=postgres \
+  DJANGO_SETTINGS_MODULE=djdesk.settings.test_postgresql \
+  uv run --with 'psycopg[binary]>=3.2' python manage.py test tests.test_workspace_slugs
+```
+
+Only use a local test server whose role may create/drop test databases. The regular
+SQLite suite skips the PostgreSQL-only concurrency check; no remote database is required.
+
 ### Python dependency security
 
 The backend requires Django >=5.2.19,<5.3 and sqlparse >=0.6.0, including packaged installs.

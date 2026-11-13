@@ -7,6 +7,15 @@ Unreleased
 Fixed
 ~~~~~
 
+- Omit notebook filenames outside the viewer's ASCII slug grammar from listings without
+  changing their bytes, so editor renames cannot break the dashboard or status feed.
+- Publish complete, flushed notebook exports atomically without clobbering edited or
+  concurrent exports. Keep staging files outside the listing suffix, clean owned staging
+  on ordinary failures, and leave hidden, unlisted staging after process interruption.
+- Recognize PostgreSQL workspace slug collisions through SQLSTATE/table/constraint
+  diagnostics and restrict SQLite retries to its exact slug constraint; retain five
+  attempts and propagate unrelated integrity errors. Add opt-in local PostgreSQL tests.
+
 - Load only the selected workspace's four recent scans and five task runs on the
   dashboard, without task logs or other workspaces' metadata. Use a stable timestamp/PK
   order in both the initial page and status polling.
@@ -77,6 +86,11 @@ Added
 
 Security
 ~~~~~~~~
+
+- Anchor notebook export creation, publication and owned-inode cleanup to the same
+  no-follow directory descriptor used by readers. Refuse invalid workspace directory
+  names and fail closed before writes where these export facilities are unavailable
+  (including Windows); exported files have owner-only permissions.
 
 - Keep the sandboxed preload bridge compatible with current Electron APIs, using
   ``webUtils.getPathForFile`` for drops without importing unsupported Node modules.

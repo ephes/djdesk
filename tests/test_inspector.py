@@ -86,7 +86,6 @@ class WorkspaceTaskRunLogTests(TestCase):
             run.append_log(f"Line {index}")
         self.assertIn("Line 0", run.log)
 
-
     @override_settings(INSPECTOR_TASK_LOG_BYTES=256)
     def test_retained_log_budget_counts_timestamps_and_newlines(self) -> None:
         run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)

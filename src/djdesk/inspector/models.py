@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from typing import Any
 
@@ -85,8 +86,20 @@ class Workspace(models.Model):
         return candidate
 
     def _is_slug_integrity_error(self, exc: IntegrityError) -> bool:
-        message = str(exc).lower()
-        return "inspector_workspace.slug" in message or ".slug" in message
+        cause = exc.__cause__
+        if isinstance(cause, sqlite3.IntegrityError):
+            return (
+                getattr(cause, "sqlite_errorcode", None) == sqlite3.SQLITE_CONSTRAINT_UNIQUE
+                and str(cause) == f"UNIQUE constraint failed: {self._meta.db_table}.slug"
+            )
+        # psycopg 3 exposes sqlstate; psycopg2 exposes pgcode.
+        code = getattr(cause, "sqlstate", None) or getattr(cause, "pgcode", None)
+        diagnostic = getattr(cause, "diag", None)
+        return (
+            code == "23505"
+            and getattr(diagnostic, "table_name", None) == self._meta.db_table
+            and getattr(diagnostic, "constraint_name", None) == f"{self._meta.db_table}_slug_key"
+        )
 
     @property
     def insights(self) -> list[dict[str, Any]]:

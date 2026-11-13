@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import stat
+import uuid
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import Any
 
 from django.conf import settings
+from django.urls.converters import SlugConverter
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
@@ -114,12 +117,27 @@ def _data_lab_root() -> Path:
 def workspace_data_lab_dir(workspace: Workspace) -> Path:
     """Return the directory where notebooks for ``workspace`` live."""
     slug = workspace.slug or f"workspace-{workspace.pk}"
+    if not re.fullmatch(SlugConverter.regex, slug):
+        raise ValueError("Invalid workspace notebook directory name.")
     root = _data_lab_root().resolve()
     path = root / slug
     if path.parent != root or path.is_symlink():
         raise ValueError("Workspace notebook directory must be directly inside the export root.")
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+@contextmanager
+def _open_workspace_directory(workspace: Workspace):
+    """Keep directory-relative operations on the admitted workspace inode."""
+    workspace_dir = workspace_data_lab_dir(workspace)
+    with ExitStack() as stack:
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        root_fd = os.open(workspace_dir.parent, flags)
+        stack.callback(os.close, root_fd)
+        directory_fd = os.open(workspace_dir.name, flags, dir_fd=root_fd)
+        stack.callback(os.close, directory_fd)
+        yield workspace_dir, directory_fd
 
 
 @contextmanager
@@ -132,11 +150,7 @@ def _open_notebook(workspace: Workspace, filename: str):
         with ExitStack() as stack:
             flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
             if os.open in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW"):
-                directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-                root_fd = os.open(workspace_dir.parent, directory_flags)
-                stack.callback(os.close, root_fd)
-                workspace_fd = os.open(workspace_dir.name, directory_flags, dir_fd=root_fd)
-                stack.callback(os.close, workspace_fd)
+                _, workspace_fd = stack.enter_context(_open_workspace_directory(workspace))
                 fd = os.open(filename, flags | os.O_NOFOLLOW, dir_fd=workspace_fd)
                 stack.callback(os.close, fd)
             else:
@@ -207,26 +221,60 @@ def build_notebook(workspace: Workspace, template_slug: str) -> dict[str, Any]:
 
 
 def export_notebook(workspace: Workspace, template_slug: str) -> Path:
-    """Persist the rendered notebook to disk and return its path."""
+    """Publish a complete notebook without replacing any existing filename."""
     notebook = build_notebook(workspace, template_slug)
-    workspace_dir = workspace_data_lab_dir(workspace)
+    if not (
+        {os.open, os.link, os.unlink, os.stat} <= os.supports_dir_fd
+        and hasattr(os, "O_NOFOLLOW")
+        and os.link in os.supports_follow_symlinks
+    ):
+        raise ValueError("Safe notebook export is unavailable on this platform.")
     content = json.dumps(notebook, indent=2)
-    suffix = 1
-    while True:
-        filename = template_slug if suffix == 1 else f"{template_slug}-{suffix}"
-        path = workspace_dir / f"{filename}.ipynb"
+    with _open_workspace_directory(workspace) as (workspace_dir, directory_fd):
+        staging = f".notebook-{uuid.uuid4().hex}.tmp"
+        fd = os.open(
+            staging,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+            dir_fd=directory_fd,
+        )
+        owned = os.fstat(fd)
         try:
-            handle = path.open("x", encoding="utf-8")
-        except FileExistsError:
-            suffix += 1
-            continue
-        try:
-            with handle:
+            with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
                 handle.write(content)
-        except BaseException:
-            path.unlink(missing_ok=True)
-            raise
-        return path
+                handle.flush()
+                os.fsync(fd)
+            suffix = 1
+            while True:
+                filename = template_slug if suffix == 1 else f"{template_slug}-{suffix}"
+                filename += ".ipynb"
+                if not os.path.samestat(
+                    owned, os.stat(staging, dir_fd=directory_fd, follow_symlinks=False)
+                ):
+                    raise ValueError("Notebook staging file changed before publication.")
+                try:
+                    os.link(
+                        staging,
+                        filename,
+                        src_dir_fd=directory_fd,
+                        dst_dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                except FileExistsError:
+                    suffix += 1
+                    continue
+                return workspace_dir / filename
+        finally:
+            try:
+                try:
+                    current = os.stat(staging, dir_fd=directory_fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    if os.path.samestat(owned, current):
+                        os.unlink(staging, dir_fd=directory_fd)
+            finally:
+                os.close(fd)
 
 
 def export_template(slug: str) -> dict[str, Any]:
@@ -245,6 +293,8 @@ def list_workspace_exports(workspace: Workspace) -> list[dict[str, Any]]:
         return []
     exports: list[dict[str, Any]] = []
     for path in sorted(workspace_dir.glob("*.ipynb")):
+        if not re.fullmatch(SlugConverter.regex, path.stem):
+            continue
         try:
             with _open_notebook(workspace, path.name) as handle:
                 modified_at = os.fstat(handle.fileno()).st_mtime

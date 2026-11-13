@@ -248,6 +248,9 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
 
     payload = workspace_status_payload(workspace)
     payload["data_lab"]["selected_notebook"] = path.stem
+    payload["data_lab"]["selected_notebook_url"] = reverse(
+        "inspector:data-lab-notebook", kwargs={"slug": workspace.slug, "notebook_slug": path.stem}
+    )
     return JsonResponse(payload, status=201)
 
 
@@ -304,15 +307,16 @@ class OfflineDocsView(View):
         if not assets.docs_bundle_available():
             raise Http404("Offline docs bundle not found.")
         try:
-            asset_path = assets.resolve_docs_asset(resource)
-        except (FileNotFoundError, ValueError) as exc:
+            asset_path, handle = assets.open_docs_asset(resource)
+        except (OSError, ValueError) as exc:
             raise Http404("Offline docs asset missing.") from exc
 
-        suffix = asset_path.suffix.lower()
-        content_type = MIMETYPE_OVERRIDES.get(suffix)
-        if not content_type:
-            content_type, _ = mimetypes.guess_type(asset_path.name)
-        return FileResponse(
-            asset_path.open("rb"),
-            content_type=content_type or "text/html",
-        )
+        try:
+            suffix = asset_path.suffix.lower()
+            content_type = MIMETYPE_OVERRIDES.get(suffix)
+            if not content_type:
+                content_type, _ = mimetypes.guess_type(asset_path.name)
+            return FileResponse(handle, content_type=content_type or "text/html")
+        except BaseException:
+            handle.close()
+            raise

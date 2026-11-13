@@ -112,7 +112,8 @@ def workspace_status_payload(workspace: Workspace) -> dict[str, Any]:
 def workspace_data_lab_payload(workspace: Workspace) -> dict[str, Any]:
     """Serialize Data Lab templates + exported notebooks."""
     notebooks_payload = []
-    for entry in data_lab.list_workspace_exports(workspace):
+    exports, incomplete = data_lab.workspace_export_inventory(workspace)
+    for entry in exports:
         modified = datetime.fromtimestamp(entry["modified_at"], tz=datetime_timezone.utc)
         notebooks_payload.append(
             {
@@ -131,6 +132,7 @@ def workspace_data_lab_payload(workspace: Workspace) -> dict[str, Any]:
     return {
         "templates": data_lab.template_summary(),
         "notebooks": notebooks_payload,
+        "notebooks_incomplete": incomplete,
         "live_enabled": settings.INSPECTOR_DATA_LAB_LIVE,
     }
 

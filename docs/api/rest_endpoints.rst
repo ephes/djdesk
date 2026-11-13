@@ -5,6 +5,12 @@ All endpoints documented below live in ``djdesk.inspector.urls``. The reference 
 ships with CSRF protection enabled, so remember to include the ``csrftoken`` value
 when POSTing from custom scripts or sketches.
 
+Dynamic inspector pages and JSON, including missing-resource, validation, method and
+server error responses, carry Django's ``private, no-store`` cache handling. Offline
+documentation files have an independent cache policy. They use owned regular-file
+handles and refuse changed paths or special files with HTTP 404; response close releases
+the descriptor. Systems without nonblocking file opens use the online docs instead.
+
 ``GET /api/workspaces/<slug>/status/``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -43,6 +49,34 @@ Returns the data needed to render the dashboard. Example response (trimmed):
 
 The Electron renderer polls this endpoint every few seconds. You can also hit it from
 ``curl`` while following the tutorial to see the raw data.
+
+The ``data_lab.notebooks`` inventory offers at most 50 supported notebook filenames,
+sorted within a window of at most 512 directory entries (plus one lookahead).
+Hidden/unrelated entries consume this scan budget too. The window comes from filesystem
+enumeration order; it is not a global alphabetical page. Each backend caches up to 32
+directory generations by path, device/inode, mtime and ctime, but only once those
+timestamps are more than three seconds old (coarse filesystem clocks can miss a same-tick
+change); more recent directories are rescanned. Unchanged polls reuse the window,
+reopening at most 50 selected files for current admission and modification times. A scan
+overlapping a directory change is retried up to three times.
+``data_lab.notebooks_incomplete`` is true if either limit was reached or some entries
+could not be admitted. All exports remain on disk and direct viewer URLs still work.
+
+``POST /api/workspaces/<slug>/data-lab/export/``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Required form field: ``template`` (``schema-audit`` or ``log-study``). A successful
+response has status 201 and contains the status payload plus
+``data_lab.selected_notebook`` and ``data_lab.selected_notebook_url`` for the exact new
+file, even when that file is outside the inventory window. Existing files are preserved.
+
+The drawer permits one export POST at a time, restores the prior control state after
+every outcome and never automatically replays a POST. Manual notebook selection while
+the request is pending fences response-driven selection. Export responses update only
+Data Lab, leaving workspace status to polling. Polls retain the currently
+open notebook. Validate this behavior against the rendered dashboard with
+``cd electron && npm run test:drawer`` after installing development npm dependencies
+and Chromium (or setting ``CHROME_EXECUTABLE`` to an installed Chrome binary).
 
 ``POST /api/task-runs/``
 ~~~~~~~~~~~~~~~~~~~~~~~~

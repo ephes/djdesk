@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
+    "test:drawer": "node smoke/inspector-notebooks.cjs",
     "bundle": "node build-django.js",
     "build": "npm run bundle && electron-builder",
     "smoke": "node smoke/shell.cjs"

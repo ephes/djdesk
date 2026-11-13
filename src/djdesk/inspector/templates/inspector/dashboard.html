@@ -278,6 +278,9 @@ class SchemaWatcher:
                         </label>
                         <button type="submit" class="primary-btn">Export notebook</button>
                     </form>
+                    <p class="empty-note" data-data-lab-incomplete {% if not data_lab_payload.notebooks_incomplete %}hidden{% endif %}>
+                        Showing a limited notebook inventory. More files may exist in the export directory; direct notebook URLs remain available.
+                    </p>
                     <div class="data-lab-list" data-data-lab-list>
                         {% for notebook in data_lab_payload.notebooks %}
                         <button

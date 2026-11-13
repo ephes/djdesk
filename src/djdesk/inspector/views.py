@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 import posixpath
 from typing import Any
@@ -25,6 +26,8 @@ from . import assets, data_lab
 from .forms import TaskRunForm, WorkspaceWizardForm
 from .models import DocLink, TaskPreset, Workspace, WorkspaceTaskRun
 from .services import workspace_data_lab_payload, workspace_status_payload
+
+logger = logging.getLogger(__name__)
 
 MIMETYPE_OVERRIDES = {
     ".woff": "font/woff",
@@ -230,12 +233,13 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
     except OSError:
         # Fail-closed publication errors (directory swapped for a symlink, no hard-link
         # support, staging write failure) leave no partial export; report them as JSON.
+        logger.exception("Notebook export failed for workspace %s", workspace.slug)
         return JsonResponse(
             {
                 "errors": {
                     "template": [
                         "The notebook could not be published to the export directory. "
-                        "Check that it is a real local directory and retry."
+                        "Check the export directory and the server log, then retry."
                     ]
                 }
             },

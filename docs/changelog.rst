@@ -7,6 +7,19 @@ Unreleased
 Fixed
 ~~~~~
 
+- Bind offline documentation reads to verified regular-file descriptors and the admitted
+  bundle generation. Refuse swapped paths and special files, close failed constructions,
+  and transfer successful handle ownership to the streaming response. Platforms without
+  nonblocking file opens fall back to online docs.
+- Apply Django's private no-store policy to dynamic inspector pages/JSON and their
+  error responses while keeping offline documentation caching independent.
+- Bound notebook inventories to 512 directory entries plus one lookahead and 50 results,
+  cache unchanged directory generations, and expose incomplete inventories in JSON and
+  the drawer. Preserve direct viewing and select newly exported files outside the window.
+- Give the export form one pending POST owner, preserve later manual notebook selections,
+  restore controls on every outcome, and prevent export snapshots replacing polled status.
+  Add a separate real drawer DOM regression with synthetic notebooks.
+
 - Omit notebook filenames outside the viewer's ASCII slug grammar from listings without
   changing their bytes, so editor renames cannot break the dashboard or status feed.
 - Publish complete, flushed notebook exports atomically without clobbering edited or

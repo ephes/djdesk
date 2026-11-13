@@ -70,6 +70,13 @@ installed; any leftover backup may be incomplete.
 
 The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
 
+Offline assets are served from verified regular-file handles anchored to the admitted
+bundle directory. Directory-relative no-follow opens prevent swapped paths from redirecting
+reads; portable readers check directory/file identity around a nonblocking open. A changed
+or special file returns HTTP 404. The response owns the handle and releases it on close;
+response-construction failures close it immediately. Platforms without nonblocking file
+opens (including Windows) use the online docs instead.
+
 Offline docs publishers copy into unique sibling staging directories and wait up to ten
 seconds for a same-destination writer lock. A failed promotion restores the previous bundle.
 If restoration also fails, the original error reports the retained
@@ -151,6 +158,9 @@ initial task history omits log bodies. Status polling keeps the same four/five w
 and includes those task logs. Renderer status, severity and log-level classes use
 supported values with neutral defaults; labels remain escaped text.
 
+Dynamic inspector pages and JSON (including error responses) carry Django's private,
+no-store cache policy. Offline documentation assets keep an independent cache policy.
+
 Task requests dispatch only after the transaction saving the run commits; rollback
 starts no command. A response inside an outer transaction reports `requested`.
 In autocommit, an enqueue error before any worker claimed the run returns HTTP 400.
@@ -207,6 +217,10 @@ Data Lab exports exclusively claim a fresh filename on every export: the templat
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
 manual edits are preserved. The export API returns `data_lab.selected_notebook`
 with the actual filename stem, and the viewer opens that newly created export.
+`data_lab.selected_notebook_url` opens the new export even when it falls outside the
+bounded listing. The export form permits one in-flight POST, restores its controls
+after success or failure, and never retries automatically. A notebook selected while
+the POST is pending keeps the viewer; export responses do not replace polled workspace state.
 The listing and viewer accept only regular files directly inside the workspace export
 directory. Notebook symlinks (including internal links) and symlinked workspace export
 directories are refused. Where supported, directory-relative opens with no symlink following
@@ -218,6 +232,24 @@ Notebook filename stems must match the viewer route: ASCII letters, digits, `_` 
 with at least one character. Other `.ipynb` names (spaces, dots or Unicode) stay untouched
 on disk and are omitted from the dashboard and status feed. Rename them to a supported
 stem to view them in DJDesk.
+
+Each inventory checks at most 512 directory entries (plus one lookahead), including
+hidden or unrelated entries, and offers at most 50 notebooks sorted by filename.
+The window uses the filesystem's enumeration order, then chooses its alphabetically
+first 50 supported names. This is a partial inventory, not the globally first 50 files.
+Up to 32 directory generations (path, device/inode, mtime and ctime) are cached per
+backend process, so unchanged polls reuse the same window without enumerating history.
+Only the selected files are reopened for current regular-file admission and modification
+times. Directory changes invalidate the window; editing file contents does not require
+a new scan. `data_lab.notebooks_incomplete` and the drawer notice indicate a limited or
+unavailable inventory. All files remain untouched, and older direct viewer URLs continue
+to work. Polls keep an already open notebook even if it is outside their window.
+
+Run the real drawer DOM regression separately with development npm dependencies and an
+installed Chromium (`npm ci --ignore-scripts` in `electron/`, then `npm run test:drawer`).
+Set `CHROME_EXECUTABLE` to an existing Chrome/Chromium binary if needed. It renders the
+actual Django dashboard with an in-memory test database and synthetic notebooks, then
+exercises deferred exports and manual selection without external network requests.
 
 Exports write and flush an owner-only (0600) `.notebook-<random>.tmp` file before
 atomically publishing a hard link under the next free `.ipynb` name. Concurrent exports

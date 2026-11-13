@@ -42,6 +42,9 @@ class InspectorUI {
     this.dataLabFrame = root?.querySelector('[data-data-lab-frame]');
     this.dataLabEmpty = root?.querySelector('[data-data-lab-empty]');
     this.activeNotebookSlug = '';
+    this.dataLabExportPending = false;
+    this.notebookSelectionGeneration = 0;
+    this.dataLabIncomplete = root?.querySelector('[data-data-lab-incomplete]');
     this.nativeBridge = window.djdeskNative || null;
   }
 
@@ -279,37 +282,45 @@ class InspectorUI {
 
   bindDataLab() {
     if (this.dataLabForm && this.dataLabExportUrl) {
-      this.dataLabForm.addEventListener('submit', (event) => {
+      this.dataLabForm.addEventListener('change', () => {
+        this.notebookSelectionGeneration += 1;
+      });
+      this.dataLabForm.addEventListener('submit', async (event) => {
         event.preventDefault();
+        if (this.dataLabExportPending) return;
         const formData = new FormData(this.dataLabForm);
         const template = formData.get('template');
         if (!template) {
           this.showToast('Choose a notebook template first.', 'danger');
           return;
         }
-        fetch(this.dataLabExportUrl, {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-CSRFToken': this.getCsrfToken(),
-          },
-        })
-          .then((response) => {
-            if (!response.ok) {
-              return response.json().then((data) => {
-                throw new Error(this.formatErrors(data.errors));
-              });
-            }
-            return response.json();
-          })
-          .then((payload) => {
-            this.showToast('Notebook exported.', 'success');
-            this.updateFromPayload(payload);
-          })
-          .catch((error) => {
-            this.showToast(error.message || 'Unable to export notebook.', 'danger');
+        this.dataLabExportPending = true;
+        const generation = this.notebookSelectionGeneration;
+        const controls = Array.from(this.dataLabForm.querySelectorAll('button, input, select'))
+          .map((control) => [control, control.disabled]);
+        controls.forEach(([control]) => { control.disabled = true; });
+        try {
+          const response = await fetch(this.dataLabExportUrl, {
+            method: 'POST',
+            body: formData,
+            headers: {
+              'X-Requested-With': 'XMLHttpRequest',
+              'X-CSRFToken': this.getCsrfToken(),
+            },
           });
+          const payload = await response.json();
+          if (!response.ok) throw new Error(this.formatErrors(payload.errors));
+          this.showToast('Notebook exported.', 'success');
+          // Export responses own the new notebook, never a stale workspace snapshot.
+          if (generation === this.notebookSelectionGeneration) {
+            this.updateDataLab(payload.data_lab || null);
+          }
+        } catch (error) {
+          this.showToast(error.message || 'Unable to export notebook.', 'danger');
+        } finally {
+          this.dataLabExportPending = false;
+          controls.forEach(([control, disabled]) => { control.disabled = disabled; });
+        }
       });
     }
 
@@ -317,6 +328,7 @@ class InspectorUI {
       this.dataLabList.addEventListener('click', (event) => {
         const trigger = event.target.closest('[data-notebook-url]');
         if (!trigger) return;
+        this.notebookSelectionGeneration += 1;
         this.openNotebook(trigger.dataset.notebookUrl, trigger.dataset.notebookSlug);
       });
     }
@@ -646,7 +658,16 @@ class InspectorUI {
   updateDataLab(data) {
     if (!data) return;
     this.updateTemplateOptions(data.templates || []);
+    if (this.dataLabIncomplete) this.dataLabIncomplete.hidden = !data.notebooks_incomplete;
+    const selected = data.notebooks?.find((nb) => nb.slug === data.selected_notebook);
+    if (data.selected_notebook && (data.selected_notebook_url || selected?.viewer_url)) {
+      this.openNotebook(data.selected_notebook_url || selected.viewer_url, data.selected_notebook);
+    }
     if (!data.notebooks?.length) {
+      if (this.activeNotebookSlug) {
+        this.renderDataLabList([]);
+        return;
+      }
       this.activeNotebookSlug = '';
       this.renderDataLabList([]);
       if (this.dataLabViewer) {
@@ -654,13 +675,9 @@ class InspectorUI {
       }
       return;
     }
-    const selected = data.notebooks.find((nb) => nb.slug === data.selected_notebook);
-    if (selected) {
-      this.openNotebook(selected.viewer_url, selected.slug);
-    }
     this.renderDataLabList(data.notebooks || []);
     const existing = data.notebooks.find((nb) => nb.slug === this.activeNotebookSlug);
-    if (existing) {
+    if (existing || this.activeNotebookSlug) {
       this.highlightNotebook();
     } else {
       const first = data.notebooks[0];

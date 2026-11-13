@@ -6,6 +6,8 @@ import re
 import stat
 import uuid
 from contextlib import ExitStack, contextmanager
+from functools import lru_cache
+from itertools import islice
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +93,8 @@ DATA_LAB_TEMPLATES = [
 ]
 
 DATA_LAB_TEMPLATE_MAP = {template["slug"]: template for template in DATA_LAB_TEMPLATES}
+EXPORT_SCAN_LIMIT = 512
+EXPORT_RESULT_LIMIT = 50
 
 
 def _replacement_table(workspace: Workspace) -> dict[str, str]:
@@ -286,19 +290,47 @@ def export_template(slug: str) -> dict[str, Any]:
     return DATA_LAB_TEMPLATE_MAP.get(slug, {})
 
 
-def list_workspace_exports(workspace: Workspace) -> list[dict[str, Any]]:
+def _directory_generation(path: Path) -> tuple[int, int, int, int]:
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode):
+        raise ValueError("Notebook inventory requires a real directory.")
+    return info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns
+
+
+@lru_cache(maxsize=32)
+def _export_names(
+    directory: Path, generation: tuple[int, int, int, int]
+) -> tuple[tuple[str, ...], bool]:
+    # Bound enumeration itself, including hidden/unrelated entries, before sorting.
+    with os.scandir(directory) as entries:
+        window = list(islice(entries, EXPORT_SCAN_LIMIT + 1))
+    if _directory_generation(directory) != generation:
+        raise ValueError("Notebook directory changed during inventory.")
+    names = sorted(
+        entry.name
+        for entry in window[:EXPORT_SCAN_LIMIT]
+        if entry.name.endswith(".ipynb")
+        and re.fullmatch(SlugConverter.regex, Path(entry.name).stem)
+    )
+    incomplete = len(window) > EXPORT_SCAN_LIMIT or len(names) > EXPORT_RESULT_LIMIT
+    return tuple(names[:EXPORT_RESULT_LIMIT]), incomplete
+
+
+def workspace_export_inventory(workspace: Workspace) -> tuple[list[dict[str, Any]], bool]:
+    """Return a bounded, generation-cached filename window and completeness flag."""
     try:
         workspace_dir = workspace_data_lab_dir(workspace)
-    except ValueError:
-        return []
+        names, incomplete = _export_names(workspace_dir, _directory_generation(workspace_dir))
+    except (OSError, ValueError):
+        return [], True
     exports: list[dict[str, Any]] = []
-    for path in sorted(workspace_dir.glob("*.ipynb")):
-        if not re.fullmatch(SlugConverter.regex, path.stem):
-            continue
+    for name in names:
+        path = workspace_dir / name
         try:
             with _open_notebook(workspace, path.name) as handle:
                 modified_at = os.fstat(handle.fileno()).st_mtime
         except FileNotFoundError:
+            incomplete = True
             continue
         slug = path.stem
         template = export_template(slug)
@@ -312,7 +344,12 @@ def list_workspace_exports(workspace: Workspace) -> list[dict[str, Any]]:
                 "modified_at": modified_at,
             }
         )
-    return exports
+    return exports, incomplete
+
+
+def list_workspace_exports(workspace: Workspace) -> list[dict[str, Any]]:
+    """Compatibility list API; use workspace_export_inventory for completeness."""
+    return workspace_export_inventory(workspace)[0]
 
 
 class InvalidNotebookError(ValueError):

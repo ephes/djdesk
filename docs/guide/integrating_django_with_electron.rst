@@ -209,7 +209,8 @@ Ordinary failures remove owned staging; a killed process can leave hidden tempor
 files that can be inspected and removed manually with exporters stopped.
 Systems without directory-relative no-follow opens and hard-link publication (including
 Windows) refuse exports before writing, with HTTP 400. The filesystem must support
-hard links; the portable reader remains available for existing notebooks.
+hard links; the portable reader remains available for existing notebooks. Filesystem
+failures during publication return an HTTP 500 JSON error and leave no partial export.
 
 Listings and previews accept regular notebook files directly inside the workspace export
 directory. Notebook symlinks, even internal ones, and symlinked workspace export directories

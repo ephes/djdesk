@@ -229,7 +229,9 @@ A killed process may leave a hidden `.notebook-*.tmp` file; it is never listed o
 With exporters stopped, inspect and remove those leftovers manually. Platforms without
 directory-relative, no-follow opens and hard-link publication (including Windows) refuse
 exports with HTTP 400 before writing; existing notebooks remain readable through the
-portable reader. The export filesystem must support hard links.
+portable reader. The export filesystem must support hard links; filesystem failures during
+publication (no hard-link support, a directory swapped for a symlink, a failed staging write)
+return an HTTP 500 JSON error and leave no partial export.
 
 Workspace saves retry slug uniqueness collisions at most five times. SQLite admission
 requires its exact single-column unique error; PostgreSQL uses SQLSTATE 23505 and the

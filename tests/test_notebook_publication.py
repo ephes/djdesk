@@ -174,6 +174,17 @@ data_lab.export_notebook(Workspace(name="Crash", slug="publication"), "schema-au
         self.assertEqual(response.status_code, 400)
         self.assertEqual(list(self.root.rglob("*.ipynb")), [])
 
+    def test_publication_os_error_returns_json_error_without_files(self):
+        with mock.patch.object(os, "fsync", side_effect=OSError("staging write failed")):
+            response = self.client.post(
+                reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                {"template": "schema-audit"},
+            )
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("could not be published", response.json()["errors"]["template"][0])
+        self.assertEqual(list(self.root.rglob("*.ipynb")), [])
+        self.assertEqual(list(self.root.rglob(".notebook-*.tmp")), [])
+
     def test_replaced_staging_inode_is_neither_published_nor_deleted(self):
         def replace():
             staging = next(self.root.rglob(".notebook-*.tmp"))

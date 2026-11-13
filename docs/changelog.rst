@@ -12,6 +12,9 @@ Fixed
 - Publish complete, flushed notebook exports atomically without clobbering edited or
   concurrent exports. Keep staging files outside the listing suffix, clean owned staging
   on ordinary failures, and leave hidden, unlisted staging after process interruption.
+- Report filesystem failures during notebook publication (missing hard-link support,
+  a swapped export directory, failed staging writes) as an HTTP 500 JSON error instead
+  of an unhandled server error.
 - Recognize PostgreSQL workspace slug collisions through SQLSTATE/table/constraint
   diagnostics and restrict SQLite retries to its exact slug constraint; retain five
   attempts and propagate unrelated integrity errors. Add opt-in local PostgreSQL tests.

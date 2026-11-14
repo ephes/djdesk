@@ -16,6 +16,9 @@ Fixed
   diagnostics. Consolidate only equivalent duplicates, preserving canonical identity
   and every child relationship. Bound projected reads and writes to batches across
   duplicate-group boundaries; document backup, repair and schema rollback behavior.
+- Fire pending deferred foreign-key checks after migration 0004 merges duplicates on
+  PostgreSQL, so its index creation no longer fails with "pending trigger events".
+  The opt-in PostgreSQL test settings now run the historical migration tests too.
 
 - Keep the live schema graph and viewport across unchanged status polls. Stage
   changed schema elements and layout before replacing the view, preserving the

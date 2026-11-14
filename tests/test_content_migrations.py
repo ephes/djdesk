@@ -24,15 +24,38 @@ class ContentMigrationTests(TestCase):
     aliases = ("migration_primary", "migration_selected")
 
     def setUp(self):
+        # Under djdesk.settings.test_postgresql the aliases are disposable PostgreSQL
+        # databases, so the PostgreSQL-only SQL in 0004 runs too; otherwise SQLite.
+        postgresql = connections["default"].vendor == "postgresql"
         for alias in self.aliases:
             config = deepcopy(connections["default"].settings_dict)
-            config.update(ENGINE="django.db.backends.sqlite3", NAME=":memory:")
+            if postgresql:
+                config.update(NAME=self.create_postgresql_database(alias))
+            else:
+                config.update(ENGINE="django.db.backends.sqlite3", NAME=":memory:")
             connections.databases[alias] = config
             self.addCleanup(self.close_alias, alias)
             self.migrate(alias, "0001_initial")
         self.router = override_settings(DATABASE_ROUTERS=[HistoricalRouter()])
         self.router.enable()
         self.addCleanup(self.router.disable)
+
+    def create_postgresql_database(self, alias):
+        base = connections["default"].settings_dict["NAME"]
+        # Run alone, the runner sets up no test database and default is the real
+        # PGDATABASE; never derive a name to drop without the test_ prefix.
+        if not base.startswith("test_"):
+            base = f"test_{base}"
+        name = f"{base}_{alias}"
+        with connections["default"].cursor() as cursor:
+            cursor.execute(f'DROP DATABASE IF EXISTS "{name}"')
+            cursor.execute(f'CREATE DATABASE "{name}"')
+        self.addCleanup(self.drop_postgresql_database, name)
+        return name
+
+    def drop_postgresql_database(self, name):
+        with connections["default"].cursor() as cursor:
+            cursor.execute(f'DROP DATABASE IF EXISTS "{name}"')
 
     def close_alias(self, alias):
         connections[alias].close()

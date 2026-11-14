@@ -53,7 +53,9 @@ remain significant.
 Preflight and application use ordered projections in batches of at most 200,
 retaining only the current group's canonical row across batches. Child moves,
 duplicate deletion and path updates are batched in the selected database's
-transaction. A failed migration rolls back its changes. Other database engines
+transaction. On PostgreSQL the deferred foreign-key checks for moved children
+are fired before the index and unique constraint are created. A failed migration
+rolls back its changes. Other database engines
 are refused before mutation rather than given different trimming semantics.
 
 Reversing 0004 to 0003 removes its index/unique constraint and leaves the

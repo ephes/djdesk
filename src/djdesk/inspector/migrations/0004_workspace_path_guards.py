@@ -121,6 +121,13 @@ def normalize_workspace_paths(apps, schema_editor) -> None:
             _write_batch(workspaces, scans, runs, paths, merges)
         if canonical and canonical["project_path"] != canonical["_normalized"]:
             _write_batch(workspaces, scans, runs, {canonical["pk"]: canonical["_normalized"]}, {})
+    if vendor == "postgresql":
+        # Merges leave deferred foreign-key checks pending in this migration's
+        # transaction; PostgreSQL refuses the following CREATE INDEX on the table
+        # until they have fired, so check them now. Then defer again, matching
+        # Django's INITIALLY DEFERRED foreign keys for the rest of the transaction.
+        schema_editor.execute("SET CONSTRAINTS ALL IMMEDIATE")
+        schema_editor.execute("SET CONSTRAINTS ALL DEFERRED")
 
 
 class Migration(migrations.Migration):

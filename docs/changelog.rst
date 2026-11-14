@@ -7,6 +7,16 @@ Unreleased
 Fixed
 ~~~~~
 
+- Bind historical inspector seed, documentation-pane and path migrations to the
+  selected database alias. Freeze their tutorial seed inputs independently of
+  runtime content and asset helpers. Refuse reversal of seed migration 0002 to
+  preserve customized workspaces, scans, presets, documentation links and task history.
+- Preflight workspace path migration 0004 before mutation: refuse empty normalized
+  paths and duplicate groups with conflicting user data, with bounded repair
+  diagnostics. Consolidate only equivalent duplicates, preserving canonical identity
+  and every child relationship. Bound projected reads and writes to batches across
+  duplicate-group boundaries; document backup, repair and schema rollback behavior.
+
 - Keep the live schema graph and viewport across unchanged status polls. Stage
   changed schema elements and layout before replacing the view, preserving the
   previous graph on failure and ignoring callbacks from retired instances.

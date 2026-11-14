@@ -2,14 +2,21 @@ from __future__ import annotations
 
 from django.db import migrations, models
 
-from djdesk.inspector import content
-
 
 def apply_pane_targets(apps, schema_editor) -> None:
     DocLink = apps.get_model("inspector", "DocLink")
-    lookup = {entry["slug"]: entry.get("pane_target", "") for entry in content.DOC_LINKS}
+    lookup = {
+        "guide-boot-django": "hello",
+        "guide-render-django": "schema",
+        "guide-desktop-affordances": "native",
+        "guide-safe-automation": "tasks",
+        "guide-data-lab": "data-lab",
+        "guide-package": "packaging",
+    }
     for slug, pane_target in lookup.items():
-        DocLink.objects.filter(slug=slug).update(pane_target=pane_target or "")
+        DocLink.objects.using(schema_editor.connection.alias).filter(slug=slug).update(
+            pane_target=pane_target
+        )
 
 
 def noop(apps, schema_editor) -> None:
@@ -17,7 +24,6 @@ def noop(apps, schema_editor) -> None:
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("inspector", "0002_seed_content"),
     ]

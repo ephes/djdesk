@@ -112,6 +112,11 @@ Run `just ci` locally before opening a pull request; a change is only ready for 
 
 ### Settings and environments
 
+Before upgrading or rolling back a database, stop its writers and make a restorable
+backup. See [historical migration and rollback guidance](docs/migrations.rst):
+inspector 0002 is irreversible, and 0004 refuses blank paths or conflicting duplicate
+workspace data before mutation. Use the intended `--database` alias for every step.
+
 Settings live in `djdesk/settings/`; choose the appropriate module via `DJANGO_SETTINGS_MODULE`:
 
 - `djdesk.settings.local` (default for `manage.py` and `just dev`): debug on, console email backend, localhost hosts.

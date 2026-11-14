@@ -3,10 +3,11 @@ from __future__ import annotations
 from django.db import migrations
 from django.utils.dateparse import parse_datetime
 
-from djdesk.inspector import content
+from . import _0002_seed_data as content
 
 
 def seed_initial_content(apps, schema_editor) -> None:
+    alias = schema_editor.connection.alias
     Workspace = apps.get_model("inspector", "Workspace")
     ScanJob = apps.get_model("inspector", "ScanJob")
     TaskPreset = apps.get_model("inspector", "TaskPreset")
@@ -14,7 +15,7 @@ def seed_initial_content(apps, schema_editor) -> None:
     DocLink = apps.get_model("inspector", "DocLink")
 
     for preset_data in content.TASK_PRESETS:
-        TaskPreset.objects.update_or_create(
+        TaskPreset.objects.using(alias).update_or_create(
             key=preset_data["key"],
             defaults={
                 "label": preset_data["label"],
@@ -28,7 +29,7 @@ def seed_initial_content(apps, schema_editor) -> None:
         )
 
     for link in content.DOC_LINKS:
-        DocLink.objects.update_or_create(
+        DocLink.objects.using(alias).update_or_create(
             slug=link["slug"],
             defaults={
                 "title": link["title"],
@@ -45,7 +46,7 @@ def seed_initial_content(apps, schema_editor) -> None:
         scans = fixture.get("scans", [])
         task_runs = fixture.get("task_runs", [])
 
-        workspace, _ = Workspace.objects.update_or_create(
+        workspace, _ = Workspace.objects.using(alias).update_or_create(
             name=fixture["name"],
             defaults={
                 "project_path": fixture["project_path"],
@@ -63,11 +64,11 @@ def seed_initial_content(apps, schema_editor) -> None:
             parsed = parse_datetime(last_scan_at)
             if parsed:
                 workspace.last_scan_at = parsed
-                workspace.save(update_fields=["last_scan_at"])
+                workspace.save(using=alias, update_fields=["last_scan_at"])
 
-        if not workspace.scans.exists():
+        if not workspace.scans.using(alias).exists():
             for scan in scans:
-                ScanJob.objects.create(
+                ScanJob.objects.using(alias).create(
                     workspace=workspace,
                     kind=scan["kind"],
                     status=scan["status"],
@@ -76,12 +77,12 @@ def seed_initial_content(apps, schema_editor) -> None:
                     log_excerpt=scan.get("log_excerpt", ""),
                 )
 
-        if not workspace.task_runs.exists():
+        if not workspace.task_runs.using(alias).exists():
             for run in task_runs:
-                preset = TaskPreset.objects.filter(key=run["preset"]).first()
+                preset = TaskPreset.objects.using(alias).filter(key=run["preset"]).first()
                 if not preset:
                     continue
-                WorkspaceTaskRun.objects.create(
+                WorkspaceTaskRun.objects.using(alias).create(
                     workspace=workspace,
                     preset=preset,
                     status=run.get("status", "succeeded"),
@@ -90,22 +91,11 @@ def seed_initial_content(apps, schema_editor) -> None:
                 )
 
 
-def remove_seeded_content(apps, schema_editor) -> None:
-    Workspace = apps.get_model("inspector", "Workspace")
-    TaskPreset = apps.get_model("inspector", "TaskPreset")
-    DocLink = apps.get_model("inspector", "DocLink")
-
-    Workspace.objects.all().delete()
-    TaskPreset.objects.all().delete()
-    DocLink.objects.all().delete()
-
-
 class Migration(migrations.Migration):
-
     dependencies = [
         ("inspector", "0001_initial"),
     ]
 
     operations = [
-        migrations.RunPython(seed_initial_content, remove_seeded_content),
+        migrations.RunPython(seed_initial_content),
     ]

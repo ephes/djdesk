@@ -113,7 +113,12 @@ Screenshot parity depends on everyone importing the same sample projects. DJDesk
     just fetch-samples                 # creates sample_projects/
     tree sample_projects/djdesk        # inspect the Atlas Telemetry workspace
 
-Behind the scenes ``scripts/fetch_samples.py`` writes the ``django-polls``, ``djdesk`` (Atlas Telemetry), and ``generated`` projects into ``INSPECTOR_SAMPLE_ROOT`` (defaults to ``sample_projects/``). ``content.py`` references these repo-relative paths so seeds, migrations, and screenshots always point at real files. Override ``DJDESK_SAMPLE_ROOT`` if you prefer to stash the bundles elsewhere.
+Behind the scenes ``scripts/fetch_samples.py`` writes the ``django-polls``, ``djdesk``
+(Atlas Telemetry), and ``generated`` projects into ``INSPECTOR_SAMPLE_ROOT``
+(defaults to ``sample_projects/``). Runtime ``content.py`` and the frozen historical
+seed resolve sample paths from this setting. Override ``DJDESK_SAMPLE_ROOT`` if
+you prefer to stash the bundles elsewhere. See :doc:`../migrations` before
+upgrading, repairing or rolling back an inspector database.
 
 Use ``uv run python scripts/fetch_samples.py --force`` to replace existing samples, including
 all local edits, tutorial state and databases. Replacements are staged beside the destination

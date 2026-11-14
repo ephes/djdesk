@@ -127,6 +127,7 @@ def _env_flag(env_name: str, default: bool) -> bool:
         return default
     return raw_value.strip().lower() in {"1", "true", "yes", "on"}
 
+
 INSPECTOR_DOCS_BASE_URL = os.environ.get(
     "DJDESK_DOCS_BASE_URL", "https://djdesk.readthedocs.io/en/latest"
 )

@@ -47,8 +47,7 @@ TASK_PRESETS = [
         "key": "sqlmigrate",
         "label": "Show SQL for migrations",
         "description": (
-            "Render the SQL for the next pending migration as part of the "
-            "inspection report."
+            "Render the SQL for the next pending migration as part of the " "inspection report."
         ),
         "command": "python manage.py sqlmigrate core 0003",
         "docs_url": "https://djdesk.readthedocs.io/en/latest/guide/integrating_django_with_electron.html#guide-safe-automation",

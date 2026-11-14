@@ -408,10 +408,7 @@ class ProcessTreeTests(ProcessFixtureCase):
 
     def test_command_that_closes_output_and_keeps_running_times_out(self) -> None:
         self.write_manage(
-            "print('closing', flush=True)\n"
-            "os.close(1)\n"
-            "os.close(2)\n"
-            "time.sleep(120)\n"
+            "print('closing', flush=True)\n" "os.close(1)\n" "os.close(2)\n" "time.sleep(120)\n"
         )
         result = self.run_fixture(timeout=1)
         self.assertTrue(result.timed_out)

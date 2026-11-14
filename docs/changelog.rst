@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Keep the live schema graph and viewport across unchanged status polls. Stage
+  changed schema elements and layout before replacing the view, preserving the
+  previous graph on failure and ignoring callbacks from retired instances.
+  Add schema lifecycle regressions and a separate real Cytoscape browser fixture.
+
 - Bind offline documentation reads to verified regular-file descriptors and the admitted
   bundle generation. Refuse swapped paths and special files, close failed constructions,
   and transfer successful handle ownership to the streaming response. Platforms without

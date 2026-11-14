@@ -257,7 +257,8 @@ exercises deferred exports and manual selection without external network request
 
 Schema polling retains the current graph, layout and viewport when the rendered schema
 is unchanged. Changed schemas are staged and laid out before replacing the live view;
-failed rebuilds keep the previous view and retry on the next status update. Callbacks
+failed rebuilds keep the previous view and retry on the next status update, without
+affecting the connection state or the other dashboard panels. Callbacks
 from retired graphs cannot move or persist the current viewport.
 The schema lifecycle guards run with `just electron-test`. For the real Cytoscape DOM
 fixture, run `npm ci --ignore-scripts` and `npm run test:schema` in `electron/`, with

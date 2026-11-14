@@ -11,6 +11,8 @@ Fixed
   changed schema elements and layout before replacing the view, preserving the
   previous graph on failure and ignoring callbacks from retired instances.
   Add schema lifecycle regressions and a separate real Cytoscape browser fixture.
+  A failed schema rebuild during polling no longer marks the dashboard offline or
+  skips the Data Lab update, and nodes without a string name no longer break sorting.
 
 - Bind offline documentation reads to verified regular-file descriptors and the admitted
   bundle generation. Refuse swapped paths and special files, close failed constructions,

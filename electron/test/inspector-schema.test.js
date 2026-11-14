@@ -32,6 +32,7 @@ function fixture() {
   }
   const state = { layouts: 0, fail: null, writes: [] };
   const context = {
+    console,
     document: { addEventListener() {}, createElement: element },
     localStorage: {
       getItem: (key) => storage.get(key) || null,
@@ -193,4 +194,36 @@ test('empty schemas retire callbacks, remove the graph and allow fresh reconstru
   assert.equal(state.writes.length, 0);
   ui.updateSchema(schema());
   assert.notEqual(ui.schemaGraphInstance, graph);
+});
+
+test('a failed schema rebuild during polling keeps the connection and other panels updating', () => {
+  const { ui, state } = fixture();
+  const calls = [];
+  ui.toggleConnection = (online) => calls.push(['connection', online]);
+  ui.updateDataLab = (data) => calls.push(['data_lab', data]);
+  ui.refreshIcons = () => calls.push(['icons']);
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (...args) => warnings.push(args);
+  try {
+    ui.updateFromPayload({ schema: schema(), data_lab: 'first' });
+    const previous = ui.schemaGraphInstance;
+    const changed = schema();
+    changed.nodes.push({ name: 'Publisher' });
+    state.fail = 'layout';
+    calls.length = 0;
+    assert.doesNotThrow(() => ui.updateFromPayload({ schema: changed, data_lab: 'second' }));
+    assert.equal(ui.schemaGraphInstance, previous, 'the previous view stays');
+    assert.deepEqual(calls, [['connection', true], ['data_lab', 'second'], ['icons']]);
+    assert.equal(warnings.length, 1);
+  } finally {
+    console.warn = originalWarn;
+  }
+});
+
+test('nodes without a string name do not break schema sorting', () => {
+  const { ui } = fixture();
+  const malformed = schema();
+  malformed.nodes.push({ fields: [] }, { name: 7 });
+  assert.doesNotThrow(() => ui.buildSchemaElements(malformed));
 });

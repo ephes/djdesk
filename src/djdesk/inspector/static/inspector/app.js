@@ -359,7 +359,7 @@ class InspectorUI {
     this.updateActivity(payload.activity || []);
     this.updateLogs(payload.log_excerpt || []);
     this.updateTasks(payload.tasks || []);
-    this.updateSchema(payload.schema || null);
+    this.applySchema(payload.schema || null);
     this.updateDataLab(payload.data_lab || null);
     this.refreshIcons();
   }
@@ -576,7 +576,17 @@ class InspectorUI {
   loadInitialSchema() {
     const data = this.getSchemaDataFromScript();
     if (data) {
-      this.updateSchema(data);
+      this.applySchema(data);
+    }
+  }
+
+  // A failed rebuild keeps the previous view (updateSchema restores it before
+  // rethrowing); it must not abort the other panels or the connection state.
+  applySchema(schema) {
+    try {
+      this.updateSchema(schema);
+    } catch (error) {
+      console.warn('Schema view update failed; keeping the previous view.', error);
     }
   }
 
@@ -901,7 +911,7 @@ class InspectorUI {
 
   buildSchemaElements(schema) {
     const nodes = [...(Array.isArray(schema.nodes) ? schema.nodes : [])]
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')));
     const edges = [...(Array.isArray(schema.connections) ? schema.connections : [])]
       .sort((a, b) => JSON.stringify([a.source, a.target]).localeCompare(JSON.stringify([b.source, b.target])));
     const edgeCounts = new Map();

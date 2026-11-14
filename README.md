@@ -112,6 +112,11 @@ Run `just ci` locally before opening a pull request; a change is only ready for 
 
 ### Settings and environments
 
+Before upgrading or rolling back a database, stop its writers and make a restorable
+backup. See [historical migration and rollback guidance](docs/migrations.rst):
+inspector 0002 is irreversible, and 0004 refuses blank paths or conflicting duplicate
+workspace data before mutation. Use the intended `--database` alias for every step.
+
 Settings live in `djdesk/settings/`; choose the appropriate module via `DJANGO_SETTINGS_MODULE`:
 
 - `djdesk.settings.local` (default for `manage.py` and `just dev`): debug on, console email backend, localhost hosts.
@@ -293,10 +298,12 @@ use a disposable `test_<PGDATABASE>` database on an explicitly selected local se
 ```bash
 PGHOST=/path/to/local/socket PGPORT=5432 PGDATABASE=postgres \
   DJANGO_SETTINGS_MODULE=djdesk.settings.test_postgresql \
-  uv run --with 'psycopg[binary]>=3.2' python manage.py test tests.test_workspace_slugs
+  uv run --with 'psycopg[binary]>=3.2' python manage.py test tests.test_workspace_slugs tests.test_content_migrations
 ```
 
-Only use a local test server whose role may create/drop test databases. The regular
+Only use a local test server whose role may create/drop test databases. Under these settings
+the historical migration tests also create and drop two `test_<PGDATABASE>_migration_*`
+databases, so migration 0004's PostgreSQL trimming and merge path runs. The regular
 SQLite suite skips the PostgreSQL-only concurrency check; no remote database is required.
 
 ### Python dependency security

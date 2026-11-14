@@ -60,7 +60,7 @@ async function main() {
 
   const standaloneSpec = resolveStandaloneSpec();
   const bundlePython = await prepareStandalonePython(standaloneSpec);
- 
+
   await installPythonDeps(bundlePython);
   await copyProjectFiles();
   await collectStatic(bundlePython);

@@ -1,4 +1,36 @@
 const WIZARD_STORAGE_KEY = 'djdesk.wizard.projectPath';
+const INSPECTOR_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+async function readInspectorJSON(response, maxBytes = INSPECTOR_RESPONSE_BYTES) {
+  const overflow = () => Object.assign(new Error('Inspector response byte limit exceeded'),
+    { code: 'INSPECTOR_RESPONSE_TOO_LARGE' });
+  const length = response.headers.get('Content-Length');
+  if (length && /^\d+$/.test(length) && Number(length) > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw overflow();
+  }
+  if (!response.ok || !response.body) throw new Error('Inspector response unavailable');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parts = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) throw overflow();
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    return JSON.parse(parts.join(''));
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 class InspectorUI {
   constructor(root) {
@@ -341,7 +373,7 @@ class InspectorUI {
       fetch(this.statusUrl, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
-        .then((response) => response.json())
+        .then((response) => readInspectorJSON(response))
         .then((payload) => this.updateFromPayload(payload))
         .catch(() => {
           this.toggleConnection(false);
@@ -1031,7 +1063,7 @@ class InspectorUI {
     fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then((response) => {
         if (!response.ok) throw new Error('Request failed');
-        return response.json();
+        return readInspectorJSON(response);
       })
       .then((data) => {
         this.renderTaskDrawer(data);
@@ -1041,9 +1073,9 @@ class InspectorUI {
           this.clearTaskDrawerPolling();
         }
       })
-      .catch(() => {
+      .catch((error) => {
         this.showToast('Unable to load task log.', 'danger');
-        this.closeTaskDrawer();
+        if (error.code !== 'INSPECTOR_RESPONSE_TOO_LARGE') this.closeTaskDrawer();
       });
   }
 

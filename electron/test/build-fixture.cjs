@@ -10,7 +10,7 @@ const buildPath = path.join(__dirname, '..', 'build-django.js');
 const realRequire = createRequire(buildPath);
 
 function buildFixture(t, processes = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'djdesk build contracts '));
+  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'djdesk build contracts ')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const bundle = path.join(root, 'electron', 'django-bundle');
   fs.mkdirSync(bundle, { recursive: true });

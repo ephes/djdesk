@@ -58,7 +58,7 @@ Bundler internals
 ``npm run bundle`` (or ``just electron-bundle``) executes ``electron/build-django.js``.
 The script produces a reproducible Python payload in seven stages:
 
-1. Delete and recreate ``electron/django-bundle/``.
+1. Exclusively reserve ``electron/django-bundle/`` and create unique sibling staging.
 2. Download the matching python-build-standalone archive for the current OS/arch,
    verify its SHA256 checksum, and unpack it into ``django-bundle/python/``.
 3. Install every dependency listed under ``[project].dependencies`` using
@@ -70,10 +70,31 @@ The script produces a reproducible Python payload in seven stages:
    ``DJANGO_STATIC_ROOT`` pointing to ``django-bundle/staticfiles/``.
 6. Write ``run_django.py`` (the in-bundle launcher) and a ``VERSION`` file containing
    ``git rev-parse --short HEAD`` plus a timestamp.
-7. Import Django using the bundled interpreter to prove the environment is healthy.
+7. Import Django using the staged interpreter, then promote the complete runtime.
+
+All runtime paths in these stages refer to staging until verification succeeds.
+Build failures preserve the previous runtime. Promotion first moves it into
+``.django-bundle-publish-*/backup``; installation failure restores it. If restoration
+fails too, the error names the retained recovery copy. Stop all builders before
+moving it back. A killed publisher can leave the destination absent: this is a
+recoverable swap, not a crash-atomic exchange. Cleanup failure after publication
+reports an error with the new runtime installed; leftover backups may be incomplete.
+
+An exclusive ``django-bundle.lock`` directory in the canonical parent identifies
+the destination owner. A competing builder fails immediately, including through
+parent-directory aliases. The owner holds the reservation across construction,
+promotion and cleanup. After interruption, stop all builders, inspect staging and
+backups, and only then remove the empty reservation directory and retry. Never
+remove a live owner's reservation. Serialize subsequent installer packaging too.
 
 Interpreter downloads are cached under ``electron/.python-downloads/`` so subsequent
-bundles reuse existing archives.
+bundles reuse existing archives. Cache validation and transfer share a two-minute
+deadline and 256 MiB byte ceiling. Cache files must be ordinary non-symlink files;
+hashing uses an admitted descriptor with identity/metadata checks before reuse.
+Special, oversized or changing entries are refused without changing their targets.
+Repair them with builders stopped. Checksums are verified before allocating
+extraction scratch; extraction and copy failures retire only owned scratch.
+Cleanup failures retain the original error and report the scratch path.
 
 Bundle layout
 -------------

@@ -6,10 +6,36 @@ const { createHash } = require('node:crypto');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 
-async function checksum(file, expected) {
-  const hash = createHash('sha256');
-  for await (const chunk of fs.createReadStream(file)) hash.update(chunk);
-  return hash.digest('hex') === expected;
+async function checksum(file, expected, { maxBytes, signal }) {
+  signal.throwIfAborted();
+  const before = await fsp.lstat(file);
+  if (!before.isFile()) throw new Error('Python cache must be a regular file, not a symbolic link');
+  const handle = await fsp.open(file, fs.constants.O_RDONLY |
+    (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+  try {
+    const admitted = await handle.stat();
+    const sameFile = (stat) => stat.isFile() && stat.dev === admitted.dev &&
+      stat.ino === admitted.ino && stat.size === admitted.size &&
+      stat.mtimeMs === admitted.mtimeMs && stat.ctimeMs === admitted.ctimeMs;
+    if (!sameFile(before)) throw new Error('Python cache changed during admission');
+    if (admitted.size > maxBytes) throw new Error('Python cache byte limit exceeded');
+    const hash = createHash('sha256');
+    let bytes = 0;
+    for await (const chunk of handle.createReadStream({ autoClose: false, signal,
+      highWaterMark: Math.min(65536, maxBytes + 1) })) {
+      signal.throwIfAborted();
+      bytes += chunk.length;
+      if (bytes > maxBytes) throw new Error('Python cache byte limit exceeded');
+      hash.update(chunk);
+    }
+    signal.throwIfAborted();
+    if (!sameFile(await handle.stat()) || !sameFile(await fsp.lstat(file))) {
+      throw new Error('Python cache changed during validation');
+    }
+    return hash.digest('hex') === expected;
+  } finally {
+    await handle.close();
+  }
 }
 
 // Only a fully downloaded, verified candidate may replace the cache entry.
@@ -17,17 +43,19 @@ async function downloadPython(url, destination, expected, {
   get = https.get, maxBytes = 256 * 1024 * 1024, timeoutMs = 120000, maxRedirects = 5,
 } = {}) {
   if (!/^[a-f0-9]{64}$/.test(expected || '')) throw new Error('Missing registered SHA256');
-  try {
-    if (await checksum(destination, expected)) return;
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-  await fsp.mkdir(path.dirname(destination), { recursive: true });
-  const directory = await fsp.mkdtemp(path.join(path.dirname(destination), '.python-download-'));
-  const candidate = path.join(directory, 'archive');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('Python download deadline exceeded')), timeoutMs);
+  let directory;
   try {
+    try {
+      if (await checksum(destination, expected, { maxBytes, signal: controller.signal })) return;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    controller.signal.throwIfAborted();
+    await fsp.mkdir(path.dirname(destination), { recursive: true });
+    directory = await fsp.mkdtemp(path.join(path.dirname(destination), '.python-download-'));
+    const candidate = path.join(directory, 'archive');
     for (let redirects = 0; ; redirects++) {
       if (new URL(url).protocol !== 'https:') throw new Error('Python download requires HTTPS');
       const response = await new Promise((resolve, reject) => {
@@ -62,8 +90,8 @@ async function downloadPython(url, destination, expected, {
     }
   } finally {
     clearTimeout(timer);
-    await fsp.rm(directory, { recursive: true, force: true });
+    if (directory) await fsp.rm(directory, { recursive: true, force: true });
   }
 }
 
-module.exports = { downloadPython };
+module.exports = { downloadPython, checksum };

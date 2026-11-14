@@ -44,6 +44,14 @@ Renderer data flow
 * The dashboard is server-rendered; ``DashboardView`` populates ``workspace``, ``doc_links``, ``task_presets``, and other context so the first paint always has meaningful data.
 * ``inspector/static/inspector/app.js`` polls ``/api/workspaces/<slug>/status/`` to keep the scan queue, insights, schema graph, and log stream updated. Submitting the assistant form returns the same payload so the UI can refresh immediately.
 
+  Status and task-detail reads stream at most 8 MiB of response bytes before JSON
+  parsing. This allows the normal five bounded task logs plus status metadata.
+  Content-Length can reject early but never replaces the streamed byte count.
+  Overflow cancels the reader and preserves the displayed status and task log;
+  later polls or a deliberate drawer reload can accept a smaller response.
+  This limit applies to decompressed response bytes, including UTF-8 characters
+  split across chunks. The separate POST handlers retain their existing contract.
+
   Schema polling compares canonical rendered element data (independent of object
   keys and model/connection ordering). Identical responses keep the live graph,
   layout, pan and zoom. A changed schema is staged in a hidden sibling container:
@@ -54,6 +62,11 @@ Renderer data flow
   Ready, tooltip and debounced viewport persistence callbacks belong to their
   graph instance, so retired graphs cannot affect the replacement.
 * ``django-tasks`` executes commands synchronously via ``ImmediateBackend``. Swapping in Celery/Redis later will not change the REST payload or UI contract because the ``TaskPreset`` + ``WorkspaceTaskRun`` models stay stable.
+
+  Command output framing scans each decoded chunk once and joins each completed
+  or final partial line once. Long newline-free output therefore takes linear
+  framing work within the existing command byte budget. Incremental decoding,
+  CRLF stripping, empty lines and callback/result semantics remain the same.
 
 Native hooks
 ------------

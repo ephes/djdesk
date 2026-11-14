@@ -37,13 +37,36 @@ cd electron && npm run bundle
 
 `build-django.js` performs the following steps:
 
-1. Creates a fresh `django-bundle/` directory.
+1. Exclusively reserves the runtime destination and creates a unique sibling staging directory.
 2. Downloads the appropriate **python-build-standalone Python 3.14.0+20251031 interpreter** for your platform and unpacks it into `django-bundle/python/` (verifying SHA256 checksums before extraction).
 3. Installs Django dependencies into that interpreter via `pip install` using the dependencies declared in `pyproject.toml`.
 4. Copies `manage.py` into `django-bundle/` and `src/djdesk` into `django-bundle/src/`.
 5. Runs `collectstatic --clear` with `DJANGO_STATIC_ROOT` pointed at `django-bundle/staticfiles`.
 6. Writes `run_django.py` (the launcher Electron calls) and a `VERSION` file with the current Git SHA.
-7. Verifies the bundled interpreter by importing Django before exiting.
+7. Verifies the staged interpreter by importing Django, then publishes the complete runtime.
+
+All build paths above point into staging until verification succeeds. An ordinary build
+failure leaves the previous `django-bundle/` intact. Promotion moves that bundle into
+`.django-bundle-publish-*/backup` and restores it if installation fails. If restoration
+also fails, the error names the retained backup for manual recovery. Stop builders before
+moving it back. This swap is recoverable, but not crash-atomic: an interrupted publisher
+may leave the destination absent. Cleanup errors after publication mean the new runtime
+is installed; leftover backups may be incomplete.
+
+The canonical parent path and destination name identify an exclusive `django-bundle.lock`
+directory. A duplicate builder fails immediately without touching staging, the runtime or
+the interpreter cache. The owner holds the reservation through cleanup and releases it
+on ordinary success/failure. After a killed builder, stop all builders and inspect staging
+and backups before removing the empty reservation directory and retrying. Never remove
+the reservation while its owner may still be running. Keep packaging steps serialized too.
+
+Cache validation and download share a two-minute deadline and a 256 MiB ceiling.
+Only ordinary, non-symlink cache files are accepted; opened-file identity and metadata
+are checked around bounded descriptor hashing. A special, oversized or changing cache
+is refused without changing its target. Remove or repair that entry with builders stopped.
+Valid registered checksums reuse the cache without HTTP. Extraction scratch is allocated
+only after checksum verification and cleaned on extraction/copy failure; a cleanup failure
+reports its path while preserving the primary error.
 
 > Only the packages listed under `[project].dependencies` in `pyproject.toml` are installed. Optional extras/dev dependencies are ignored.
 
@@ -129,7 +152,7 @@ electron/django-bundle/
 **"build-django.js failed"**
 - Ensure your shell can run `tar` (needed to extract python-build-standalone).
 - Confirm you have network access to GitHub to download the interpreter artifacts.
-- Delete `electron/django-bundle/` and try again if permissions look odd.
+- Inspect the reported staging, reservation or recovery path; preserve the last usable runtime while repairing permissions.
 
 **"Django server failed to start"**
 - Confirm the bundle exists and contains `python/bin/python3` (macOS/Linux) or `python/python.exe` (Windows).

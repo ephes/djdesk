@@ -43,6 +43,16 @@ Renderer data flow
 
 * The dashboard is server-rendered; ``DashboardView`` populates ``workspace``, ``doc_links``, ``task_presets``, and other context so the first paint always has meaningful data.
 * ``inspector/static/inspector/app.js`` polls ``/api/workspaces/<slug>/status/`` to keep the scan queue, insights, schema graph, and log stream updated. Submitting the assistant form returns the same payload so the UI can refresh immediately.
+
+  Schema polling compares canonical rendered element data (independent of object
+  keys and model/connection ordering). Identical responses keep the live graph,
+  layout, pan and zoom. A changed schema is staged in a hidden sibling container:
+  the previous elements are copied, then additions, removals and changed data are
+  applied through Cytoscape's public API. A synchronous layout completes before
+  installation, retaining the live viewport. Constructor or layout errors discard
+  staging and keep the previous graph; the next status update can retry.
+  Ready, tooltip and debounced viewport persistence callbacks belong to their
+  graph instance, so retired graphs cannot affect the replacement.
 * ``django-tasks`` executes commands synchronously via ``ImmediateBackend``. Swapping in Celery/Redis later will not change the REST payload or UI contract because the ``TaskPreset`` + ``WorkspaceTaskRun`` models stay stable.
 
 Native hooks

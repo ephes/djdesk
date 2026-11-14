@@ -18,6 +18,7 @@ class InspectorUI {
     this.schemaCanvas = root?.querySelector('#schema-canvas');
     this.previousTaskStatuses = new Map();
     this.schemaGraphInstance = null;
+    this.schemaSignature = null;
     this.schemaTooltip = document.createElement('div');
     this.schemaTooltip.className = 'schema-tooltip';
     this.taskDrawer = root?.querySelector('[data-task-drawer]');
@@ -358,7 +359,7 @@ class InspectorUI {
     this.updateActivity(payload.activity || []);
     this.updateLogs(payload.log_excerpt || []);
     this.updateTasks(payload.tasks || []);
-    this.updateSchema(payload.schema || null);
+    this.applySchema(payload.schema || null);
     this.updateDataLab(payload.data_lab || null);
     this.refreshIcons();
   }
@@ -575,7 +576,17 @@ class InspectorUI {
   loadInitialSchema() {
     const data = this.getSchemaDataFromScript();
     if (data) {
-      this.updateSchema(data);
+      this.applySchema(data);
+    }
+  }
+
+  // A failed rebuild keeps the previous view (updateSchema restores it before
+  // rethrowing); it must not abort the other panels or the connection state.
+  applySchema(schema) {
+    try {
+      this.updateSchema(schema);
+    } catch (error) {
+      console.warn('Schema view update failed; keeping the previous view.', error);
     }
   }
 
@@ -600,59 +611,110 @@ class InspectorUI {
         this.schemaGraphInstance.destroy();
         this.schemaGraphInstance = null;
       }
+      this.schemaSignature = null;
       return;
     }
     if (!window.cytoscape) {
-      this.schemaCanvas.textContent = 'Schema view unavailable (visualization library missing).';
+      if (!this.schemaGraphInstance) {
+        this.schemaCanvas.textContent = 'Schema view unavailable (visualization library missing).';
+      }
       return;
     }
-    this.schemaCanvas.classList.remove('is-empty');
-    this.schemaCanvas.innerHTML = '';
-    this.schemaCanvas.appendChild(this.schemaTooltip);
     const elements = this.buildSchemaElements(schema);
-    if (this.schemaGraphInstance) {
-      this.schemaGraphInstance.destroy();
+    const signature = this.schemaDataSignature(elements);
+    if (this.schemaGraphInstance && signature === this.schemaSignature) return;
+    const previous = this.schemaGraphInstance;
+    const viewport = previous ? { zoom: previous.zoom(), pan: { ...previous.pan() } } : null;
+    const container = document.createElement('div');
+    Object.assign(container.style, { position: 'absolute', inset: '0', visibility: 'hidden' });
+    this.schemaCanvas.appendChild(container);
+    let graph = null;
+    try {
+      graph = window.cytoscape({
+        container,
+        elements: previous ? previous.elements().jsons() : [],
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'background-color': '#0f172a',
+              'border-color': '#3b82f6',
+              'border-width': 2,
+              'width': 120,
+              'height': 60,
+              'shape': 'round-rectangle',
+              'label': 'data(label)',
+              'color': '#f8fafc',
+              'font-size': 12,
+              'font-weight': 600,
+              'text-valign': 'center',
+              'text-wrap': 'wrap',
+              'text-max-width': 100,
+            },
+          },
+          {
+            selector: 'edge',
+            style: {
+              'width': 2,
+              'curve-style': 'bezier',
+              'line-color': '#7dd3fc',
+              'target-arrow-color': '#7dd3fc',
+              'target-arrow-shape': 'triangle',
+              'arrow-scale': 1,
+            },
+          },
+        ],
+        layout: { name: 'preset' },
+        wheelSensitivity: 0.15,
+      });
+      this.syncSchemaElements(graph, elements);
+      // A synchronous layout finishes staging before the live generation is retired.
+      graph.layout({ name: 'cose', padding: 30, animate: false, fit: !previous }).run();
+      this.attachSchemaTooltip(schema, graph);
+      graph.on('pan zoom', () => this.scheduleSchemaStatePersist(graph));
+      this.schemaGraphInstance = graph;
+      this.restoreSchemaState(graph, viewport);
+    } catch (error) {
+      this.schemaGraphInstance = previous;
+      graph?.destroy();
+      container.remove();
+      throw error;
     }
-    this.schemaGraphInstance = window.cytoscape({
-      container: this.schemaCanvas,
-      elements,
-      style: [
-        {
-          selector: 'node',
-          style: {
-            'background-color': '#0f172a',
-            'border-color': '#3b82f6',
-            'border-width': 2,
-            'width': 120,
-            'height': 60,
-            'shape': 'round-rectangle',
-            'label': 'data(label)',
-            'color': '#f8fafc',
-            'font-size': 12,
-            'font-weight': 600,
-            'text-valign': 'center',
-            'text-wrap': 'wrap',
-            'text-max-width': 100,
-          },
-        },
-        {
-          selector: 'edge',
-          style: {
-            'width': 2,
-            'curve-style': 'bezier',
-            'line-color': '#7dd3fc',
-            'target-arrow-color': '#7dd3fc',
-            'target-arrow-shape': 'triangle',
-            'arrow-scale': 1,
-          },
-        },
-      ],
-      layout: { name: 'cose', padding: 30, animate: true, fit: true },
-      wheelSensitivity: 0.15,
+    previous?.destroy();
+    Array.from(this.schemaCanvas.children).forEach((child) => {
+      if (child !== container && child !== this.schemaTooltip) child.remove();
     });
-    this.attachSchemaTooltip(schema);
-    this.restoreSchemaState();
-    this.schemaGraphInstance.on('pan zoom', () => this.scheduleSchemaStatePersist());
+    this.schemaCanvas.classList.remove('is-empty');
+    this.schemaTooltip.classList.remove('is-visible');
+    container.style.visibility = 'visible';
+    this.schemaSignature = signature;
+  }
+
+  schemaDataSignature(value) {
+    const canonical = (item) => {
+      if (Array.isArray(item)) return item.map(canonical);
+      if (item && typeof item === 'object') {
+        return Object.fromEntries(Object.keys(item).sort().map((key) => [key, canonical(item[key])]));
+      }
+      return item;
+    };
+    return JSON.stringify(canonical(value));
+  }
+
+  syncSchemaElements(graph, elements) {
+    const desired = new Map(elements.map((element) => [element.data.id, element]));
+    graph.batch(() => {
+      graph.elements().forEach((element) => {
+        if (!desired.has(element.id())) element.remove();
+      });
+      elements.forEach((element) => {
+        const current = graph.getElementById(element.data.id);
+        if (!current.length) graph.add(element);
+        else if (this.schemaDataSignature(current.data()) !== this.schemaDataSignature(element.data)) {
+          current.data(element.data);
+        }
+      });
+    });
   }
 
   updateDataLab(data) {
@@ -692,18 +754,19 @@ class InspectorUI {
     }
   }
 
-  attachSchemaTooltip(schema) {
-    if (!this.schemaGraphInstance || !this.schemaTooltip) return;
+  attachSchemaTooltip(schema, graph = this.schemaGraphInstance) {
+    if (!graph || !this.schemaTooltip) return;
     const schemaNodes = new Map();
     (schema.nodes || []).forEach((node) => {
       schemaNodes.set(node.name, node);
     });
 
-    this.schemaGraphInstance.off('mouseover');
-    this.schemaGraphInstance.off('mouseout');
-    this.schemaGraphInstance.off('mousemove');
+    graph.off('mouseover');
+    graph.off('mouseout');
+    graph.off('mousemove');
 
-    this.schemaGraphInstance.on('mouseover', 'node', (event) => {
+    graph.on('mouseover', 'node', (event) => {
+      if (graph !== this.schemaGraphInstance) return;
       const node = schemaNodes.get(event.target.id());
       if (!node) return;
       this.schemaTooltip.innerHTML = this.buildTooltipContent(node);
@@ -711,11 +774,13 @@ class InspectorUI {
       this.positionSchemaTooltip(event.renderedPosition);
     });
 
-    this.schemaGraphInstance.on('mouseout', 'node', () => {
+    graph.on('mouseout', 'node', () => {
+      if (graph !== this.schemaGraphInstance) return;
       this.schemaTooltip.classList.remove('is-visible');
     });
 
-    this.schemaGraphInstance.on('mousemove', 'node', (event) => {
+    graph.on('mousemove', 'node', (event) => {
+      if (graph !== this.schemaGraphInstance) return;
       this.positionSchemaTooltip(event.renderedPosition);
     });
   }
@@ -743,18 +808,19 @@ class InspectorUI {
     this.schemaTooltip.style.top = `${y + offset}px`;
   }
 
-  scheduleSchemaStatePersist() {
+  scheduleSchemaStatePersist(graph = this.schemaGraphInstance) {
+    if (!graph || graph !== this.schemaGraphInstance) return;
     if (this.schemaStateDebounce) {
       clearTimeout(this.schemaStateDebounce);
     }
-    this.schemaStateDebounce = window.setTimeout(() => this.persistSchemaState(), 300);
+    this.schemaStateDebounce = window.setTimeout(() => this.persistSchemaState(graph), 300);
   }
 
-  persistSchemaState() {
-    if (!this.schemaGraphInstance || !this.workspaceSlug) return;
+  persistSchemaState(graph = this.schemaGraphInstance) {
+    if (!graph || graph !== this.schemaGraphInstance || !this.workspaceSlug) return;
     const payload = {
-      zoom: this.schemaGraphInstance.zoom(),
-      pan: this.schemaGraphInstance.pan(),
+      zoom: graph.zoom(),
+      pan: graph.pan(),
     };
     try {
       localStorage.setItem(`djdesk.schema.${this.workspaceSlug}`, JSON.stringify(payload));
@@ -763,27 +829,29 @@ class InspectorUI {
     }
   }
 
-  restoreSchemaState() {
-    if (!this.schemaGraphInstance || !this.workspaceSlug) return;
-    let payload = null;
+  restoreSchemaState(graph = this.schemaGraphInstance, viewport = null) {
+    if (!graph) return;
+    let payload = viewport;
     try {
-      payload = JSON.parse(localStorage.getItem(`djdesk.schema.${this.workspaceSlug}`));
+      if (!payload && this.workspaceSlug) {
+        payload = JSON.parse(localStorage.getItem(`djdesk.schema.${this.workspaceSlug}`));
+      }
     } catch {
       payload = null;
     }
     if (!payload) return;
     const apply = () => {
+      if (graph !== this.schemaGraphInstance) return;
       if (payload.zoom) {
-        this.schemaGraphInstance.zoom(payload.zoom);
+        graph.zoom(payload.zoom);
       }
       if (payload.pan) {
-        this.schemaGraphInstance.pan(payload.pan);
+        graph.pan(payload.pan);
       }
     };
-    if (typeof this.schemaGraphInstance.ready === 'function') {
-      this.schemaGraphInstance.ready(apply);
-    } else {
-      apply();
+    apply();
+    if (typeof graph.ready === 'function') {
+      graph.ready(apply);
     }
   }
 
@@ -842,8 +910,11 @@ class InspectorUI {
   }
 
   buildSchemaElements(schema) {
-    const nodes = Array.isArray(schema.nodes) ? schema.nodes : [];
-    const edges = Array.isArray(schema.connections) ? schema.connections : [];
+    const nodes = [...(Array.isArray(schema.nodes) ? schema.nodes : [])]
+      .sort((a, b) => String(a.name ?? '').localeCompare(String(b.name ?? '')));
+    const edges = [...(Array.isArray(schema.connections) ? schema.connections : [])]
+      .sort((a, b) => JSON.stringify([a.source, a.target]).localeCompare(JSON.stringify([b.source, b.target])));
+    const edgeCounts = new Map();
     return [
       ...nodes.map((node) => ({
         data: {
@@ -855,13 +926,18 @@ class InspectorUI {
           pending_migrations: node.pending_migrations || 0,
         },
       })),
-      ...edges.map((edge, index) => ({
-        data: {
-          id: `${edge.source}-${edge.target}-${index}`,
-          source: edge.source,
-          target: edge.target,
-        },
-      })),
+      ...edges.map((edge) => {
+        const key = JSON.stringify([edge.source, edge.target]);
+        const occurrence = edgeCounts.get(key) || 0;
+        edgeCounts.set(key, occurrence + 1);
+        return {
+          data: {
+            id: `edge:${key}:${occurrence}`,
+            source: edge.source,
+            target: edge.target,
+          },
+        };
+      }),
     ];
   }
 

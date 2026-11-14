@@ -7,6 +7,8 @@
     "start": "electron .",
     "test": "node --test test/*.test.js",
     "test:drawer": "node smoke/inspector-notebooks.cjs",
+    "test:schema": "node smoke/inspector-schema.cjs",
+    "test:schema:headless": "node smoke/inspector-schema.cjs --headless",
     "bundle": "node build-django.js",
     "build": "npm run bundle && electron-builder",
     "smoke": "node smoke/shell.cjs"
@@ -18,6 +20,7 @@
   },
   "license": "ISC",
   "devDependencies": {
+    "cytoscape": "3.27.0",
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0",
     "playwright-core": "1.65.0"

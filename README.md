@@ -255,6 +255,21 @@ Set `CHROME_EXECUTABLE` to an existing Chrome/Chromium binary if needed. It rend
 actual Django dashboard with an in-memory test database and synthetic notebooks, then
 exercises deferred exports and manual selection without external network requests.
 
+Schema polling retains the current graph, layout and viewport when the rendered schema
+is unchanged. Changed schemas are staged and laid out before replacing the live view;
+failed rebuilds keep the previous view and retry on the next status update, without
+affecting the connection state or the other dashboard panels. Callbacks
+from retired graphs cannot move or persist the current viewport.
+The schema lifecycle guards run with `just electron-test`. For the real Cytoscape DOM
+fixture, run `npm ci --ignore-scripts` and `npm run test:schema` in `electron/`, with
+`CHROME_EXECUTABLE` pointing to an installed Chrome/Chromium if needed. It uses the
+same pinned Cytoscape version as the dashboard and synthetic schema data, without
+external requests; it covers repeated polls, schema changes, failed construction/layout,
+retired callbacks, removals and reconstruction after an empty schema.
+`npm run test:schema:headless` runs the same oracle against real Cytoscape in Node
+with a synthetic container, covering graph APIs without requiring a browser. It
+does not verify DOM rendering.
+
 Exports write and flush an owner-only (0600) `.notebook-<random>.tmp` file before
 atomically publishing a hard link under the next free `.ipynb` name. Concurrent exports
 never overwrite one another and polls never see a partly written export. Creation,

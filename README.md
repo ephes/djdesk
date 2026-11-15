@@ -243,6 +243,13 @@ directories are refused. Where supported, directory-relative opens with no symli
 bind these checks to the opened descriptors; other systems check file identity around the open.
 Invalid UTF-8, JSON or viewer cell/output shapes return a bounded HTTP 422 repair page.
 Edit the original file and reload; the viewer preserves its bytes and escapes rendered text.
+The viewer reads bytes up to the opened file's initial size plus one, comparing descriptor
+size, nanosecond mtime and ctime before and after the read, before decoding UTF-8 or JSON.
+A changed generation is reopened, with at most three attempts per request. Continued
+in-place edits return HTTP 404 (unavailable); finish saving and reload. Stable malformed
+files still return HTTP 422. Atomic editor replacements can return the complete opened
+generation or retry the new one; mixed generations are refused. These checks depend on
+the filesystem exposing content changes through its size or timestamps.
 
 Notebook filename stems must match the viewer route: ASCII letters, digits, `_` and `-`,
 with at least one character. Other `.ipynb` names (spaces, dots or Unicode) stay untouched
@@ -286,9 +293,14 @@ retired callbacks, removals and reconstruction after an empty schema.
 with a synthetic container, covering graph APIs without requiring a browser. It
 does not verify DOM rendering.
 
-Exports write and flush an owner-only (0600) `.notebook-<random>.tmp` file before
+Exports write and fsync an owner-only (0600) `.notebook-<random>.tmp` file before
 atomically publishing a hard link under the next free `.ipynb` name. Concurrent exports
-never overwrite one another and polls never see a partly written export. Creation,
+never overwrite one another and polls never see a partly written export. The same opened
+workspace directory is fsynced after the final link and before success is acknowledged.
+If that sync fails, HTTP 500 names the already published, complete notebook and reports
+uncertain durability. It does not remove that export or roll back existing files. Inspect
+the export directory before exporting again; a retry creates another filename. A power
+loss before a successful directory sync may lose the new name. Creation,
 publication and cleanup use the same opened workspace directory, even if its pathname
 is replaced. A renamed directory may therefore contain the export while it is unavailable
 at its former path. Ordinary failures clean up only this attempt's staging inode.

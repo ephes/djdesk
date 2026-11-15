@@ -13,3 +13,8 @@ before performing automated changes:
    commands (`reset --hard`, etc.).
 5. Keep documentation and the changelog up to date whenever code changes warrant it.
 6. Always run `just test` and `just lint` before committing.
+7. Data Lab exports acknowledge success only after syncing the published workspace
+   directory. A failed sync leaves the complete export visible and must report uncertain
+   durability without rollback or automatic retry. Notebook reads check descriptor size,
+   mtime and ctime around each bounded read, retrying at most three times before refusing
+   concurrent edits. Keep these publication and editing contracts documented in README.md.

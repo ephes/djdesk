@@ -231,6 +231,9 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
         path = data_lab.export_notebook(workspace, template_slug)
     except ValueError as exc:
         return JsonResponse({"errors": {"template": [str(exc)]}}, status=400)
+    except data_lab.NotebookDurabilityError as exc:
+        logger.exception("Notebook export durability uncertain for workspace %s", workspace.slug)
+        return JsonResponse({"errors": {"template": [str(exc)]}}, status=500)
     except OSError:
         # Fail-closed publication errors (directory swapped for a symlink, no hard-link
         # support, staging write failure) leave no partial export; report them as JSON.

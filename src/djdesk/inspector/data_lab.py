@@ -99,6 +99,7 @@ EXPORT_SCAN_LIMIT = 512
 EXPORT_RESULT_LIMIT = 50
 EXPORT_CACHE_SIZE = 32
 EXPORT_SCAN_ATTEMPTS = 3
+NOTEBOOK_READ_ATTEMPTS = 3
 # Directory timestamps can be coarse (jiffies on Linux, 1-2 s on HFS+/FAT/SMB), so a
 # change in the same tick as a scan keeps the generation unchanged. Like Git's racy-clean
 # rule, a window is cached only once the directory timestamps are clearly in the past.
@@ -178,7 +179,7 @@ def _open_notebook(workspace: Workspace, filename: str):
                     or not os.path.samestat(before, path.lstat())
                 ):
                     raise ValueError("Notebook changed while opening.")
-            with os.fdopen(fd, "r", encoding="utf-8", closefd=False) as handle:
+            with os.fdopen(fd, "rb", closefd=False) as handle:
                 if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                     raise ValueError("Notebook must be a regular file.")
                 yield handle
@@ -232,6 +233,17 @@ def build_notebook(workspace: Workspace, template_slug: str) -> dict[str, Any]:
     }
 
 
+class NotebookDurabilityError(OSError):
+    """A complete export is visible, but its directory sync failed."""
+
+    def __init__(self, published_path: Path):
+        self.published_path = published_path
+        super().__init__(
+            f"The notebook '{published_path.name}' is already published, but its durability "
+            "could not be confirmed. Inspect the export directory before exporting again."
+        )
+
+
 def export_notebook(workspace: Workspace, template_slug: str) -> Path:
     """Publish a complete notebook without replacing any existing filename."""
     notebook = build_notebook(workspace, template_slug)
@@ -275,7 +287,12 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
                 except FileExistsError:
                     suffix += 1
                     continue
-                return workspace_dir / filename
+                published_path = workspace_dir / filename
+                try:
+                    os.fsync(directory_fd)
+                except OSError as exc:
+                    raise NotebookDurabilityError(published_path) from exc
+                return published_path
         finally:
             try:
                 try:
@@ -407,9 +424,23 @@ def _is_notebook_text(value: Any) -> bool:
 
 def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
     try:
-        with _open_notebook(workspace, f"{slug}.ipynb") as handle:
-            content = handle.read()
-        notebook = json.loads(content)
+        for _attempt in range(NOTEBOOK_READ_ATTEMPTS):
+            with _open_notebook(workspace, f"{slug}.ipynb") as handle:
+                before = os.fstat(handle.fileno())
+                # Bound this read even if an editor keeps appending to the inode.
+                content = handle.read(before.st_size + 1)
+                after = os.fstat(handle.fileno())
+            if (
+                len(content) == before.st_size == after.st_size
+                and before.st_mtime_ns == after.st_mtime_ns
+                and before.st_ctime_ns == after.st_ctime_ns
+            ):
+                break
+        else:
+            raise FileNotFoundError(
+                "Notebook kept changing while reading; finish editing and reload."
+            )
+        notebook = json.loads(content.decode("utf-8"))
     except (ValueError, RecursionError) as exc:
         raise InvalidNotebookError("Notebook is not valid UTF-8 JSON.") from exc
     if not isinstance(notebook, dict) or not isinstance(notebook.get("cells", []), list):

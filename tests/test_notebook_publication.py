@@ -77,6 +77,60 @@ class NotebookPublicationTests(TestCase):
                 json.loads(path.read_text()), data_lab.build_notebook(self.workspace, "log-study")
             )
 
+    def test_publication_syncs_file_then_linked_directory_before_success(self):
+        events = []
+        sync = os.fsync
+        link = os.link
+
+        def synced(fd):
+            events.append("directory-sync" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file-sync")
+            sync(fd)
+
+        def linked(*args, **kwargs):
+            link(*args, **kwargs)
+            events.append("link")
+
+        with (
+            mock.patch.object(os, "fsync", side_effect=synced),
+            mock.patch.object(os, "link", side_effect=linked) as patched_link,
+            mock.patch.object(os, "supports_dir_fd", os.supports_dir_fd | {patched_link}),
+            mock.patch.object(
+                os, "supports_follow_symlinks", os.supports_follow_symlinks | {patched_link}
+            ),
+        ):
+            path = data_lab.export_notebook(self.workspace, "schema-audit")
+            events.append("success")
+        self.assertEqual(events, ["file-sync", "link", "directory-sync", "success"])
+        self.assertTrue(path.is_file())
+
+    def test_directory_sync_failure_reports_visible_export_without_rollback(self):
+        old = data_lab.export_notebook(self.workspace, "schema-audit")
+        old.write_bytes(b"manual edit")
+        sync = os.fsync
+
+        def failed_directory_sync(fd):
+            if stat.S_ISDIR(os.fstat(fd).st_mode):
+                raise OSError("injected directory sync failure")
+            sync(fd)
+
+        with mock.patch.object(os, "fsync", side_effect=failed_directory_sync):
+            response = self.client.post(
+                reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                {"template": "schema-audit"},
+            )
+        self.assertEqual(response.status_code, 500)
+        error = response.json()["errors"]["template"][0]
+        self.assertIn("already published", error)
+        self.assertIn("schema-audit-2.ipynb", error)
+        self.assertIn("durability", error)
+        self.assertNotIn("then retry", error)
+        self.assertEqual(old.read_bytes(), b"manual edit")
+        new = old.with_name("schema-audit-2.ipynb")
+        self.assertEqual(
+            json.loads(new.read_text()), data_lab.build_notebook(self.workspace, "schema-audit")
+        )
+        self.assertEqual(set(old.parent.iterdir()), {old, new})
+
     def test_killed_writer_leaves_no_listed_partial_notebook(self):
         script = """
 import io, os, sys

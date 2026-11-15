@@ -7,6 +7,14 @@ Unreleased
 Fixed
 ~~~~~
 
+- Fsync the opened Data Lab publication directory after the final no-clobber hard link
+  before acknowledging success. A failed directory sync reports the already published
+  filename and uncertain durability without deleting complete exports or existing edits.
+- Fence notebook preview reads with descriptor size, mtime and ctime checks before
+  decoding, bounding each read to its initial byte size plus one. Retry changed generations
+  at most three times, then report unavailable instead of rendering mixed in-place edits;
+  preserve stable reads and atomic editor replacements.
+
 - Build Django runtimes in unique staging and verify before publication. Restore the
   last good runtime on failed promotion and retain a named backup if restoration fails.
   Exclusively reserve the destination through build, promotion and cleanup; refuse

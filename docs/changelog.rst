@@ -22,6 +22,8 @@ Fixed
 - Reload dashboard/poll workspace metadata and materialize bounded scan/task histories
   in one SQLite or PostgreSQL read snapshot on the same alias, including with replica
   routers, before rendering or filesystem access.
+  An opt-in PostgreSQL test pins the repeatable-read snapshot and the refusal of a
+  read-committed outer transaction.
 
 - Fsync the opened Data Lab publication directory after the final no-clobber hard link
   before acknowledging success. A failed directory sync reports the already published

@@ -1,3 +1,4 @@
+import errno
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -99,4 +100,12 @@ class SampleRefreshTests(SimpleTestCase):
         self.assertEqual(
             samples.ensure_sample_projects(self.root), [("fixture", self.destination, False)]
         )
+        self.assert_original()
+
+    def test_missing_native_lock_refuses_without_falling_back_to_stale_marker(self):
+        import fcntl
+
+        with mock.patch.object(fcntl, "flock", side_effect=OSError(errno.ENOSYS, "no flock")):
+            with self.assertRaises(OSError):
+                samples.ensure_sample_projects(self.root, force=True)
         self.assert_original()

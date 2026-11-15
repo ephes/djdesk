@@ -7,9 +7,9 @@ from unittest import TestCase
 
 from django.db import connections, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import RequestFactory
+from django.test import RequestFactory, override_settings
 
-from djdesk.inspector.models import ScanJob, Workspace
+from djdesk.inspector.models import ScanJob, Workspace, WorkspaceTaskRun
 from djdesk.inspector.services import workspace_status_payload
 from djdesk.inspector.views import DashboardView
 
@@ -19,10 +19,15 @@ class SnapshotRouter:
         return hints.get("instance")._state.db if hints.get("instance") else "snapshot_read"
 
 
+class HistoryReplicaRouter(SnapshotRouter):
+    def db_for_read(self, model, **hints):
+        if model in {ScanJob, WorkspaceTaskRun}:
+            return "snapshot_write"
+        return super().db_for_read(model, **hints)
+
+
 class WorkspaceSnapshotTests(TestCase):
     def setUp(self):
-        from django.test import override_settings
-
         temporary = TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         for alias in ("snapshot_read", "snapshot_write"):
@@ -100,3 +105,11 @@ class WorkspaceSnapshotTests(TestCase):
         self.assertEqual(context["workspace"].insights, [list(context["recent_scans"])[0].summary])
         self.assertIsInstance(context["recent_scans"], list)
         self.assertIsInstance(context["recent_task_runs"], list)
+
+    @override_settings(DATABASE_ROUTERS=[HistoryReplicaRouter()])
+    def test_snapshot_keeps_history_on_its_connection_despite_replica_router(self):
+        def refuse_replica(execute, sql, params, many, context):
+            raise AssertionError("History escaped the snapshot connection")
+
+        with connections["snapshot_write"].execute_wrapper(refuse_replica):
+            self.assertEqual(workspace_status_payload(self.workspace)["scans"][0]["summary"], "old")

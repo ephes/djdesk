@@ -7,10 +7,21 @@ Unreleased
 Fixed
 ~~~~~
 
-- Serialize sample publishers with stable per-target process locks through preflight,
+- Persist sample swap intents before removing the public name and reconcile interrupted
+  generations under the publisher lock. Retain interrupted backups and staging for
+  inspection; keep recovered samples for this invocation even with force, and refuse
+  changed identities and malformed control files without mutation.
+- Sync staged sample files/directories, the intent and rename parents before retiring
+  the old backup. Report visible-but-uncertain durability failures without rollback or
+  automatic retries; share macOS drive-cache flushing with notebook exports. Unsupported
+  directory-sync platforms refuse sample creation/replacement before changing old data.
+
+- Serialize sample publishers with stable native per-target locks (no soft-lock fallback)
+  through preflight,
   swap, rollback and cleanup, including an existence recheck for non-force callers.
 - Reload dashboard/poll workspace metadata and materialize bounded scan/task histories
-  in one SQLite or PostgreSQL read snapshot before rendering or filesystem access.
+  in one SQLite or PostgreSQL read snapshot on the same alias, including with replica
+  routers, before rendering or filesystem access.
 
 - Fsync the opened Data Lab publication directory after the final no-clobber hard link
   before acknowledging success. A failed directory sync reports the already published

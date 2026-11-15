@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import errno
 import json
 import os
 import re
@@ -24,6 +23,7 @@ from django.urls.converters import SlugConverter
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
 
+from .filesystem import sync_descriptor
 from .models import Workspace
 
 DATA_LAB_TEMPLATES = [
@@ -239,23 +239,8 @@ def build_notebook(workspace: Workspace, template_slug: str) -> dict[str, Any]:
     }
 
 
-_FULL_FSYNC_UNSUPPORTED = frozenset(
-    {errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS, errno.EINVAL, errno.ENOTTY}
-)
-
-
 def _sync(fd: int) -> None:
-    """fsync, then F_FULLFSYNC where available: macOS fsync leaves the drive cache unflushed."""
-    os.fsync(fd)
-    full_fsync = getattr(fcntl, "F_FULLFSYNC", None)
-    if full_fsync is None:
-        return
-    try:
-        fcntl.fcntl(fd, full_fsync)
-    except OSError as exc:
-        # Some filesystems (network shares, FAT) do not implement it; fsync already ran.
-        if exc.errno not in _FULL_FSYNC_UNSUPPORTED:
-            raise
+    sync_descriptor(fd, fcntl_module=fcntl)
 
 
 class NotebookDurabilityError(OSError):

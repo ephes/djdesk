@@ -64,13 +64,37 @@ To replace existing samples, run `uv run python scripts/fetch_samples.py --force
 This replaces the entire sample directory, including local edits, tutorial state and databases.
 Publishers wait up to ten seconds for a stable per-sample `.slug.lock` file and
 hold it through preflight, publication, rollback and cleanup. Never delete these lock
-files while publishers may be running. A waiting non-force publisher rechecks existence
+files while publishers may be running. Native locks are required; there is no fallback
+to lock-file existence markers. A waiting non-force publisher rechecks existence
 after taking the lock; force publishers replace complete generations in serial order.
-Each replacement is fully written beside the destination first. A write failure leaves the old
-sample intact; a publication failure restores it. If restoration itself fails, the last copy
-remains under `.sample-slug-*/backup` inside the sample root for manual recovery.
-If cleanup fails after publication, the command reports an error with the new sample already
-installed; any leftover backup may be incomplete.
+Each replacement is written and synced beside the destination first, along with an
+owner-only `.slug.swap.json` intent recording the root, staging and old/new directory
+identities. The rename parents are synced before the old backup is retired. On macOS,
+file and directory syncs also use `F_FULLFSYNC` where the filesystem supports it.
+A write failure preserves the old sample; a failed install attempts restoration.
+A sync failure after installation reports that the new sample is already visible but
+its durability is uncertain, retaining the backup/staging for inspection. Never retry
+such errors automatically.
+
+The next invocation (including without `--force`) reconciles an interrupted intent under
+the same lock. It restores an identity-matched old backup if the public name is missing,
+or accepts the already installed new generation. For a first install with no old sample,
+it completes the staged generation. Interrupted staging trees are retained, including
+user edits to backups, and the warning names their path. Unknown identities or malformed
+intents stop publication for manual inspection without removing any related paths.
+A recovered sample is kept for this invocation even with `--force`, so recovery does
+not immediately delete saved edits. Inspect it before a separate force replacement.
+Stop all publishers before inspecting `.slug-*/backup`, `replacement`, or the journal;
+copy out valuable files before manual repair. Do not remove a journal until the public
+sample is complete and all retained generations have been accounted for. A crash before
+the intent is written can leave an unreferenced staging tree; inspect it manually too.
+This is a recoverable swap, so readers can briefly see a missing public name between
+renames. Cleanup errors report the installed sample; a leftover backup may be incomplete
+only after the new generation has been synced successfully.
+
+Creation/replacement requires no-follow directory opens and directory fsync; unsupported
+filesystems and Windows refuse before replacing existing samples. Existing samples can
+still be skipped without force. See [sample publication and recovery](docs/sample_projects.rst).
 
 The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
 

@@ -105,8 +105,12 @@ def workspace_snapshot(workspace: Workspace, *, include_logs: bool = False):
     using = workspace._state.db or "default"
     with _read_snapshot(using):
         current = Workspace.objects.using(using).get(pk=workspace.pk)
-        scans = current.scans.order_by("-created_at", "-pk")[:4]
-        tasks = current.task_runs.select_related("preset").order_by("-created_at", "-pk")[:5]
+        scans = current.scans.using(using).order_by("-created_at", "-pk")[:4]
+        tasks = (
+            current.task_runs.using(using)
+            .select_related("preset")
+            .order_by("-created_at", "-pk")[:5]
+        )
         if not include_logs:
             scans = scans.defer("details", "log_excerpt")
             tasks = tasks.defer("log", "metadata")

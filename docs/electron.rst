@@ -79,6 +79,9 @@ fails too, the error names the retained recovery copy. Stop all builders before
 moving it back. A killed publisher can leave the destination absent: this is a
 recoverable swap, not a crash-atomic exchange. Cleanup failure after publication
 reports an error with the new runtime installed; leftover backups may be incomplete.
+Leftover ``.django-bundle-publish-*`` directories and the ``django-bundle.lock``
+reservation are ignored by Git and excluded from electron-builder ``files``, so a
+retained recovery copy is never committed or packaged as a second runtime tree.
 
 An exclusive ``django-bundle.lock`` directory in the canonical parent identifies
 the destination owner. A competing builder fails immediately, including through

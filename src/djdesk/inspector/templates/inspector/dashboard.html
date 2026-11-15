@@ -9,6 +9,7 @@
         data-inspector-shell
         data-workspace-slug="{{ workspace.slug }}"
         data-status-endpoint="{{ workspace_status_url }}"
+        data-response-bytes="{{ inspector_response_bytes }}"
         data-task-endpoint="{% url 'inspector:task-run-create' %}"
         data-task-detail-template="{% url 'inspector:task-run-detail' pk=0 %}"
         {% if workspace.slug %}data-data-lab-export="{% url 'inspector:data-lab-export' workspace.slug %}"{% endif %}

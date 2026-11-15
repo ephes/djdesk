@@ -5,6 +5,8 @@
   "files": [
     "**/*",
     "!django-bundle/**",
+    "!django-bundle.lock/**",
+    "!.django-bundle-publish-*/**",
     "!test/**",
     "!smoke/**"
   ],

@@ -220,8 +220,12 @@ Commands whose normal output fits the budgets behave as before.
 Line framing scans only newly decoded text and joins each completed/final line once,
 so newline-free output uses linear work within the same byte limit.
 
-Inspector status and task-detail responses stream through an 8 MiB byte ceiling before
-JSON parsing, regardless of missing or inaccurate Content-Length. Overflow cancels the
+Inspector status and task-detail responses stream through a byte ceiling before JSON
+parsing, regardless of missing or inaccurate Content-Length. The ceiling is
+`DJDESK_INSPECTOR_RESPONSE_BYTES` (default 8 MiB plus 30 times the task-log budget, enough
+for five logs made only of JSON-escaped control characters; raising the task-log budget
+raises this default), passed to the dashboard as `data-response-bytes`; without a valid
+attribute the reader falls back to 8 MiB. Overflow cancels the
 read and preserves the last displayed status/log; later polls or a drawer reload can
 recover with a smaller response. The drawer DOM test also covers this response boundary.
 

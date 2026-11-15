@@ -78,3 +78,13 @@ test('status and drawer overflow preserve displayed state and accept the next re
   await settled();
   assert.equal(displayed, 'next good');
 });
+
+test('the dashboard root sets the server-derived response ceiling', () => {
+  const { inspectorResponseBytes } = vm.runInNewContext(source + `\n({ inspectorResponseBytes });`, {
+    document: { addEventListener() {} }, TextDecoder, Uint8Array,
+  });
+  assert.equal(inspectorResponseBytes('40000000'), 40000000);
+  for (const invalid of [undefined, '', '0', '-1', '1.5', 'x', '1e9', '9'.repeat(20)]) {
+    assert.equal(inspectorResponseBytes(invalid), undefined);
+  }
+});

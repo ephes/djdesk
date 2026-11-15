@@ -87,14 +87,17 @@ async function main() {
     assert.equal(await page.locator('[data-data-lab-incomplete]').isVisible(), true);
     console.log('Notebook drawer DOM passed: owned POST, manual choice, retry, truncated inventory');
 
-    await page.evaluate(() => {
+    // The rendered dashboard carries the server-derived ceiling (default settings).
+    const ceiling = await page.evaluate(() => ui.responseBytes);
+    assert.equal(ceiling, 8 * 1024 * 1024 + 5 * 6 * 1024 * 1024, 'dashboard response ceiling');
+    await page.evaluate((limit) => {
       window.cancelledResponses = 0;
       window.oversizedJSONParses = 0;
       window.fetch = async () => {
         const response = new Response(new ReadableStream({
           start(controller) {
-            controller.enqueue(new Uint8Array(4 * 1024 * 1024));
-            controller.enqueue(new Uint8Array(4 * 1024 * 1024 + 1));
+            controller.enqueue(new Uint8Array(limit));
+            controller.enqueue(new Uint8Array(1));
           },
           cancel() { cancelledResponses++; },
         }), { headers: { 'Content-Length': '1' } });
@@ -107,7 +110,7 @@ async function main() {
       ui.startPolling();
       clearInterval(ui.polling);
       ui.loadTaskDetails(123);
-    });
+    }, ceiling);
     await page.waitForFunction(() => cancelledResponses === 2);
     assert.match(await page.locator('[data-log-stream]').textContent(), /Previous valid status/);
     assert.equal(await page.locator('[data-task-drawer-log]').textContent(), 'Previous valid log');

@@ -81,6 +81,7 @@ class DashboardView(TemplateView):
                 "task_presets": TaskPreset.objects.all(),
                 "status_meta": status_meta,
                 "workspace_status_url": status_url,
+                "inspector_response_bytes": settings.INSPECTOR_RESPONSE_BYTES,
                 "task_form": TaskRunForm(
                     initial={"workspace": workspace.slug if workspace else None}
                 ),

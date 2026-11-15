@@ -32,6 +32,8 @@ electron/node_modules/
 electron/dist/
 electron/django-bundle/
 electron/.python-downloads/
+electron/django-bundle.lock/
+electron/.django-bundle-publish-*/
 
 # GitHub artifacts
 dist-artifacts/

@@ -1,6 +1,13 @@
 const WIZARD_STORAGE_KEY = 'djdesk.wizard.projectPath';
 const INSPECTOR_RESPONSE_BYTES = 8 * 1024 * 1024;
 
+// The server derives the ceiling from its task-log budget; fall back to the default.
+function inspectorResponseBytes(value) {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return undefined;
+  const bytes = Number(value);
+  return Number.isSafeInteger(bytes) ? bytes : undefined;
+}
+
 async function readInspectorJSON(response, maxBytes = INSPECTOR_RESPONSE_BYTES) {
   const overflow = () => Object.assign(new Error('Inspector response byte limit exceeded'),
     { code: 'INSPECTOR_RESPONSE_TOO_LARGE' });
@@ -36,6 +43,7 @@ class InspectorUI {
   constructor(root) {
     this.root = root;
     this.statusUrl = root?.dataset.statusEndpoint;
+    this.responseBytes = inspectorResponseBytes(root?.dataset.responseBytes);
     this.taskEndpoint = root?.dataset.taskEndpoint;
     this.workspaceSlug = root?.dataset.workspaceSlug || '';
     this.taskDetailTemplate = root?.dataset.taskDetailTemplate || '';
@@ -373,7 +381,7 @@ class InspectorUI {
       fetch(this.statusUrl, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
-        .then((response) => readInspectorJSON(response))
+        .then((response) => readInspectorJSON(response, this.responseBytes))
         .then((payload) => this.updateFromPayload(payload))
         .catch(() => {
           this.toggleConnection(false);
@@ -1063,7 +1071,7 @@ class InspectorUI {
     fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then((response) => {
         if (!response.ok) throw new Error('Request failed');
-        return readInspectorJSON(response);
+        return readInspectorJSON(response, this.responseBytes);
       })
       .then((data) => {
         this.renderTaskDrawer(data);

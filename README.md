@@ -62,6 +62,10 @@ The tutorial relies on reproducible sample workspaces so screenshots and wizard 
 
 To replace existing samples, run `uv run python scripts/fetch_samples.py --force`.
 This replaces the entire sample directory, including local edits, tutorial state and databases.
+Publishers wait up to ten seconds for a stable per-sample `.slug.lock` file and
+hold it through preflight, publication, rollback and cleanup. Never delete these lock
+files while publishers may be running. A waiting non-force publisher rechecks existence
+after taking the lock; force publishers replace complete generations in serial order.
 Each replacement is fully written beside the destination first. A write failure leaves the old
 sample intact; a publication failure restores it. If restoration itself fails, the last copy
 remains under `.sample-slug-*/backup` inside the sample root for manual recovery.
@@ -159,7 +163,13 @@ holds no database transaction open while executing a command.
 The dashboard loads four recent scans and five recent task runs for the selected
 workspace only, ordered newest first with the primary key breaking timestamp ties.
 The workspace selector loads names and paths without historical logs or metadata;
-initial task history omits log bodies. Status polling keeps the same four/five windows
+initial task history omits log bodies. Both the page and polling reload workspace
+metadata and materialize the related history in one short database snapshot before
+rendering or notebook filesystem access. SQLite uses a read transaction; PostgreSQL
+uses a read-only repeatable-read transaction. An existing PostgreSQL outer transaction
+must already use repeatable-read or serializable isolation; other database backends
+are unsupported for these snapshots. Notebook inventory and documentation links are
+independent of the scan snapshot. Status polling keeps the same four/five windows
 and includes those task logs. Renderer status, severity and log-level classes use
 supported values with neutral defaults; labels remain escaped text.
 

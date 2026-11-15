@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Serialize sample publishers with stable per-target process locks through preflight,
+  swap, rollback and cleanup, including an existence recheck for non-force callers.
+- Reload dashboard/poll workspace metadata and materialize bounded scan/task histories
+  in one SQLite or PostgreSQL read snapshot before rendering or filesystem access.
+
 - Fsync the opened Data Lab publication directory after the final no-clobber hard link
   before acknowledging success. A failed directory sync reports the already published
   filename and uncertain durability without deleting complete exports or existing edits.

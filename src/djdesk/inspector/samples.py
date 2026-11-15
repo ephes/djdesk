@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from filelock import FileLock
+
 from .assets import sample_root
 
 DJANGO_APPS = [
@@ -657,31 +659,34 @@ def ensure_sample_projects(
     results: list[tuple[str, Path, bool]] = []
     for project in SAMPLE_PROJECTS:
         project_dir = target_root / project.slug
-        if project_dir.exists() and not force:
-            results.append((project.slug, project_dir, False))
-            continue
-        staging = Path(tempfile.mkdtemp(prefix=f".{project.slug}-", dir=target_root))
-        replacement = staging / "replacement"
-        backup = staging / "backup"
-        try:
-            replacement.mkdir()
-            for relative_path, content in project.files.items():
-                full_path = replacement / relative_path
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text(content.rstrip() + "\n", encoding="utf-8")
-            if project_dir.exists():
-                project_dir.rename(backup)
+        # Never unlink this stable lock: waiters must share the same inode.
+        with FileLock(target_root / f".{project.slug}.lock", timeout=10):
+            if project_dir.exists() and not force:
+                results.append((project.slug, project_dir, False))
+                continue
+            staging = Path(tempfile.mkdtemp(prefix=f".{project.slug}-", dir=target_root))
+            replacement = staging / "replacement"
+            backup = staging / "backup"
             try:
-                replacement.rename(project_dir)
-            except BaseException:
+                replacement.mkdir()
+                for relative_path, content in project.files.items():
+                    full_path = replacement / relative_path
+                    full_path.parent.mkdir(parents=True, exist_ok=True)
+                    full_path.write_text(content.rstrip() + "\n", encoding="utf-8")
+                if project_dir.exists():
+                    project_dir.rename(backup)
+                try:
+                    replacement.rename(project_dir)
+                except BaseException:
+                    if backup.exists():
+                        backup.rename(project_dir)
+                    raise
                 if backup.exists():
-                    backup.rename(project_dir)
-                raise
-            if backup.exists():
-                shutil.rmtree(backup)
-        finally:
-            # Retain the last copy at this path if rollback itself fails.
-            if not backup.exists():
-                shutil.rmtree(staging)
-        results.append((project.slug, project_dir, True))
+                    shutil.rmtree(backup)
+            finally:
+                # Retain the last copy at this path if rollback itself fails.
+                if not backup.exists():
+                    shutil.rmtree(staging)
+            results.append((project.slug, project_dir, True))
+
     return results

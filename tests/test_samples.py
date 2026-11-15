@@ -34,7 +34,9 @@ class SampleRefreshTests(SimpleTestCase):
     def assert_original(self):
         self.assertEqual((self.destination / "first.txt").read_bytes(), b"original")
         self.assertEqual((self.destination / "tutorial.txt").read_bytes(), b"local state")
-        self.assertEqual(list(self.root.iterdir()), [self.destination])
+        self.assertEqual(
+            [p for p in self.root.iterdir() if p.suffix != ".lock"], [self.destination]
+        )
 
     def test_later_write_failure_preserves_original(self):
         write_text = Path.write_text
@@ -73,7 +75,9 @@ class SampleRefreshTests(SimpleTestCase):
         self.assertEqual((self.destination / "first.txt").read_bytes(), b"replacement\n")
         self.assertEqual((self.destination / "nested/later.txt").read_bytes(), b"later\n")
         self.assertFalse((self.destination / "tutorial.txt").exists())
-        self.assertEqual(list(self.root.iterdir()), [self.destination])
+        self.assertEqual(
+            [p for p in self.root.iterdir() if p.suffix != ".lock"], [self.destination]
+        )
 
     def test_failed_rollback_retains_recovery_copy(self):
         rename = Path.rename

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -12,6 +13,11 @@ from contextlib import ExitStack, contextmanager
 from itertools import islice
 from pathlib import Path
 from typing import Any
+
+try:  # pragma: no cover - fcntl is absent on Windows
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None  # type: ignore[assignment]
 
 from django.conf import settings
 from django.urls.converters import SlugConverter
@@ -233,6 +239,25 @@ def build_notebook(workspace: Workspace, template_slug: str) -> dict[str, Any]:
     }
 
 
+_FULL_FSYNC_UNSUPPORTED = frozenset(
+    {errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS, errno.EINVAL, errno.ENOTTY}
+)
+
+
+def _sync(fd: int) -> None:
+    """fsync, then F_FULLFSYNC where available: macOS fsync leaves the drive cache unflushed."""
+    os.fsync(fd)
+    full_fsync = getattr(fcntl, "F_FULLFSYNC", None)
+    if full_fsync is None:
+        return
+    try:
+        fcntl.fcntl(fd, full_fsync)
+    except OSError as exc:
+        # Some filesystems (network shares, FAT) do not implement it; fsync already ran.
+        if exc.errno not in _FULL_FSYNC_UNSUPPORTED:
+            raise
+
+
 class NotebookDurabilityError(OSError):
     """A complete export is visible, but its directory sync failed."""
 
@@ -267,7 +292,7 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
             with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
                 handle.write(content)
                 handle.flush()
-                os.fsync(fd)
+                _sync(fd)
             suffix = 1
             while True:
                 filename = template_slug if suffix == 1 else f"{template_slug}-{suffix}"
@@ -289,7 +314,7 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
                     continue
                 published_path = workspace_dir / filename
                 try:
-                    os.fsync(directory_fd)
+                    _sync(directory_fd)
                 except OSError as exc:
                     raise NotebookDurabilityError(published_path) from exc
                 return published_path

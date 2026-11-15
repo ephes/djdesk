@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import io
 import json
 import os
@@ -102,6 +103,34 @@ class NotebookPublicationTests(TestCase):
             events.append("success")
         self.assertEqual(events, ["file-sync", "link", "directory-sync", "success"])
         self.assertTrue(path.is_file())
+
+    def test_publication_requests_full_device_flush_where_supported(self):
+        calls = []
+
+        def full_fsync(fd, command, *args):
+            calls.append(("dir" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file", command))
+            return 0
+
+        fake_fcntl = mock.Mock(F_FULLFSYNC=51, fcntl=mock.Mock(side_effect=full_fsync))
+        with mock.patch.object(data_lab, "fcntl", fake_fcntl):
+            path = data_lab.export_notebook(self.workspace, "schema-audit")
+        self.assertEqual(calls, [("file", 51), ("dir", 51)])
+        self.assertTrue(path.is_file())
+
+    def test_unsupported_full_flush_falls_back_to_fsync_and_other_errors_refuse(self):
+        for code in (errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS):
+            unsupported = mock.Mock(
+                F_FULLFSYNC=51, fcntl=mock.Mock(side_effect=OSError(code, "unsupported"))
+            )
+            with mock.patch.object(data_lab, "fcntl", unsupported):
+                self.assertTrue(data_lab.export_notebook(self.workspace, "schema-audit").is_file())
+        failing = mock.Mock(F_FULLFSYNC=51, fcntl=mock.Mock(side_effect=OSError(errno.EIO, "io")))
+        with mock.patch.object(data_lab, "fcntl", failing):
+            with self.assertRaises(OSError):
+                data_lab.export_notebook(self.workspace, "log-study")
+        without = mock.Mock(spec=[])
+        with mock.patch.object(data_lab, "fcntl", without):
+            self.assertTrue(data_lab.export_notebook(self.workspace, "log-study").is_file())
 
     def test_directory_sync_failure_reports_visible_export_without_rollback(self):
         old = data_lab.export_notebook(self.workspace, "schema-audit")

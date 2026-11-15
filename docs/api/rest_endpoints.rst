@@ -70,7 +70,8 @@ response has status 201 and contains the status payload plus
 ``data_lab.selected_notebook`` and ``data_lab.selected_notebook_url`` for the exact new
 file, even when that file is outside the inventory window. Existing files are preserved.
 Success follows file fsync, hard-link publication and fsync of the same opened workspace
-directory. If the directory sync fails, HTTP 500 names the already published complete file
+directory. On macOS both syncs also issue ``F_FULLFSYNC`` to flush the drive cache
+(plain fsync where a filesystem does not support it). If the directory sync fails, HTTP 500 names the already published complete file
 and reports uncertain durability. No export is rolled back. Inspect the export directory
 before exporting again; retries create additional files.
 

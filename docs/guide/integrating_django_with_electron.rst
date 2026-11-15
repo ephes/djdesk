@@ -209,6 +209,7 @@ rename them to a supported stem to make them visible in DJDesk.
 Exports fsync an owner-only hidden ``.notebook-*.tmp`` file, then publish a hard link
 atomically without overwriting another file. Polling sees only complete exports.
 The opened workspace directory is fsynced after publication before reporting success.
+On macOS both syncs also use ``F_FULLFSYNC`` so the drive cache is flushed.
 A directory-sync failure returns HTTP 500 naming the already published notebook, whose
 durability is uncertain. The complete visible export and existing notebooks are preserved.
 Inspect the directory before exporting again; retrying creates another file, and a power

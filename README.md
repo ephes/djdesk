@@ -297,6 +297,8 @@ Exports write and fsync an owner-only (0600) `.notebook-<random>.tmp` file befor
 atomically publishing a hard link under the next free `.ipynb` name. Concurrent exports
 never overwrite one another and polls never see a partly written export. The same opened
 workspace directory is fsynced after the final link and before success is acknowledged.
+Where the platform offers `F_FULLFSYNC` (macOS), both syncs also flush the drive cache;
+filesystems without it fall back to plain fsync.
 If that sync fails, HTTP 500 names the already published, complete notebook and reports
 uncertain durability. It does not remove that export or roll back existing files. Inspect
 the export directory before exporting again; a retry creates another filename. A power

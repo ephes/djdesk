@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import time
 from tempfile import TemporaryDirectory
 from unittest import mock
 
@@ -61,6 +62,14 @@ class NotebookReadTests(TestCase):
         # Ensure deterministic timestamp differences even on coarse filesystems.
         mtime = before.st_mtime_ns if restore_mtime else before.st_mtime_ns + 1_000_000_000
         os.utime(self.path, ns=(before.st_atime_ns, mtime))
+        # Coarse ctime clocks (Linux before multigrain timestamps) can stamp an
+        # edit in the same tick as the reader's first fstat; redo utime until
+        # the change is observable, as a real later edit would be.
+        deadline = time.monotonic() + 5
+        while self.path.stat().st_ctime_ns == before.st_ctime_ns and time.monotonic() < deadline:
+            time.sleep(0.001)
+            os.utime(self.path, ns=(before.st_atime_ns, mtime))
+        self.assertNotEqual(self.path.stat().st_ctime_ns, before.st_ctime_ns)
         self.assertEqual(self.path.stat().st_ino, before.st_ino)
 
     def test_repeated_inplace_edits_refuse_valid_mixed_json_before_decoding(self):

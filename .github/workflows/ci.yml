@@ -4,9 +4,7 @@ name: ci
 # Packaging lives in electron-desktop.yml and stays manual; this workflow must
 # not gain secrets, artifact uploads, or write permissions.
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -28,10 +28,9 @@ class QualityWorkflowTests(TestCase):
     def setUp(self) -> None:
         self.text = _read("ci.yml")
 
-    def test_runs_on_push_and_pull_request(self) -> None:
+    def test_runs_only_on_manual_dispatch(self) -> None:
         triggers = _top_level_block(self.text, "on")
-        self.assertRegex(triggers, r"(?m)^  push:")
-        self.assertRegex(triggers, r"(?m)^  pull_request:")
+        self.assertEqual(triggers.strip(), "workflow_dispatch:")
         self.assertNotIn("pull_request_target", self.text)
 
     def test_token_is_read_only(self) -> None:

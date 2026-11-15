@@ -25,7 +25,7 @@ from django.views.generic import FormView, TemplateView
 from . import assets, data_lab
 from .forms import TaskRunForm, WorkspaceWizardForm
 from .models import DocLink, TaskPreset, Workspace, WorkspaceTaskRun
-from .services import workspace_data_lab_payload, workspace_status_payload
+from .services import workspace_data_lab_payload, workspace_snapshot, workspace_status_payload
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +47,9 @@ class DashboardView(TemplateView):
             Workspace.objects.only("id", "name", "slug", "project_path").order_by("name", "pk")
         )
         workspace = self._resolve_workspace(workspaces)
+        scans, tasks = [], []
         if workspace:
-            workspace = Workspace.objects.get(pk=workspace.pk)
+            workspace, scans, tasks = workspace_snapshot(workspace)
         status_meta: dict[str, Any] = {}
         status_url = ""
         if workspace and workspace.slug:
@@ -61,20 +62,8 @@ class DashboardView(TemplateView):
             {
                 "workspace": workspace,
                 "workspaces": workspaces,
-                "recent_scans": (
-                    workspace.scans.defer("details", "log_excerpt").order_by("-created_at", "-pk")[
-                        :4
-                    ]
-                    if workspace
-                    else []
-                ),
-                "recent_task_runs": (
-                    workspace.task_runs.select_related("preset")
-                    .defer("log", "metadata")
-                    .order_by("-created_at", "-pk")[:5]
-                    if workspace
-                    else []
-                ),
+                "recent_scans": scans,
+                "recent_task_runs": tasks,
                 "docs_base_url": docs_source["base_url"],
                 "doc_links": docs_source["links"],
                 "docs_source": docs_source,

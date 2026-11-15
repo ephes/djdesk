@@ -16,6 +16,7 @@ Control-room grade tutorial and reference material for the DJDesk Electron + Dja
    concepts
    architecture
    migrations
+   sample_projects
    electron
    api/overview
    api/rest_endpoints

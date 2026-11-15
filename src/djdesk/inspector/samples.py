@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-import shutil
-import tempfile
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from filelock import FileLock
+
 from .assets import sample_root
+from .sample_publication import prepare_sample_root, publish_sample, recover_sample
 
 DJANGO_APPS = [
     "django.contrib.admin",
@@ -650,38 +651,25 @@ def ensure_sample_projects(
 
     Returns a list of tuples ``(slug, path, created)`` where ``created`` is True
     when files were freshly written (False indicates the directory already
-    existed and ``force`` was not set).
+    existed and ``force`` was not set, or this call recovered an interrupted swap).
     """
     target_root = Path(root) if root else sample_root()
-    target_root.mkdir(parents=True, exist_ok=True)
+    prepare_sample_root(target_root)
     results: list[tuple[str, Path, bool]] = []
     for project in SAMPLE_PROJECTS:
         project_dir = target_root / project.slug
-        if project_dir.exists() and not force:
-            results.append((project.slug, project_dir, False))
-            continue
-        staging = Path(tempfile.mkdtemp(prefix=f".{project.slug}-", dir=target_root))
-        replacement = staging / "replacement"
-        backup = staging / "backup"
-        try:
-            replacement.mkdir()
-            for relative_path, content in project.files.items():
-                full_path = replacement / relative_path
-                full_path.parent.mkdir(parents=True, exist_ok=True)
-                full_path.write_text(content.rstrip() + "\n", encoding="utf-8")
-            if project_dir.exists():
-                project_dir.rename(backup)
-            try:
-                replacement.rename(project_dir)
-            except BaseException:
-                if backup.exists():
-                    backup.rename(project_dir)
-                raise
-            if backup.exists():
-                shutil.rmtree(backup)
-        finally:
-            # Retain the last copy at this path if rollback itself fails.
-            if not backup.exists():
-                shutil.rmtree(staging)
-        results.append((project.slug, project_dir, True))
+        # Never unlink this stable lock: waiters must share the same inode.
+        with FileLock(
+            target_root / f".{project.slug}.lock",
+            timeout=10,
+            preserve_lock_file=True,
+            fallback_to_soft=False,
+        ):
+            recovered = recover_sample(project_dir)
+            if project_dir.exists() and (not force or recovered):
+                results.append((project.slug, project_dir, False))
+                continue
+            publish_sample(project_dir, project.files)
+            results.append((project.slug, project_dir, True))
+
     return results

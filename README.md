@@ -62,11 +62,39 @@ The tutorial relies on reproducible sample workspaces so screenshots and wizard 
 
 To replace existing samples, run `uv run python scripts/fetch_samples.py --force`.
 This replaces the entire sample directory, including local edits, tutorial state and databases.
-Each replacement is fully written beside the destination first. A write failure leaves the old
-sample intact; a publication failure restores it. If restoration itself fails, the last copy
-remains under `.sample-slug-*/backup` inside the sample root for manual recovery.
-If cleanup fails after publication, the command reports an error with the new sample already
-installed; any leftover backup may be incomplete.
+Publishers wait up to ten seconds for a stable per-sample `.slug.lock` file and
+hold it through preflight, publication, rollback and cleanup. Never delete these lock
+files while publishers may be running. Native locks are required; there is no fallback
+to lock-file existence markers. A waiting non-force publisher rechecks existence
+after taking the lock; force publishers replace complete generations in serial order.
+Each replacement is written and synced beside the destination first, along with an
+owner-only `.slug.swap.json` intent recording the root, staging and old/new directory
+identities. The rename parents are synced before the old backup is retired. On macOS,
+file and directory syncs also use `F_FULLFSYNC` where the filesystem supports it.
+A write failure preserves the old sample; a failed install attempts restoration.
+A sync failure after installation reports that the new sample is already visible but
+its durability is uncertain, retaining the backup/staging for inspection. Never retry
+such errors automatically.
+
+The next invocation (including without `--force`) reconciles an interrupted intent under
+the same lock. It restores an identity-matched old backup if the public name is missing,
+or accepts the already installed new generation. For a first install with no old sample,
+it completes the staged generation. Interrupted staging trees are retained, including
+user edits to backups, and the warning names their path. Unknown identities or malformed
+intents stop publication for manual inspection without removing any related paths.
+A recovered sample is kept for this invocation even with `--force`, so recovery does
+not immediately delete saved edits. Inspect it before a separate force replacement.
+Stop all publishers before inspecting `.slug-*/backup`, `replacement`, or the journal;
+copy out valuable files before manual repair. Do not remove a journal until the public
+sample is complete and all retained generations have been accounted for. A crash before
+the intent is written can leave an unreferenced staging tree; inspect it manually too.
+This is a recoverable swap, so readers can briefly see a missing public name between
+renames. Cleanup errors report the installed sample; a leftover backup may be incomplete
+only after the new generation has been synced successfully.
+
+Creation/replacement requires no-follow directory opens and directory fsync; unsupported
+filesystems and Windows refuse before replacing existing samples. Existing samples can
+still be skipped without force. See [sample publication and recovery](docs/sample_projects.rst).
 
 The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
 
@@ -159,7 +187,13 @@ holds no database transaction open while executing a command.
 The dashboard loads four recent scans and five recent task runs for the selected
 workspace only, ordered newest first with the primary key breaking timestamp ties.
 The workspace selector loads names and paths without historical logs or metadata;
-initial task history omits log bodies. Status polling keeps the same four/five windows
+initial task history omits log bodies. Both the page and polling reload workspace
+metadata and materialize the related history in one short database snapshot before
+rendering or notebook filesystem access. SQLite uses a read transaction; PostgreSQL
+uses a read-only repeatable-read transaction. An existing PostgreSQL outer transaction
+must already use repeatable-read or serializable isolation; other database backends
+are unsupported for these snapshots. Notebook inventory and documentation links are
+independent of the scan snapshot. Status polling keeps the same four/five windows
 and includes those task logs. Renderer status, severity and log-level classes use
 supported values with neutral defaults; labels remain escaped text.
 
@@ -323,13 +357,15 @@ use a disposable `test_<PGDATABASE>` database on an explicitly selected local se
 ```bash
 PGHOST=/path/to/local/socket PGPORT=5432 PGDATABASE=postgres \
   DJANGO_SETTINGS_MODULE=djdesk.settings.test_postgresql \
-  uv run --with 'psycopg[binary]>=3.2' python manage.py test tests.test_workspace_slugs tests.test_content_migrations
+  uv run --with 'psycopg[binary]>=3.2' python manage.py test tests.test_workspace_slugs tests.test_content_migrations \
+  tests.test_workspace_snapshot_postgresql
 ```
 
 Only use a local test server whose role may create/drop test databases. Under these settings
 the historical migration tests also create and drop two `test_<PGDATABASE>_migration_*`
 databases, so migration 0004's PostgreSQL trimming and merge path runs. The regular
-SQLite suite skips the PostgreSQL-only concurrency check; no remote database is required.
+SQLite suite skips the PostgreSQL-only concurrency and repeatable-read snapshot checks; no remote
+database is required.
 
 ### Python dependency security
 

@@ -83,3 +83,15 @@ Frontend assets
 ---------------
 
 No JS bundler is required for the reference build—``inspector/static/inspector/app.css`` and ``app.js`` are served as-is. This keeps contribution friction low and mirrors how many Django teams work today. You can always migrate to Vite or another bundler after validating the Electron integration.
+
+Workspace read generations
+--------------------------
+
+The initial dashboard and status payload reload the selected workspace and eagerly
+load its four scans and five task runs on the same database alias inside one short
+snapshot, even when a router normally sends history reads to a replica. SQLite
+uses a read transaction; PostgreSQL uses read-only repeatable read (an existing outer
+transaction must already be repeatable read or serializable). Other backends are
+refused. Rendering, JSON formatting, documentation links and notebook filesystem
+inventory happen afterward; those external resources are not part of the scan snapshot.
+The initial page still defers task logs and scan details.

@@ -1,3 +1,4 @@
+import errno
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -34,7 +35,9 @@ class SampleRefreshTests(SimpleTestCase):
     def assert_original(self):
         self.assertEqual((self.destination / "first.txt").read_bytes(), b"original")
         self.assertEqual((self.destination / "tutorial.txt").read_bytes(), b"local state")
-        self.assertEqual(list(self.root.iterdir()), [self.destination])
+        self.assertEqual(
+            [p for p in self.root.iterdir() if p.suffix != ".lock"], [self.destination]
+        )
 
     def test_later_write_failure_preserves_original(self):
         write_text = Path.write_text
@@ -73,7 +76,9 @@ class SampleRefreshTests(SimpleTestCase):
         self.assertEqual((self.destination / "first.txt").read_bytes(), b"replacement\n")
         self.assertEqual((self.destination / "nested/later.txt").read_bytes(), b"later\n")
         self.assertFalse((self.destination / "tutorial.txt").exists())
-        self.assertEqual(list(self.root.iterdir()), [self.destination])
+        self.assertEqual(
+            [p for p in self.root.iterdir() if p.suffix != ".lock"], [self.destination]
+        )
 
     def test_failed_rollback_retains_recovery_copy(self):
         rename = Path.rename
@@ -95,4 +100,12 @@ class SampleRefreshTests(SimpleTestCase):
         self.assertEqual(
             samples.ensure_sample_projects(self.root), [("fixture", self.destination, False)]
         )
+        self.assert_original()
+
+    def test_missing_native_lock_refuses_without_falling_back_to_stale_marker(self):
+        import fcntl
+
+        with mock.patch.object(fcntl, "flock", side_effect=OSError(errno.ENOSYS, "no flock")):
+            with self.assertRaises(OSError):
+                samples.ensure_sample_projects(self.root, force=True)
         self.assert_original()

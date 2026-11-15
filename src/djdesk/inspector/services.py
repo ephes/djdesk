@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import datetime
 from datetime import timezone as datetime_timezone
 from typing import Any
 
 from django.conf import settings
+from django.db import NotSupportedError, connections, transaction
 from django.urls import reverse
 from django.utils import timezone
 
@@ -78,13 +80,48 @@ def serialize_task_run(run: WorkspaceTaskRun) -> dict[str, Any]:
     }
 
 
+@contextmanager
+def _read_snapshot(using: str):
+    connection = connections[using]
+    nested = connection.in_atomic_block
+    if connection.vendor not in {"sqlite", "postgresql"}:
+        raise NotSupportedError("Workspace snapshots require SQLite or PostgreSQL")
+    with transaction.atomic(using=using):
+        if connection.vendor == "postgresql":
+            with connection.cursor() as cursor:
+                if nested:
+                    cursor.execute("SHOW transaction_isolation")
+                    if cursor.fetchone()[0] not in {"repeatable read", "serializable"}:
+                        raise NotSupportedError(
+                            "An outer workspace transaction requires repeatable read isolation"
+                        )
+                else:
+                    cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        yield
+
+
+def workspace_snapshot(workspace: Workspace, *, include_logs: bool = False):
+    """Materialize one bounded database generation before formatting or filesystem I/O."""
+    using = workspace._state.db or "default"
+    with _read_snapshot(using):
+        current = Workspace.objects.using(using).get(pk=workspace.pk)
+        scans = current.scans.using(using).order_by("-created_at", "-pk")[:4]
+        tasks = (
+            current.task_runs.using(using)
+            .select_related("preset")
+            .order_by("-created_at", "-pk")[:5]
+        )
+        if not include_logs:
+            scans = scans.defer("details", "log_excerpt")
+            tasks = tasks.defer("log", "metadata")
+        return current, list(scans), list(tasks)
+
+
 def workspace_status_payload(workspace: Workspace) -> dict[str, Any]:
     """Return a JSON structure consumed by the dashboard polling logic."""
-    scans = [serialize_scan(job) for job in workspace.scans.order_by("-created_at", "-pk")[:4]]
-    tasks = [
-        serialize_task_run(run)
-        for run in workspace.task_runs.select_related("preset").order_by("-created_at", "-pk")[:5]
-    ]
+    workspace, scan_rows, task_rows = workspace_snapshot(workspace, include_logs=True)
+    scans = [serialize_scan(job) for job in scan_rows]
+    tasks = [serialize_task_run(run) for run in task_rows]
     docs = [
         {
             "title": link.title,

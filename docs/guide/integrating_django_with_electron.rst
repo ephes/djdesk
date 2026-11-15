@@ -206,8 +206,14 @@ Filename stems must contain only ASCII letters, digits, underscores and hyphens,
 at least one character. Other names remain untouched but are omitted from listings;
 rename them to a supported stem to make them visible in DJDesk.
 
-Exports flush an owner-only hidden ``.notebook-*.tmp`` file, then publish a hard link
+Exports fsync an owner-only hidden ``.notebook-*.tmp`` file, then publish a hard link
 atomically without overwriting another file. Polling sees only complete exports.
+The opened workspace directory is fsynced after publication before reporting success.
+On macOS both syncs also use ``F_FULLFSYNC`` so the drive cache is flushed.
+A directory-sync failure returns HTTP 500 naming the already published notebook, whose
+durability is uncertain. The complete visible export and existing notebooks are preserved.
+Inspect the directory before exporting again; retrying creates another file, and a power
+loss before a successful directory sync may lose the new name.
 All export operations use the same opened workspace directory, so a directory rename
 cannot redirect writing or cleanup. The renamed directory may retain the export.
 Ordinary failures remove owned staging; a killed process can leave hidden temporary
@@ -224,6 +230,12 @@ is bound to the opened descriptors. The portable fallback checks file identity a
 Malformed UTF-8, JSON, cells or text outputs produce an HTTP 422 repair page with no notebook
 content or parser traceback. Repair the export in your editor and reload. The preview does
 not rewrite or execute it, and rendered source and output text remain HTML-escaped.
+Each preview reads at most the opened file's initial byte size plus one and compares
+descriptor size, nanosecond mtime and ctime around the read before decoding. Changed
+generations are reopened, with three attempts at most; continued in-place editing returns
+HTTP 404 (unavailable). Finish saving and reload. An atomic replacement can yield the
+complete opened generation or a retried new generation. Detection relies on the filesystem
+exposing content edits through size or timestamps.
 
 Apply this to your project
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

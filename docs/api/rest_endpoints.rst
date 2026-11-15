@@ -69,6 +69,11 @@ Required form field: ``template`` (``schema-audit`` or ``log-study``). A success
 response has status 201 and contains the status payload plus
 ``data_lab.selected_notebook`` and ``data_lab.selected_notebook_url`` for the exact new
 file, even when that file is outside the inventory window. Existing files are preserved.
+Success follows file fsync, hard-link publication and fsync of the same opened workspace
+directory. On macOS both syncs also issue ``F_FULLFSYNC`` to flush the drive cache
+(plain fsync where a filesystem does not support it). If the directory sync fails, HTTP 500 names the already published complete file
+and reports uncertain durability. No export is rolled back. Inspect the export directory
+before exporting again; retries create additional files.
 
 The drawer permits one export POST at a time, restores the prior control state after
 every outcome and never automatically replays a POST. Manual notebook selection while
@@ -77,6 +82,12 @@ Data Lab, leaving workspace status to polling. Polls retain the currently
 open notebook. Validate this behavior against the rendered dashboard with
 ``cd electron && npm run test:drawer`` after installing development npm dependencies
 and Chromium (or setting ``CHROME_EXECUTABLE`` to an installed Chrome binary).
+
+Notebook viewer reads compare descriptor size, nanosecond mtime and ctime around a read
+bounded to the initial byte size plus one, before UTF-8 and JSON decoding. Changed files
+are reopened up to three attempts total. Continued concurrent editing returns HTTP 404;
+finish saving and reload. Atomic replacement returns one complete generation. Stable
+malformed notebooks retain the HTTP 422 repair response.
 
 ``POST /api/task-runs/``
 ~~~~~~~~~~~~~~~~~~~~~~~~

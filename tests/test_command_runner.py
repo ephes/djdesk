@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import codecs
 import os
 import shlex
 import subprocess
@@ -25,6 +26,86 @@ from djdesk.inspector.models import TaskPreset, Workspace, WorkspaceTaskRun
 from djdesk.inspector.tasks import execute_workspace_task
 
 MANAGE = "python manage.py"
+
+
+class CommandFramingTests(SimpleTestCase):
+    def test_newline_free_output_scans_and_copies_only_linear_text(self):
+        for size in (1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024):
+            work = {"scanned": 0, "copied": 0}
+
+            class MeasuredText(str):
+                def split(self, *args, **kwargs):
+                    work["scanned"] += len(self)
+                    return [MeasuredText(part) for part in super().split(*args, **kwargs)]
+
+                def __add__(self, other):
+                    work["copied"] += len(self) + len(other)
+                    return MeasuredText(super().__add__(other))
+
+                def __radd__(self, other):
+                    work["copied"] += len(self) + len(other)
+                    return MeasuredText(str(other) + str(self))
+
+            class Decoder:
+                def decode(self, chunk, **kwargs):
+                    return MeasuredText(chunk.decode())
+
+            chunks = iter([b"x" * 1024] * (size // 1024) + [b""])
+            lines = []
+            process = mock.Mock(returncode=0)
+            with (
+                TemporaryDirectory() as workspace,
+                override_settings(INSPECTOR_COMMAND_OUTPUT_BYTES=size),
+                mock.patch.object(command_runner.subprocess, "Popen", return_value=process),
+                mock.patch.object(command_runner, "_prepare_stream"),
+                mock.patch.object(
+                    command_runner, "_read_available", side_effect=lambda *a: next(chunks)
+                ),
+                mock.patch.object(command_runner, "_stop_and_reap"),
+                mock.patch.object(
+                    command_runner.codecs,
+                    "getincrementaldecoder",
+                    return_value=lambda **kw: Decoder(),
+                ),
+            ):
+                (Path(workspace) / "manage.py").touch()
+                result = run_command(
+                    command=f"{MANAGE} check",
+                    workspace_path=workspace,
+                    timeout=30,
+                    log_callback=lines.append,
+                )
+            self.assertEqual(lines, ["x" * size])
+            self.assertEqual(result.output_lines, 1)
+            self.assertFalse(result.output_limited)
+            self.assertLessEqual(work["scanned"], 2 * size)
+            self.assertLessEqual(work["copied"], 2 * size)
+
+    def test_split_utf8_crlf_empty_lines_and_final_partial_line(self):
+        decoder = codecs.getincrementaldecoder("utf-8")
+        lines = []
+        chunks = iter([b"a\r", b"\n\n\xc3", b"\xa9\r", b"\nend\r", b""])
+        with (
+            TemporaryDirectory() as workspace,
+            mock.patch.object(
+                command_runner.subprocess, "Popen", return_value=mock.Mock(returncode=0)
+            ),
+            mock.patch.object(command_runner, "_prepare_stream"),
+            mock.patch.object(
+                command_runner, "_read_available", side_effect=lambda *a: next(chunks)
+            ),
+            mock.patch.object(command_runner, "_stop_and_reap"),
+            mock.patch.object(command_runner.codecs, "getincrementaldecoder", return_value=decoder),
+        ):
+            (Path(workspace) / "manage.py").touch()
+            result = run_command(
+                command=f"{MANAGE} check",
+                workspace_path=workspace,
+                timeout=5,
+                log_callback=lines.append,
+            )
+        self.assertEqual(lines, ["a", "", "é", "end"])
+        self.assertEqual(result.output_lines, 4)
 
 
 class CommandGuardTests(SimpleTestCase):

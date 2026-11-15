@@ -4,15 +4,12 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const { downloadPython } = require('./python-download');
-const crypto = require('crypto');
+const { downloadPython, checksum } = require('./python-download');
 const toml = require('toml');
 const { spawn, spawnSync, execSync } = require('child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
 const bundleRoot = path.join(__dirname, 'django-bundle');
-const pythonDir = path.join(bundleRoot, 'python');
-const bundleSrcDir = path.join(bundleRoot, 'src');
 const djangoSourceDir = path.join(projectRoot, 'src', 'djdesk');
 const managePy = path.join(projectRoot, 'manage.py');
 
@@ -54,26 +51,90 @@ const PLATFORM_MATRIX = {
   }
 };
 
-async function main() {
-  console.log('Building Django bundle (Phase 3)...');
-  await recreateBundle();
-
-  const standaloneSpec = resolveStandaloneSpec();
-  const bundlePython = await prepareStandalonePython(standaloneSpec);
-
-  await installPythonDeps(bundlePython);
-  await copyProjectFiles();
-  await collectStatic(bundlePython);
-  await writeLauncherScript();
-  await writeVersionFile();
-  await verifyBundle(bundlePython);
-
-  console.log('django-bundle ready.');
+async function main({ destination = bundleRoot, steps = {}, io = fsp } = {}) {
+  const operations = {
+    prepareStandalonePython, installPythonDeps, copyProjectFiles, collectStatic,
+    writeLauncherScript, writeVersionFile, verifyBundle, ...steps
+  };
+  const parent = await io.realpath(path.dirname(destination));
+  destination = path.join(parent, path.basename(destination));
+  const lock = `${destination}.lock`;
+  try {
+    await io.mkdir(lock);
+  } catch (error) {
+    if (error.code === 'EEXIST') throw new Error(`Runtime already building; reservation: ${lock}`);
+    throw error;
+  }
+  let failure;
+  try {
+    await publishRuntime(destination, operations, io);
+  } catch (error) {
+    failure = error;
+    throw error;
+  } finally {
+    try {
+      await io.rmdir(lock);
+    } catch (error) {
+      if (!failure) throw error;
+      failure.message += `; reservation cleanup failed: ${error.message}`;
+    }
+  }
 }
 
-async function recreateBundle() {
-  await fsp.rm(bundleRoot, { recursive: true, force: true });
-  await fsp.mkdir(bundleRoot, { recursive: true });
+async function publishRuntime(destination, operations, io) {
+  const parent = path.dirname(destination);
+  const work = await io.mkdtemp(path.join(parent, '.django-bundle-publish-'));
+  const staging = path.join(work, 'staging');
+  const backup = path.join(work, 'backup');
+  let retained = false;
+  let failure;
+  try {
+    await io.mkdir(staging);
+    await buildRuntime(staging, operations);
+    let hadPrevious = false;
+    try {
+      await io.rename(destination, backup);
+      hadPrevious = true;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    try {
+      await io.rename(staging, destination);
+    } catch (error) {
+      if (hadPrevious) {
+        try {
+          await io.rename(backup, destination);
+        } catch (restoreError) {
+          retained = true;
+          error.recoveryPath = backup;
+          error.message += `; restoration failed: ${restoreError.message}; recover from ${backup}`;
+        }
+      }
+      throw error;
+    }
+  } catch (error) {
+    failure = error;
+    throw error;
+  } finally {
+    if (!retained) {
+      try {
+        await io.rm(work, { recursive: true, force: true });
+      } catch (error) {
+        if (!failure) throw error;
+        failure.message += `; staging cleanup failed: ${error.message}`;
+      }
+    }
+  }
+}
+
+async function buildRuntime(destination, operations) {
+  const python = await operations.prepareStandalonePython(resolveStandaloneSpec(), destination);
+  await operations.installPythonDeps(python);
+  await operations.copyProjectFiles(destination);
+  await operations.collectStatic(python, destination);
+  await operations.writeLauncherScript(destination);
+  await operations.writeVersionFile(destination);
+  await operations.verifyBundle(python, destination);
 }
 
 function resolveStandaloneSpec() {
@@ -94,7 +155,8 @@ function resolveStandaloneSpec() {
   };
 }
 
-async function prepareStandalonePython({ assetName, pythonRelative }) {
+async function prepareStandalonePython({ assetName, pythonRelative }, root = bundleRoot) {
+  const pythonDir = path.join(root, 'python');
   console.log('Preparing python-build-standalone interpreter...');
   ensureTarAvailable();
   const downloadDir = path.join(__dirname, '.python-downloads');
@@ -104,30 +166,7 @@ async function prepareStandalonePython({ assetName, pythonRelative }) {
 
   await downloadPython(downloadUrl, archivePath, PYTHON_SHA256[assetName]);
 
-  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'djdesk-python-'));
-  await verifyChecksum(archivePath, assetName);
-
-  try {
-    await extractArchive(archivePath, tempDir);
-
-    const extractedPythonDir = path.join(tempDir, 'python');
-    if (!fs.existsSync(extractedPythonDir)) {
-      throw new Error('python-build-standalone archive missing python directory');
-    }
-
-    await fsp.rm(pythonDir, { recursive: true, force: true });
-    await fsp.mkdir(path.dirname(pythonDir), { recursive: true });
-    try {
-      await fsp.rename(extractedPythonDir, pythonDir);
-    } catch (error) {
-      if (error.code !== 'EXDEV') {
-        throw error;
-      }
-      await fsp.cp(extractedPythonDir, pythonDir, { recursive: true, dereference: false });
-    }
-  } finally {
-    await fsp.rm(tempDir, { recursive: true, force: true });
-  }
+  await extractPython(archivePath, assetName, pythonDir);
 
   const pythonExecutable = path.join(pythonDir, ...pythonRelative);
   if (!fs.existsSync(pythonExecutable)) {
@@ -141,6 +180,43 @@ async function prepareStandalonePython({ assetName, pythonRelative }) {
   ensurePythonVersion(pythonExecutable);
   console.log(`Standalone interpreter ready at ${pythonExecutable}`);
   return pythonExecutable;
+}
+
+async function extractPython(archivePath, assetName, pythonDir, {
+  verify = verifyChecksum, extract = extractArchive, io = fsp
+} = {}) {
+  await verify(archivePath, assetName);
+  const tempDir = await io.mkdtemp(path.join(os.tmpdir(), 'djdesk-python-'));
+  let failure;
+  try {
+    await extract(archivePath, tempDir);
+
+    const extractedPythonDir = path.join(tempDir, 'python');
+    if (!fs.existsSync(extractedPythonDir)) {
+      throw new Error('python-build-standalone archive missing python directory');
+    }
+
+    await io.rm(pythonDir, { recursive: true, force: true });
+    await io.mkdir(path.dirname(pythonDir), { recursive: true });
+    try {
+      await io.rename(extractedPythonDir, pythonDir);
+    } catch (error) {
+      if (error.code !== 'EXDEV') {
+        throw error;
+      }
+      await io.cp(extractedPythonDir, pythonDir, { recursive: true, dereference: false });
+    }
+  } catch (error) {
+    failure = error;
+    throw error;
+  } finally {
+    try {
+      await io.rm(tempDir, { recursive: true, force: true });
+    } catch (error) {
+      if (!failure) throw error;
+      failure.message += `; extraction cleanup failed (${tempDir}): ${error.message}`;
+    }
+  }
 }
 
 async function extractArchive(archivePath, destination) {
@@ -163,16 +239,10 @@ async function verifyChecksum(filePath, assetName) {
     throw new Error(`No checksum registered for ${assetName}`);
   }
 
-  const hash = crypto.createHash('sha256');
-  await new Promise((resolve, reject) => {
-    const stream = fs.createReadStream(filePath);
-    stream.on('data', (chunk) => hash.update(chunk));
-    stream.on('end', resolve);
-    stream.on('error', reject);
-  });
-  const actual = hash.digest('hex');
-  if (actual !== expected) {
-    throw new Error(`Checksum mismatch for ${assetName}. Expected ${expected}, got ${actual}`);
+  if (!await checksum(filePath, expected, {
+    maxBytes: 256 * 1024 * 1024, signal: AbortSignal.timeout(120000)
+  })) {
+    throw new Error(`Checksum mismatch for ${assetName}`);
   }
 }
 
@@ -226,19 +296,20 @@ async function installPythonDeps(pythonExecutable) {
   });
 }
 
-async function copyProjectFiles() {
+async function copyProjectFiles(root = bundleRoot) {
+  const bundleSrcDir = path.join(root, 'src');
   console.log('Copying Django sources into django-bundle/src ...');
   await fsp.mkdir(bundleSrcDir, { recursive: true });
   await fsp.cp(djangoSourceDir, path.join(bundleSrcDir, 'djdesk'), {
     recursive: true,
     filter: (source) => !source.includes('__pycache__')
   });
-  await fsp.copyFile(managePy, path.join(bundleRoot, 'manage.py'));
+  await fsp.copyFile(managePy, path.join(root, 'manage.py'));
 }
 
-async function collectStatic(pythonExecutable) {
+async function collectStatic(pythonExecutable, root = bundleRoot) {
   console.log('Running collectstatic targeting the bundle...');
-  const staticRoot = path.join(bundleRoot, 'staticfiles');
+  const staticRoot = path.join(root, 'staticfiles');
   const env = {
     ...process.env,
     DJANGO_STATIC_ROOT: staticRoot,
@@ -257,9 +328,9 @@ async function collectStatic(pythonExecutable) {
   });
 }
 
-async function writeLauncherScript() {
+async function writeLauncherScript(root = bundleRoot) {
   console.log('Writing bundle launcher script...');
-  const launcherPath = path.join(bundleRoot, 'run_django.py');
+  const launcherPath = path.join(root, 'run_django.py');
 const content = String.raw`#!/usr/bin/env python
 
 """Launch Django from the bundled sources."""
@@ -324,8 +395,8 @@ if __name__ == "__main__":
   await fsp.chmod(launcherPath, 0o755);
 }
 
-async function writeVersionFile() {
-  const versionPath = path.join(bundleRoot, 'VERSION');
+async function writeVersionFile(root = bundleRoot) {
+  const versionPath = path.join(root, 'VERSION');
   let version = 'unknown';
   try {
     version = execSync('git rev-parse --short HEAD', {
@@ -340,17 +411,17 @@ async function writeVersionFile() {
   await fsp.writeFile(versionPath, payload, 'utf8');
 }
 
-async function verifyBundle(pythonExecutable) {
+async function verifyBundle(pythonExecutable, root = bundleRoot) {
   console.log('Verifying bundle Python environment...');
   const env = {
     ...process.env,
-    PYTHONPATH: buildPythonPath(path.join(bundleRoot, 'src'))
+    PYTHONPATH: buildPythonPath(path.join(root, 'src'))
   };
   const result = spawnSync(pythonExecutable, [
     '-c',
     'import django, sys; sys.stdout.write(django.get_version())'
   ], {
-    cwd: bundleRoot,
+    cwd: root,
     env,
     encoding: 'utf8',
     stdio: 'pipe'
@@ -390,6 +461,8 @@ function runCommand(command, args, options = {}) {
 }
 
 module.exports = {
+  main,
+  extractPython,
   writeLauncherScript,
   readProjectDependencies,
   installPythonDeps,

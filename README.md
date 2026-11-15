@@ -217,6 +217,17 @@ unexpectedly obeys the same limit, giving up earlier output before the error lin
 these cases the run is recorded as failed and its `command` metadata carries
 `output_limited: true`, except for unexpected failures, which record the error instead.
 Commands whose normal output fits the budgets behave as before.
+Line framing scans only newly decoded text and joins each completed/final line once,
+so newline-free output uses linear work within the same byte limit.
+
+Inspector status and task-detail responses stream through a byte ceiling before JSON
+parsing, regardless of missing or inaccurate Content-Length. The ceiling is
+`DJDESK_INSPECTOR_RESPONSE_BYTES` (default 8 MiB plus 30 times the task-log budget, enough
+for five logs made only of JSON-escaped control characters; raising the task-log budget
+raises this default), passed to the dashboard as `data-response-bytes`; without a valid
+attribute the reader falls back to 8 MiB. Overflow cancels the
+read and preserves the last displayed status/log; later polls or a drawer reload can
+recover with a smaller response. The drawer DOM test also covers this response boundary.
 
 Data Lab exports exclusively claim a fresh filename on every export: the template
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
@@ -322,10 +333,17 @@ npm audit still reports six moderate entries from builder's transitive minimatch
 GHSA-g3hv-75wg-m249 (including dependent packages); no supported builder update resolves
 that tree yet. No overrides or advisory ignores are used.
 
-Interpreter archives use verified cache entries only. Downloads stage beside the cache,
+Interpreter archives use verified regular, non-symlink cache entries only. Cache hashing
+uses bounded opened-file reads and checks identity/metadata before reuse; special,
+oversized or changing cache entries are refused without changing their targets.
+Cache validation shares the transfer deadline. Downloads stage beside the cache,
 allow at most five HTTPS redirects and 256 MiB, and have a two minute total deadline.
 Only a matching registered SHA256 is published. Failed attempts remove their own
 partials and preserve the prior cache; a stale or interrupted cache is retried automatically.
+Runtime builds reserve their destination, construct and verify unique sibling staging,
+then promote with restoration of the old bundle on failure. See
+[build and recovery details](electron/README.md#building-the-django-bundle-phase-3),
+including retained backups, interrupted reservations and extraction scratch cleanup.
 
 Node.js >=22.12.0 is required by the refreshed shell toolchain. The read-only
 electron-smoke workflow builds the Python bundle and an unsigned unpacked app,

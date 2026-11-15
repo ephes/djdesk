@@ -1,9 +1,49 @@
 const WIZARD_STORAGE_KEY = 'djdesk.wizard.projectPath';
+const INSPECTOR_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+// The server derives the ceiling from its task-log budget; fall back to the default.
+function inspectorResponseBytes(value) {
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return undefined;
+  const bytes = Number(value);
+  return Number.isSafeInteger(bytes) ? bytes : undefined;
+}
+
+async function readInspectorJSON(response, maxBytes = INSPECTOR_RESPONSE_BYTES) {
+  const overflow = () => Object.assign(new Error('Inspector response byte limit exceeded'),
+    { code: 'INSPECTOR_RESPONSE_TOO_LARGE' });
+  const length = response.headers.get('Content-Length');
+  if (length && /^\d+$/.test(length) && Number(length) > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw overflow();
+  }
+  if (!response.ok || !response.body) throw new Error('Inspector response unavailable');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parts = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > maxBytes) throw overflow();
+      parts.push(decoder.decode(value, { stream: true }));
+    }
+    parts.push(decoder.decode());
+    return JSON.parse(parts.join(''));
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
 
 class InspectorUI {
   constructor(root) {
     this.root = root;
     this.statusUrl = root?.dataset.statusEndpoint;
+    this.responseBytes = inspectorResponseBytes(root?.dataset.responseBytes);
     this.taskEndpoint = root?.dataset.taskEndpoint;
     this.workspaceSlug = root?.dataset.workspaceSlug || '';
     this.taskDetailTemplate = root?.dataset.taskDetailTemplate || '';
@@ -341,7 +381,7 @@ class InspectorUI {
       fetch(this.statusUrl, {
         headers: { 'X-Requested-With': 'XMLHttpRequest' },
       })
-        .then((response) => response.json())
+        .then((response) => readInspectorJSON(response, this.responseBytes))
         .then((payload) => this.updateFromPayload(payload))
         .catch(() => {
           this.toggleConnection(false);
@@ -1031,7 +1071,7 @@ class InspectorUI {
     fetch(url, { headers: { 'X-Requested-With': 'XMLHttpRequest' } })
       .then((response) => {
         if (!response.ok) throw new Error('Request failed');
-        return response.json();
+        return readInspectorJSON(response, this.responseBytes);
       })
       .then((data) => {
         this.renderTaskDrawer(data);
@@ -1041,9 +1081,9 @@ class InspectorUI {
           this.clearTaskDrawerPolling();
         }
       })
-      .catch(() => {
+      .catch((error) => {
         this.showToast('Unable to load task log.', 'danger');
-        this.closeTaskDrawer();
+        if (error.code !== 'INSPECTOR_RESPONSE_TOO_LARGE') this.closeTaskDrawer();
       });
   }
 

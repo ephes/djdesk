@@ -256,6 +256,6 @@ Checklist
 Apply this to your project
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Keep the bundler deterministic—delete previous payloads before rebuilding, verify checksums, and record the git SHA in `VERSION`.
+1. Build in uniquely owned staging, verify checksums and the complete runtime, then publish with restoration of the previous payload on failure. Reserve the destination against concurrent builders and record the git SHA in ``VERSION``. See :doc:`../electron` for recovery and cache limits.
 2. Ensure migrations run before distributing the app—DJDesk applies them via the bundled launcher when Electron starts, but you can bake them into the bundle if your workflow demands it.
 3. Document where installers write user data/logs so downstream teams know how to reset environments.

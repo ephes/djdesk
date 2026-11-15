@@ -151,6 +151,15 @@ INSPECTOR_COMMAND_OUTPUT_BYTES = int(
     os.environ.get("DJDESK_INSPECTOR_COMMAND_OUTPUT_BYTES", str(1024 * 1024))
 )
 INSPECTOR_TASK_LOG_BYTES = int(os.environ.get("DJDESK_INSPECTOR_TASK_LOG_BYTES", str(1024 * 1024)))
+# Bytes of one inspector JSON response the dashboard reads before parsing. The status
+# payload embeds the five newest task logs, and JSON escaping can expand one stored byte
+# (a control character) to six, so the default covers that worst case plus metadata.
+INSPECTOR_RESPONSE_BYTES = int(
+    os.environ.get(
+        "DJDESK_INSPECTOR_RESPONSE_BYTES",
+        str(8 * 1024 * 1024 + 5 * 6 * INSPECTOR_TASK_LOG_BYTES),
+    )
+)
 
 INSPECTOR_DATA_LAB_ROOT = Path(
     os.environ.get("DJDESK_DATA_LAB_ROOT", BASE_DIR / "var" / "data_lab")

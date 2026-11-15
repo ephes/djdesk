@@ -353,7 +353,7 @@ def run_command(
 
     # Undecodable bytes are replaced instead of aborting the run.
     decoder = codecs.getincrementaldecoder(_output_encoding())(errors="replace")
-    pending = ""
+    pending: list[str] = []
     output_lines = 0
     timed_out = False
     output_limited = False
@@ -374,13 +374,16 @@ def run_command(
             end_of_output = chunk == b"" or output_limited
             chunk = chunk[: budget - received]
             received += len(chunk)
-            pending += decoder.decode(chunk, final=end_of_output)
-            *lines, pending = pending.split("\n")
+            *lines, tail = decoder.decode(chunk, final=end_of_output).split("\n")
             for line in lines:
-                log_callback(line.rstrip("\r"))
+                pending.append(line)
+                log_callback("".join(pending).rstrip("\r"))
+                pending.clear()
                 output_lines += 1
+            if tail:
+                pending.append(tail)
         if pending:
-            log_callback(pending.rstrip("\r"))
+            log_callback("".join(pending).rstrip("\r"))
             output_lines += 1
         # A command may close its output and keep running; the deadline still applies.
         while not (timed_out or output_limited or _leader_exited(process)):

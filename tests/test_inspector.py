@@ -336,6 +336,24 @@ class InspectorAPIViewTests(TestCase):
         self.assertEqual(data["workspace"], self.workspace.slug)
         self.assertTrue(data["scans"])
 
+    def test_status_with_escape_heavy_logs_fits_the_dashboard_ceiling(self) -> None:
+        from django.conf import settings
+
+        budget = settings.INSPECTOR_TASK_LOG_BYTES
+        WorkspaceTaskRun.objects.bulk_create(
+            [
+                WorkspaceTaskRun(workspace=self.workspace, preset=self.preset, log="\x01" * budget)
+                for _ in range(5)
+            ]
+        )
+        response = Client().get(reverse("inspector:workspace-status", args=[self.workspace.slug]))
+        self.assertEqual(response.status_code, 200)
+        # Each control character serializes as a six-byte ``\\u0001`` escape.
+        self.assertGreater(len(response.content), 5 * 6 * budget)
+        self.assertLessEqual(len(response.content), settings.INSPECTOR_RESPONSE_BYTES)
+        dashboard = Client().get(reverse("inspector:dashboard"), {"workspace": self.workspace.slug})
+        self.assertContains(dashboard, f'data-response-bytes="{settings.INSPECTOR_RESPONSE_BYTES}"')
+
     def test_task_run_create_endpoint(self) -> None:
         client = Client()
         payload = {

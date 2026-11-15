@@ -7,6 +7,22 @@ Unreleased
 Fixed
 ~~~~~
 
+- Build Django runtimes in unique staging and verify before publication. Restore the
+  last good runtime on failed promotion and retain a named backup if restoration fails.
+  Exclusively reserve the destination through build, promotion and cleanup; refuse
+  duplicate builders immediately and document interrupted-owner recovery.
+- Bound cached interpreter hashing by ordinary-file descriptor admission, byte ceiling
+  and the total download deadline; refuse special, oversized and changing entries.
+  Verify before allocating extraction scratch and preserve primary extraction/copy
+  errors when scratch cleanup also fails.
+- Frame command output with linear scanning/joining even for long newline-free output,
+  preserving incremental decoding and callbacks. Bound inspector status/task-detail
+  JSON reads to ``INSPECTOR_RESPONSE_BYTES`` (derived from the task-log budget and
+  worst-case JSON escaping, configurable via ``DJDESK_INSPECTOR_RESPONSE_BYTES``),
+  cancel overflow before parsing and retain the last displayed state. Ignore publisher
+  leftovers in Git and electron-builder packaging.
+  Add synthetic publisher/cache/framing tests and response-reader DOM regressions.
+
 - Bind historical inspector seed, documentation-pane and path migrations to the
   selected database alias. Freeze their tutorial seed inputs independently of
   runtime content and asset helpers. Refuse reversal of seed migration 0002 to

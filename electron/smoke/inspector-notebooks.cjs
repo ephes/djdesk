@@ -86,6 +86,53 @@ async function main() {
     assert.equal(await page.evaluate(() => ui.activeNotebookSlug), 'schema-audit-9', 'limited polls retain the current viewer');
     assert.equal(await page.locator('[data-data-lab-incomplete]').isVisible(), true);
     console.log('Notebook drawer DOM passed: owned POST, manual choice, retry, truncated inventory');
+
+    // The rendered dashboard carries the server-derived ceiling (default settings).
+    const ceiling = await page.evaluate(() => ui.responseBytes);
+    assert.equal(ceiling, 8 * 1024 * 1024 + 5 * 6 * 1024 * 1024, 'dashboard response ceiling');
+    await page.evaluate((limit) => {
+      window.cancelledResponses = 0;
+      window.oversizedJSONParses = 0;
+      window.fetch = async () => {
+        const response = new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(limit));
+            controller.enqueue(new Uint8Array(1));
+          },
+          cancel() { cancelledResponses++; },
+        }), { headers: { 'Content-Length': '1' } });
+        response.json = async () => { oversizedJSONParses++; return {}; };
+        return response;
+      };
+      ui.updateLogs([{ level: 'info', message: 'Previous valid status' }]);
+      ui.taskDrawer.classList.add('is-visible');
+      ui.renderTaskDrawer({ label: 'Previous valid task', status: 'succeeded', log: 'Previous valid log' });
+      ui.startPolling();
+      clearInterval(ui.polling);
+      ui.loadTaskDetails(123);
+    }, ceiling);
+    await page.waitForFunction(() => cancelledResponses === 2);
+    assert.match(await page.locator('[data-log-stream]').textContent(), /Previous valid status/);
+    assert.equal(await page.locator('[data-task-drawer-log]').textContent(), 'Previous valid log');
+    assert.equal(await page.locator('[data-task-drawer]').evaluate((node) => node.classList.contains('is-visible')), true);
+    assert.equal(await page.evaluate(() => oversizedJSONParses), 0);
+    await page.evaluate(() => {
+      window.fetch = async () => new Response(JSON.stringify({
+        label: 'Recovered task', status: 'succeeded', log: 'Small response works',
+      }));
+      ui.loadTaskDetails(123);
+    });
+    await page.waitForFunction(() => document.querySelector('[data-task-drawer-log]').textContent === 'Small response works');
+    const unicode = await page.evaluate(async () => {
+      const bytes = new TextEncoder().encode('{"text":"é€"}');
+      const body = new ReadableStream({ start(controller) {
+        for (const byte of bytes) controller.enqueue(Uint8Array.of(byte));
+        controller.close();
+      } });
+      return (await readInspectorJSON(new Response(body), bytes.length)).text;
+    });
+    assert.equal(unicode, 'é€');
+    console.log('Inspector response DOM passed: bounded streams, preserved status/drawer, retry, Unicode boundary');
   } finally {
     await browser.close();
   }

@@ -7,6 +7,9 @@ from typing import Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, models, router, transaction
+from django.db.models.deletion import ProtectedError
+from django.db.models.signals import pre_delete
+from django.dispatch import receiver
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -374,6 +377,25 @@ class WorkspaceTaskRun(models.Model):
         else:
             self.log = chunk
         self.publish_fields("log")
+
+
+@receiver(pre_delete, sender=Workspace)
+@receiver(pre_delete, sender=TaskPreset)
+def protect_active_task_runs(sender, instance, using, **kwargs):
+    """Protect the recovery handle at both model and bulk deletion boundaries."""
+    # Collector sends pre_delete inside its writer transaction, before any deletes.
+    # The parent lock also fences concurrent FK insertions on PostgreSQL. SQLite
+    # serializes writers (a conflicting snapshot must fail rather than erase a run).
+    sender.objects.using(using).filter(pk=instance.pk).select_for_update().first()
+    field = "workspace_id" if sender is Workspace else "preset_id"
+    active = list(
+        WorkspaceTaskRun.objects.using(using).filter(
+            **{field: instance.pk},
+            status__in=(WorkspaceTaskRun.Status.REQUESTED, WorkspaceTaskRun.Status.RUNNING),
+        )
+    )
+    if active:
+        raise ProtectedError("Cannot delete a parent with requested or running task runs.", active)
 
 
 class DocLink(models.Model):

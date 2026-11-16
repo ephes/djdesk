@@ -4,11 +4,12 @@ from unittest import TestCase, mock
 
 from django.core.management import call_command
 from django.db import connections, transaction
+from django.db.models.deletion import ProtectedError
 from django.test import override_settings
 
 from djdesk.inspector.command_runner import CommandResult
 from djdesk.inspector.forms import TaskRunForm
-from djdesk.inspector.models import TaskPreset, Workspace, WorkspaceTaskRun
+from djdesk.inspector.models import ScanJob, TaskPreset, Workspace, WorkspaceTaskRun
 from djdesk.inspector.tasks import execute_workspace_task
 
 
@@ -32,7 +33,7 @@ class TaskDatabaseTests(TestCase):
             connections.databases[alias] = config
             self.addCleanup(self.close_alias, alias)
             with connections[alias].schema_editor() as editor:
-                for model in (Workspace, TaskPreset, WorkspaceTaskRun):
+                for model in (Workspace, TaskPreset, ScanJob, WorkspaceTaskRun):
                     editor.create_model(model)
             workspace = Workspace.objects.using(alias).create(
                 pk=1, name=alias, slug=alias, project_path=f"/synthetic/{alias}"
@@ -59,6 +60,29 @@ class TaskDatabaseTests(TestCase):
         run.refresh_from_db(using=selected)
         self.assertEqual(run.status, "running")
         self.assertEqual(WorkspaceTaskRun.objects.using(primary).get(pk=1).status, "requested")
+
+    def test_active_parent_guard_checks_the_selected_writer_not_read_router(self):
+        primary, selected = self.aliases
+        WorkspaceTaskRun.objects.using(primary).update(status="succeeded")
+        for model in (Workspace, TaskPreset):
+            for bulk in (False, True):
+                with self.subTest(model=model.__name__, bulk=bulk):
+                    with self.assertRaises(ProtectedError):
+                        if bulk:
+                            model.objects.using(selected).all().delete()
+                        else:
+                            model.objects.using(selected).get(pk=1).delete()
+                    self.assertTrue(model.objects.using(selected).filter(pk=1).exists())
+        self.assertTrue(WorkspaceTaskRun.objects.using(selected).filter(pk=1).exists())
+
+    def test_terminal_parent_delete_ignores_active_runs_in_other_database(self):
+        primary, selected = self.aliases
+        WorkspaceTaskRun.objects.using(selected).update(status="succeeded")
+        before = list(WorkspaceTaskRun.objects.using(primary).values())
+        Workspace.objects.using(selected).get(pk=1).delete()
+        TaskPreset.objects.using(selected).all().delete()
+        self.assertFalse(WorkspaceTaskRun.objects.using(selected).exists())
+        self.assertEqual(before, list(WorkspaceTaskRun.objects.using(primary).values()))
 
     def test_execution_and_unexpected_failure_use_selected_database(self):
         primary, selected = self.aliases

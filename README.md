@@ -238,6 +238,20 @@ selected running IDs, rejects missing/terminal runs, preserves logs, and marks t
 failed with interruption metadata. It trusts the operator's shutdown confirmation;
 it cannot detect live workers. Restart workers afterward; duplicate deliveries never
 replay these commands. Any desired retry requires a new, explicitly approved request.
+Execution history in the Django admin is read-only, including for superusers: runs
+cannot be added, edited or deleted there. Start tasks through the inspector's
+confirmed task form; use `recover_task_runs` for abandoned running attempts after
+the ownership checks above. Admin viewing, status filters and search remain available.
+Workspace and task-preset deletion is refused while either has any `REQUESTED` or
+`RUNNING` runs. This applies to admin single/bulk deletion and ORM model/queryset
+deletion; a blocked bulk operation preserves the entire selected set. The final
+check uses the deletion database inside the writer transaction, locking the parent
+on PostgreSQL; conflicting SQLite writers may report a database-lock error instead.
+Deletion never cancels a command. Wait for settlement, or stop the owning workers
+and command trees and explicitly recover abandoned running runs first. Requested
+work must be allowed to settle; the recovery command accepts only running runs.
+Once all related runs are terminal (`SUCCEEDED`, `FAILED` or `CANCELLED`), deleting
+the parent also deletes its run history. Export any history you need before confirming.
 Worker publications are conditional on the running status and immutable claim start
 time. Recovery retires that claim: a late worker cannot replace its logs, progress,
 metadata or failure with success, and returns `{retired: true, status: ...}` when it

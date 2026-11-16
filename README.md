@@ -189,10 +189,25 @@ result ID and terminal writes. Programmatic callers use
 execution); omitting `database` selects `default`. Workspace and preset must belong
 to the selected database; numeric IDs are local to that alias.
 
+Workspace saves resolve `using` (or the write router) once for slug allocation,
+collision-retry savepoints and the final write. Duplicate-path model validation
+uses the write router with the workspace instance, so loaded instances retain their
+own alias under Django's default routing. For validation before an explicit
+`save(using=...)`, configure the write router to select that alias too. Slugs,
+paths and numeric IDs are independent between databases; only slug-constraint
+collisions are retried, at most five attempts.
+
 The dashboard loads four recent scans and five recent task runs for the selected
 workspace only, ordered newest first with the primary key breaking timestamp ties.
-The workspace selector loads names and paths without historical logs or metadata;
-initial task history omits log bodies. Both the page and polling reload workspace
+The workspace selector loads at most 50 names and paths per page, ordered by name
+then primary key, without historical logs or metadata. Use Previous/Next or search
+by name/path (at most 120 characters); the URL parameters are `workspace_page`
+and `workspace_search`. Search and page navigation preserve the active workspace.
+Direct `?workspace=<slug>` links open any registered workspace, including entries
+outside the selector page; without a slug, the first workspace in name/ID order opens.
+Pages reflect the current inventory, so concurrent imports, deletions or renames may
+shift entries between pages. Initial task history omits log bodies.
+Both the page and polling reload workspace
 metadata and materialize the related history in one short database snapshot before
 rendering or notebook filesystem access. SQLite uses a read transaction; PostgreSQL
 uses a read-only repeatable-read transaction. An existing PostgreSQL outer transaction

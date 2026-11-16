@@ -6,7 +6,7 @@ from typing import Any
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, models, transaction
+from django.db import IntegrityError, models, router, transaction
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -48,14 +48,20 @@ class Workspace(models.Model):
     def __str__(self) -> str:  # pragma: no cover - human readable helper
         return self.name
 
-    def save(self, *args: Any, **kwargs: Any) -> None:
+    def save(self, force_insert=False, force_update=False, using=None, update_fields=None) -> None:
+        using = using or router.db_for_write(type(self), instance=self)
         attempts = 0
         while True:
             if not self.slug:
-                self.slug = self._generate_unique_slug()
+                self.slug = self._generate_unique_slug(using=using)
             try:
-                with transaction.atomic(using=kwargs.get("using")):
-                    super().save(*args, **kwargs)
+                with transaction.atomic(using=using):
+                    super().save(
+                        force_insert=force_insert,
+                        force_update=force_update,
+                        using=using,
+                        update_fields=update_fields,
+                    )
                 return
             except IntegrityError as exc:
                 if not self._is_slug_integrity_error(exc):
@@ -72,15 +78,21 @@ class Workspace(models.Model):
         if not normalized:
             raise ValidationError({"project_path": "Project path cannot be empty."})
         self.project_path = normalized
-        exists = Workspace.objects.exclude(pk=self.pk).filter(project_path=normalized).exists()
+        using = router.db_for_write(type(self), instance=self)
+        exists = (
+            Workspace.objects.using(using)
+            .exclude(pk=self.pk)
+            .filter(project_path=normalized)
+            .exists()
+        )
         if exists:
             raise ValidationError({"project_path": "A workspace already inspects this folder."})
 
-    def _generate_unique_slug(self) -> str:
+    def _generate_unique_slug(self, *, using: str) -> str:
         base = slugify(self.name) or "workspace"
         candidate = base
         suffix = 1
-        while Workspace.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
+        while Workspace.objects.using(using).filter(slug=candidate).exclude(pk=self.pk).exists():
             suffix += 1
             candidate = f"{base}-{suffix}"
         return candidate

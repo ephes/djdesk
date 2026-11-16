@@ -7,6 +7,13 @@ Unreleased
 Fixed
 ~~~~~
 
+- Page the dashboard workspace selector in deterministic 50-row windows with name/path
+  search, preserving active selections and direct links outside the visible page.
+
+- Keep workspace slug allocation, savepoints and writes on one resolved write alias;
+  validate duplicate paths on the instance's write database and preserve independent
+  workspace identities across databases.
+
 - Bound notebook view admission by JSON bytes, cell/output counts and aggregate text
   and escaped HTML work before building fragments; refuse oversized views with HTTP 422.
 - Return a committed notebook export receipt even if optional status/inventory refresh

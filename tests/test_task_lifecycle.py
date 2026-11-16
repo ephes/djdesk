@@ -6,6 +6,7 @@ from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import connections, transaction
+from django.db.models.deletion import ProtectedError
 from django.test import TransactionTestCase
 from django.urls import reverse
 
@@ -200,6 +201,58 @@ class TaskLifecycleTests(TransactionTestCase):
         ):
             self.assertTrue(execute_workspace_task.call(run.pk)["retired"])
         self.assertEqual(WorkspaceTaskRun.objects.filter(pk=run.pk).values().get(), recovered)
+
+    def test_recovery_settles_undelivered_request_and_unblocks_parent_deletion(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        with self.assertRaises(ProtectedError):
+            self.workspace.delete()
+        call_command(
+            "recover_task_runs",
+            run_id=[run.pk],
+            confirm_workers_stopped=True,
+            reason="Enqueue lost after commit; workers stopped",
+            stdout=StringIO(),
+        )
+        run.refresh_from_db()
+        self.assertEqual(run.status, "failed")
+        self.assertIsNone(run.started_at)
+        self.assertIsNotNone(run.completed_at)
+        self.assertTrue(run.metadata["command"]["never_started"])
+        self.assertFalse(run.metadata["command"]["interrupted"])
+        # A late delivery of the lost message can no longer claim or run the command.
+        with mock.patch("djdesk.inspector.tasks.run_command") as command:
+            self.assertTrue(execute_workspace_task.call(run.pk)["never_started"])
+            command.assert_not_called()
+        run.refresh_from_db()
+        self.assertEqual(run.status, "failed")
+        self.workspace.delete()
+        self.assertFalse(WorkspaceTaskRun.objects.filter(pk=run.pk).exists())
+
+    def test_recovery_of_request_claimed_meanwhile_changes_nothing(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        stale = WorkspaceTaskRun.objects.get(pk=run.pk)
+        run.mark_running()
+        real = WorkspaceTaskRun.objects.using("default")
+
+        def snapshot_then_real_write(**lookups):
+            # The read returns the stale REQUESTED snapshot; the conditional write runs
+            # the command's own lookups against the row a worker has since claimed.
+            return [stale] if "pk__in" in lookups else real.filter(**lookups)
+
+        with mock.patch(
+            "djdesk.inspector.management.commands.recover_task_runs.WorkspaceTaskRun.objects"
+        ) as manager:
+            manager.using.return_value.filter.side_effect = snapshot_then_real_write
+            with self.assertRaisesRegex(CommandError, "changed during recovery"):
+                call_command(
+                    "recover_task_runs",
+                    run_id=[run.pk],
+                    confirm_workers_stopped=True,
+                    reason="Stale snapshot",
+                    stdout=StringIO(),
+                )
+        run.refresh_from_db()
+        self.assertEqual(run.status, "running")
 
     def test_recovery_requires_confirmation_and_only_selected_running_rows(self):
         selected = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)

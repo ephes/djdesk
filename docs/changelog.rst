@@ -7,6 +7,15 @@ Unreleased
 Fixed
 ~~~~~
 
+- Make task execution history read-only in the admin, preserving worker-owned
+  claims, outcomes and provenance against stale or forged forms and arbitrary adds.
+- Refuse workspace/preset single and bulk deletion while task runs are requested
+  or running, including at the ORM writer boundary. Preserve complete selections
+  on refusal and document terminal-history cascade and explicit recovery policy.
+  Admin cascade of terminal run history requires the run delete permission.
+- Let ``recover_task_runs`` settle abandoned requested runs whose message was lost,
+  marking them failed as never started so a late delivery cannot claim them.
+
 - Page the dashboard workspace selector in deterministic 50-row windows with name/path
   search, preserving active selections and direct links outside the visible page.
 

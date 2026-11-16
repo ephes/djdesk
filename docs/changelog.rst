@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Keep task dispatch, claims, logs, metadata and outcomes on the saved database alias;
+  allow explicit alias selection for worker execution and operator recovery.
+- Fence worker publications by their running claim so operator recovery remains
+  authoritative even if an old worker returns later, without replaying commands.
+
 - Persist sample swap intents before removing the public name and reconcile interrupted
   generations under the publisher lock. Retain interrupted backups and staging for
   inspection; keep recovered samples for this invocation even with force, and refuse

@@ -203,6 +203,10 @@ class TaskPreset(models.Model):
             raise ValidationError({"command": str(exc)}) from exc
 
 
+class TaskRunRetired(RuntimeError):
+    """The worker no longer owns the persisted running attempt."""
+
+
 class WorkspaceTaskRun(models.Model):
     """Instance of a `django-tasks` command associated with a workspace."""
 
@@ -251,7 +255,8 @@ class WorkspaceTaskRun(models.Model):
         started_at = timezone.now()
         claimed = (
             type(self)
-            .objects.filter(pk=self.pk, status=self.Status.REQUESTED)
+            .objects.using(self._state.db)
+            .filter(pk=self.pk, status=self.Status.REQUESTED)
             .update(
                 status=self.Status.RUNNING,
                 started_at=started_at,
@@ -267,7 +272,24 @@ class WorkspaceTaskRun(models.Model):
         self.status = self.Status.SUCCEEDED if success else self.Status.FAILED
         self.completed_at = timezone.now()
         self.progress = 100
-        self.save(update_fields=["status", "completed_at", "progress"])
+        self.publish_fields("status", "completed_at", "progress")
+
+    def publish_fields(self, *fields: str) -> None:
+        """Publish only while this instance's claim still owns the row."""
+        changed = (
+            type(self)
+            .objects.using(self._state.db)
+            .filter(
+                pk=self.pk,
+                status=self.Status.RUNNING
+                if self.started_at is not None
+                else self.Status.REQUESTED,
+                started_at=self.started_at,
+            )
+            .update(**{field: getattr(self, field) for field in fields})
+        )
+        if not changed:
+            raise TaskRunRetired("Workspace task attempt has been retired.")
 
     @property
     def log_truncated(self) -> bool:
@@ -322,7 +344,7 @@ class WorkspaceTaskRun(models.Model):
             self._log_buffer = []
             self.log = self.clamp_log(complete, limit)
             self._log_bytes = len(self.log.encode("utf-8"))
-            self.save(update_fields=["log"])
+            self.publish_fields("log")
             return
         buffer.append(new_line)
         self._log_bytes = used + (1 if used else 0) + size
@@ -339,7 +361,7 @@ class WorkspaceTaskRun(models.Model):
             self.log = f"{self.log}\n{chunk}"
         else:
             self.log = chunk
-        self.save(update_fields=["log"])
+        self.publish_fields("log")
 
 
 class DocLink(models.Model):

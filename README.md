@@ -183,6 +183,11 @@ Queued workspace tasks atomically claim only `REQUESTED` runs. Duplicate deliver
 returns the persisted command outcome, or `{skipped: true, status: ...}` while a
 run is in progress or has no outcome. It never resets logs or timestamps and
 holds no database transaction open while executing a command.
+Task dispatch carries the saved run's database alias through claim, logs, metadata,
+result ID and terminal writes. Programmatic callers use
+`execute_workspace_task.enqueue(run_id, database="alias")` (or `.call` for immediate
+execution); omitting `database` selects `default`. Workspace and preset must belong
+to the selected database; numeric IDs are local to that alias.
 
 The dashboard loads four recent scans and five recent task runs for the selected
 workspace only, ordered newest first with the primary key breaking timestamp ties.
@@ -212,11 +217,18 @@ After a worker crash, stop all workers owning the selected runs and terminate/ch
 their command process trees before recovery. Age alone does not establish abandonment.
 Inspect the saved run IDs and logs, then explicitly record that ownership check:
 `uv run python manage.py recover_task_runs --run-id 123 --run-id 124 --confirm-workers-stopped --reason "Owning workers and commands stopped after crash"`.
-Use the same settings/database as those workers. The command accepts at most 100
+Use the same settings as those workers and select their alias with `--database alias`
+(default: `default`). The command accepts at most 100
 selected running IDs, rejects missing/terminal runs, preserves logs, and marks them
 failed with interruption metadata. It trusts the operator's shutdown confirmation;
 it cannot detect live workers. Restart workers afterward; duplicate deliveries never
 replay these commands. Any desired retry requires a new, explicitly approved request.
+Worker publications are conditional on the running status and immutable claim start
+time. Recovery retires that claim: a late worker cannot replace its logs, progress,
+metadata or failure with success, and returns `{retired: true, status: ...}` when it
+detects retirement. Unexpected worker errors still propagate without changing a
+recovered outcome. This fence does not stop a live command; the shutdown check remains
+required before recovery.
 
 Workspace commands are checked by one guard that sees the argv list exactly as it is
 executed. An argv is accepted only when it is `<interpreter> manage.py <command>` from

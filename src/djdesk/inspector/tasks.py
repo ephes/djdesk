@@ -127,7 +127,7 @@ def execute_workspace_task(task_run_id: int, database: str = DEFAULT_DB_ALIAS) -
         .get(pk=task_run_id)
     )
     if not run.mark_running():
-        run.refresh_from_db()
+        run.refresh_from_db(using=database)
         return (run.metadata or {}).get("command") or {"skipped": True, "status": run.status}
 
     # Every path that leaves a claimed run without a recorded outcome ends up in ``finally``:
@@ -136,7 +136,7 @@ def execute_workspace_task(task_run_id: int, database: str = DEFAULT_DB_ALIAS) -
     try:
         payload = _execute_claimed_run(run)
     except TaskRunRetired:
-        run.refresh_from_db()
+        run.refresh_from_db(using=database)
         payload = {"retired": True, "status": run.status}
     finally:
         if payload is None:

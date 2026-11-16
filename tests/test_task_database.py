@@ -14,10 +14,11 @@ from djdesk.inspector.tasks import execute_workspace_task
 
 class TaskRouter:
     def db_for_read(self, model, **hints):
+        return "task_primary"
+
+    def db_for_write(self, model, **hints):
         instance = hints.get("instance")
         return instance._state.db if instance else "task_primary"
-
-    db_for_write = db_for_read
 
 
 class TaskDatabaseTests(TestCase):
@@ -55,7 +56,7 @@ class TaskDatabaseTests(TestCase):
         primary, selected = self.aliases
         run = WorkspaceTaskRun.objects.using(selected).get(pk=1)
         self.assertTrue(run.mark_running())
-        run.refresh_from_db()
+        run.refresh_from_db(using=selected)
         self.assertEqual(run.status, "running")
         self.assertEqual(WorkspaceTaskRun.objects.using(primary).get(pk=1).status, "requested")
 
@@ -96,7 +97,7 @@ class TaskDatabaseTests(TestCase):
                 self.assertEqual(run._state.db, selected)
                 task.enqueue.assert_not_called()
             task.enqueue.assert_called_once_with(run.pk, database=selected)
-        run.refresh_from_db()
+        run.refresh_from_db(using=selected)
         self.assertEqual(run.result_id, "selected-result")
 
     def test_recovery_uses_selected_database(self):

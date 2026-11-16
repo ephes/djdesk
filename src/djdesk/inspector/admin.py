@@ -19,8 +19,12 @@ class TaskParentAdmin(admin.ModelAdmin):
 
     def get_deleted_objects(self, objs, request):
         deleted, counts, perms, protected = super().get_deleted_objects(objs, request)
-        # Terminal history may cascade with its parent despite the read-only run admin.
-        perms.discard(WorkspaceTaskRun._meta.verbose_name)
+        # The run admin is read-only for everyone, so Django always lists runs as needing
+        # permission. Terminal history may cascade only for users holding the model-level
+        # run delete permission.
+        run_opts = WorkspaceTaskRun._meta
+        if request.user.has_perm(f"{run_opts.app_label}.delete_{run_opts.model_name}"):
+            perms.discard(run_opts.verbose_name)
         field = "workspace_id" if self.model is Workspace else "preset_id"
         active = WorkspaceTaskRun.objects.using(router.db_for_write(self.model)).filter(
             **{f"{field}__in": [obj.pk for obj in objs]},

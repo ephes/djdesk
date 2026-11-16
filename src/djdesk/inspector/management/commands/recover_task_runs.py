@@ -4,9 +4,14 @@ from django.utils import timezone
 
 from djdesk.inspector.models import WorkspaceTaskRun
 
+RECOVERABLE = (WorkspaceTaskRun.Status.REQUESTED, WorkspaceTaskRun.Status.RUNNING)
+
 
 class Command(BaseCommand):
-    help = "Mark explicitly selected abandoned RUNNING runs failed; never replay commands."
+    help = (
+        "Mark explicitly selected abandoned REQUESTED or RUNNING runs failed; "
+        "never replay commands."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("--database", default=DEFAULT_DB_ALIAS, choices=tuple(connections))
@@ -28,17 +33,27 @@ class Command(BaseCommand):
             raise CommandError("Select 1–100 positive run IDs.")
         with transaction.atomic(using=database):
             runs = list(WorkspaceTaskRun.objects.using(database).filter(pk__in=ids))
-            if len(runs) != len(ids) or any(run.status != "running" for run in runs):
-                raise CommandError("Every selected run must exist and be RUNNING; nothing changed.")
+            if len(runs) != len(ids) or any(run.status not in RECOVERABLE for run in runs):
+                raise CommandError(
+                    "Every selected run must exist and be REQUESTED or RUNNING; nothing changed."
+                )
             for run in runs:
+                never_started = run.status == WorkspaceTaskRun.Status.REQUESTED
                 metadata = {
                     **(run.metadata or {}),
                     "recovery": {"reason": reason, "workers_stopped": True},
-                    "command": {"interrupted": True, "error": "Operator confirmed abandoned run."},
+                    "command": {
+                        "interrupted": not never_started,
+                        "never_started": never_started,
+                        "error": "Operator confirmed abandoned request; command never started."
+                        if never_started
+                        else "Operator confirmed abandoned run.",
+                    },
                 }
+                # A stale snapshot (claimed or settled meanwhile) changes nothing.
                 changed = (
                     WorkspaceTaskRun.objects.using(database)
-                    .filter(pk=run.pk, status="running", started_at=run.started_at)
+                    .filter(pk=run.pk, status=run.status, started_at=run.started_at)
                     .update(
                         status="failed",
                         completed_at=timezone.now(),
@@ -48,4 +63,4 @@ class Command(BaseCommand):
                 )
                 if not changed:
                     raise CommandError("A selected run changed during recovery; nothing changed.")
-        self.stdout.write(f"Recovered {len(runs)} interrupted run(s). No commands replayed.")
+        self.stdout.write(f"Recovered {len(runs)} abandoned run(s). No commands replayed.")

@@ -234,24 +234,30 @@ Inspect the saved run IDs and logs, then explicitly record that ownership check:
 `uv run python manage.py recover_task_runs --run-id 123 --run-id 124 --confirm-workers-stopped --reason "Owning workers and commands stopped after crash"`.
 Use the same settings as those workers and select their alias with `--database alias`
 (default: `default`). The command accepts at most 100
-selected running IDs, rejects missing/terminal runs, preserves logs, and marks them
-failed with interruption metadata. It trusts the operator's shutdown confirmation;
+selected requested or running IDs, rejects missing/terminal runs, preserves logs, and
+marks them failed with interruption metadata. A `REQUESTED` run whose message was lost
+(for example a crash between commit and enqueue) is marked failed with `never_started`
+metadata; a late delivery can no longer claim it. A run claimed or settled while the
+command runs makes the whole call fail without changes. It trusts the operator's shutdown confirmation;
 it cannot detect live workers. Restart workers afterward; duplicate deliveries never
 replay these commands. Any desired retry requires a new, explicitly approved request.
 Execution history in the Django admin is read-only, including for superusers: runs
 cannot be added, edited or deleted there. Start tasks through the inspector's
-confirmed task form; use `recover_task_runs` for abandoned running attempts after
-the ownership checks above. Admin viewing, status filters and search remain available.
+confirmed task form; use `recover_task_runs` for abandoned requested or running attempts
+after the ownership checks above. Admin viewing, status filters and search remain available.
 Workspace and task-preset deletion is refused while either has any `REQUESTED` or
 `RUNNING` runs. This applies to admin single/bulk deletion and ORM model/queryset
 deletion; a blocked bulk operation preserves the entire selected set. The final
-check uses the deletion database inside the writer transaction, locking the parent
-on PostgreSQL; conflicting SQLite writers may report a database-lock error instead.
+check uses the deletion database inside the writer transaction and locks the parent
+row on PostgreSQL, where a concurrently inserted run fails its foreign-key check rather
+than being deleted silently; conflicting SQLite writers may report a database-lock error.
 Deletion never cancels a command. Wait for settlement, or stop the owning workers
-and command trees and explicitly recover abandoned running runs first. Requested
-work must be allowed to settle; the recovery command accepts only running runs.
+and command trees and explicitly recover abandoned requested or running runs first.
 Once all related runs are terminal (`SUCCEEDED`, `FAILED` or `CANCELLED`), deleting
-the parent also deletes its run history. Export any history you need before confirming.
+the parent also deletes its run history. In the admin this cascade requires the
+`inspector.delete_workspacetaskrun` permission (superusers have it); staff without it
+cannot delete a parent that still has run history. Export any history you need before
+confirming.
 Worker publications are conditional on the running status and immutable claim start
 time. Recovery retires that claim: a late worker cannot replace its logs, progress,
 metadata or failure with success, and returns `{retired: true, status: ...}` when it

@@ -76,21 +76,26 @@ Renderer data flow
   delete operations. Start a new command through the inspector's confirmed task
   form. After a crash, stop the owning workers and command trees before using
   ``recover_task_runs --confirm-workers-stopped --reason ... --run-id ...``
-  against their database (``--database alias``). Recovery preserves the log and
-  retires the worker claim; retrying requires a new confirmed request.
+  against their database (``--database alias``). Recovery accepts requested or
+  running runs, preserves the log and retires the worker claim; a requested run
+  whose message was lost is marked failed as never started, so a late delivery
+  cannot claim it. Retrying requires a new confirmed request.
 
   Workspace and task-preset deletion, including ``delete_selected`` and ORM bulk
   deletion, preserves the entire selected set while any related run is requested
   or running. A ``pre_delete`` guard checks on the deletion database inside the
-  writer transaction before any row is deleted. PostgreSQL locks the parent to
-  fence concurrent run insertion; SQLite serializes writers and may refuse a
-  competing writer with a database-lock error. The admin also shows protected
+  writer transaction before any row is deleted. PostgreSQL also locks the parent
+  row; a run inserted concurrently by another transaction then fails its
+  foreign-key check instead of being deleted silently or left orphaned. SQLite
+  serializes writers and may refuse a competing writer with a database-lock error. The admin also shows protected
   runs on confirmation and rechecks when the confirmation is submitted.
   Deletion does not cancel subprocesses: wait for settlement or stop the owning
-  workers/command trees and explicitly recover abandoned running attempts.
-  Requested runs must settle before deletion; recovery accepts only running runs.
-  Terminal history (succeeded, failed, cancelled) cascades when its workspace or
-  preset is deleted, so export any required records before confirming deletion.
+  workers/command trees and explicitly recover abandoned requested or running
+  attempts. Terminal history (succeeded, failed, cancelled) cascades when its
+  workspace or preset is deleted, so export any required records before confirming
+  deletion. In the admin the cascade requires the model-level
+  ``inspector.delete_workspacetaskrun`` permission, although the run admin itself
+  never offers deletion.
 
 Native hooks
 ------------

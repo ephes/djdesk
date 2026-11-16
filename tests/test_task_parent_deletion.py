@@ -5,6 +5,7 @@ from unittest import mock
 from django.contrib import admin
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.db import connections, transaction
 from django.db.models.deletion import Collector, ProtectedError
 from django.test import TransactionTestCase
@@ -202,3 +203,39 @@ class TaskParentDeletionTests(TransactionTestCase):
                 self.assertEqual(list(model.objects.values()), before)
                 self.assertFalse(LogEntry.objects.exists())
                 self.assertTrue(WorkspaceTaskRun.objects.filter(pk=self.run.pk).exists())
+
+    def test_terminal_history_cascade_requires_run_delete_permission(self):
+        self.run.status = "succeeded"
+        self.run.save(update_fields=["status"])
+        staff = get_user_model().objects.create_user("staff", is_staff=True)
+        staff.user_permissions.set(
+            Permission.objects.filter(
+                content_type__app_label="inspector",
+                codename__in=("view_workspace", "change_workspace", "delete_workspace"),
+            )
+        )
+        self.client.force_login(staff)
+        url = reverse("admin:inspector_workspace_delete", args=[self.workspace.pk])
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["perms_lacking"])
+        self.assertEqual(self.client.post(url, {"post": "yes"}).status_code, 403)
+        bulk = self.client.post(
+            reverse("admin:inspector_workspace_changelist"),
+            {"action": "delete_selected", "_selected_action": self.workspace.pk, "post": "yes"},
+        )
+        self.assertEqual(bulk.status_code, 403)
+        self.assertTrue(Workspace.objects.filter(pk=self.workspace.pk).exists())
+        self.assertTrue(WorkspaceTaskRun.objects.filter(pk=self.run.pk).exists())
+
+        staff.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="inspector", codename="delete_workspacetaskrun"
+            )
+        )
+        staff = get_user_model().objects.get(pk=staff.pk)
+        self.client.force_login(staff)
+        self.assertFalse(self.client.get(url).context["perms_lacking"])
+        self.assertEqual(self.client.post(url, {"post": "yes"}).status_code, 302)
+        self.assertFalse(Workspace.objects.filter(pk=self.workspace.pk).exists())
+        self.assertFalse(WorkspaceTaskRun.objects.filter(pk=self.run.pk).exists())

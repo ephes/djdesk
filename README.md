@@ -283,6 +283,11 @@ with the actual filename stem, and the viewer opens that newly created export.
 bounded listing. The export form permits one in-flight POST, restores its controls
 after success or failure, and never retries automatically. A notebook selected while
 the POST is pending keeps the viewer; export responses do not replace polled workspace state.
+A successful HTTP 201 is a receipt for an already published and synced notebook. If the
+optional workspace/inventory refresh or its serialization fails, the response still
+returns `data_lab.selected_notebook` and `data_lab.selected_notebook_url`. The drawer
+opens that file, retains its current listing/templates and lets later status polls
+refresh them. Do not repeat an export merely because its optional refresh is missing.
 The listing and viewer accept only regular files directly inside the workspace export
 directory. Notebook symlinks (including internal links) and symlinked workspace export
 directories are refused. Where supported, directory-relative opens with no symlink following
@@ -291,6 +296,11 @@ Invalid UTF-8, ambiguous JSON (duplicate members at any nesting level), or inval
 viewer cell/output shapes return a bounded HTTP 422 repair page. Consumed sources and
 output text must contain Unicode scalar values; escaped lone surrogates are refused.
 Ordinary Unicode, including emoji, combining characters and newlines, is preserved.
+Viewer admission allows at most 8 MiB of notebook JSON, 500 cells, 50 outputs per code
+cell and 1 MiB of aggregate UTF-8 source/output text. Before constructing HTML, it also
+checks a conservative 2 MiB fragment budget including escaped text, cell/output wrappers
+and paragraph markup (even empty/stripped paragraphs count). Exceeding any limit returns
+a whole-view HTTP 422 size refusal; reduce the notebook in your editor and reload.
 Edit the original file and reload; the viewer preserves its bytes and escapes rendered text.
 The viewer reads bytes up to the opened file's initial size plus one, comparing descriptor
 size, nanosecond mtime and ctime before and after the read, before decoding UTF-8 or JSON.

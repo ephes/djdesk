@@ -115,3 +115,15 @@ test('an exported notebook outside the window opens directly and older polls ret
   ui.updateDataLab({ notebooks: [] });
   assert.equal(ui.activeNotebookSlug, 'schema-audit-9');
 });
+
+test('a minimal committed receipt opens its file and retains optional inventory state', () => {
+  const ui = Object.create(InspectorUI.prototype);
+  ui.dataLabIncomplete = { hidden: false };
+  ui.updateTemplateOptions = () => { assert.fail('receipt must retain templates'); };
+  ui.renderDataLabList = () => { assert.fail('receipt must retain inventory'); };
+  ui.openNotebook = (url, slug) => { ui.activeNotebookSlug = slug; ui.url = url; };
+  ui.updateDataLab({ selected_notebook: 'schema-audit-2', selected_notebook_url: '/published-2' });
+  assert.equal(ui.activeNotebookSlug, 'schema-audit-2');
+  assert.equal(ui.url, '/published-2');
+  assert.equal(ui.dataLabIncomplete.hidden, false);
+});

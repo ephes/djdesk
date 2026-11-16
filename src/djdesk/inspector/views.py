@@ -239,12 +239,24 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
             status=500,
         )
 
-    payload = workspace_status_payload(workspace)
-    payload["data_lab"]["selected_notebook"] = path.stem
-    payload["data_lab"]["selected_notebook_url"] = reverse(
-        "inspector:data-lab-notebook", kwargs={"slug": workspace.slug, "notebook_slug": path.stem}
-    )
-    return JsonResponse(payload, status=201)
+    receipt = {
+        "selected_notebook": path.stem,
+        "selected_notebook_url": reverse(
+            "inspector:data-lab-notebook",
+            kwargs={"slug": workspace.slug, "notebook_slug": path.stem},
+        ),
+    }
+    try:
+        payload = workspace_status_payload(workspace)
+        payload["data_lab"].update(receipt)
+        return JsonResponse(payload, status=201)
+    except Exception:
+        # Publication and directory sync already committed. Optional refresh/serialization
+        # must not turn that outcome into an apparent export failure or encourage replay.
+        logger.exception(
+            "Notebook published; status refresh failed for workspace %s", workspace.slug
+        )
+        return JsonResponse({"data_lab": receipt}, status=201)
 
 
 class DataLabNotebookView(TemplateView):
@@ -255,15 +267,19 @@ class DataLabNotebookView(TemplateView):
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         try:
             return super().get(request, *args, **kwargs)
-        except data_lab.InvalidNotebookError:
+        except data_lab.InvalidNotebookError as exc:
+            message = (
+                "This export exceeds the supported viewer size. Reduce cells, outputs or "
+                "text in your editor and reload. Your file has not been changed."
+                if isinstance(exc, data_lab.NotebookSizeError)
+                else "This export is not valid notebook JSON. Repair the file in your "
+                "editor and reload. Your file has not been changed."
+            )
             return self.render_to_response(
                 {
                     "notebook_title": "Notebook needs repair",
                     "live_enabled": settings.INSPECTOR_DATA_LAB_LIVE,
-                    "notebook_error": (
-                        "This export is not valid notebook JSON. Repair the file in your "
-                        "editor and reload. Your file has not been changed."
-                    ),
+                    "notebook_error": message,
                 },
                 status=422,
             )

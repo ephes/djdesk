@@ -106,6 +106,11 @@ EXPORT_RESULT_LIMIT = 50
 EXPORT_CACHE_SIZE = 32
 EXPORT_SCAN_ATTEMPTS = 3
 NOTEBOOK_READ_ATTEMPTS = 3
+NOTEBOOK_FILE_BYTES = 8 * 1024 * 1024
+NOTEBOOK_VIEW_CELLS = 500
+NOTEBOOK_VIEW_OUTPUTS_PER_CELL = 50
+NOTEBOOK_VIEW_TEXT_BYTES = 1024 * 1024
+NOTEBOOK_VIEW_HTML_BYTES = 2 * 1024 * 1024
 # Directory timestamps can be coarse (jiffies on Linux, 1-2 s on HFS+/FAT/SMB), so a
 # change in the same tick as a scan keeps the generation unchanged. Like Git's racy-clean
 # rule, a window is cached only once the directory timestamps are clearly in the past.
@@ -189,7 +194,7 @@ def _open_notebook(workspace: Workspace, filename: str):
                 if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
                     raise ValueError("Notebook must be a regular file.")
                 yield handle
-    except UnicodeError:
+    except (UnicodeError, InvalidNotebookError):
         raise
     except (OSError, ValueError) as exc:
         raise FileNotFoundError("Notebook export is unavailable.") from exc
@@ -426,6 +431,10 @@ class InvalidNotebookError(ValueError):
     """The edited export cannot be rendered by the notebook viewer."""
 
 
+class NotebookSizeError(InvalidNotebookError):
+    """The complete view exceeds its supported work envelope."""
+
+
 def _unique_notebook_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result = {}
     for key, value in pairs:
@@ -452,6 +461,8 @@ def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
         for _attempt in range(NOTEBOOK_READ_ATTEMPTS):
             with _open_notebook(workspace, f"{slug}.ipynb") as handle:
                 before = os.fstat(handle.fileno())
+                if before.st_size > NOTEBOOK_FILE_BYTES:
+                    raise NotebookSizeError("Notebook exceeds the supported viewer size.")
                 # Bound this read even if an editor keeps appending to the inode.
                 content = handle.read(before.st_size + 1)
                 after = os.fstat(handle.fileno())
@@ -466,21 +477,67 @@ def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
                 "Notebook kept changing while reading; finish editing and reload."
             )
         notebook = json.loads(content.decode("utf-8"), object_pairs_hook=_unique_notebook_members)
+    except InvalidNotebookError:
+        raise
     except (ValueError, RecursionError) as exc:
         raise InvalidNotebookError("Notebook is not valid UTF-8 JSON.") from exc
     if not isinstance(notebook, dict) or not isinstance(notebook.get("cells", []), list):
         raise InvalidNotebookError("Notebook cells must be a list.")
+    _admit_notebook_view(notebook)
+    return notebook
+
+
+def _admit_notebook_view(notebook: dict[str, Any]) -> None:
+    """Check the complete view before allocating any HTML fragments."""
+    if len(notebook.get("cells", [])) > NOTEBOOK_VIEW_CELLS:
+        raise NotebookSizeError("Too many notebook cells.")
+    text_bytes = 0
+    html_bytes = 0
+
+    def charge_text(value: Any) -> int:
+        nonlocal text_bytes, html_bytes
+        newlines = 0
+        for line in [value] if isinstance(value, str) else value:
+            size = len(line.encode("utf-8"))
+            text_bytes += size
+            # Exact escaped byte count, without constructing escaped text.
+            html_bytes += size + sum(
+                line.count(char) * extra
+                for char, extra in (("&", 4), ("<", 3), (">", 3), ('"', 5), ("'", 5))
+            )
+            newlines += line.count("\n")
+            check_budget()
+        return newlines
+
+    def check_budget() -> None:
+        if text_bytes > NOTEBOOK_VIEW_TEXT_BYTES or html_bytes > NOTEBOOK_VIEW_HTML_BYTES:
+            raise NotebookSizeError("Notebook text or HTML exceeds the supported viewer size.")
+
     for cell in notebook.get("cells", []):
         if not isinstance(cell, dict) or not _is_notebook_text(cell.get("source", [])):
             raise InvalidNotebookError("Notebook cell source must be text or a list of text.")
+        newlines = charge_text(cell.get("source", []))
+        if cell.get("cell_type") == "markdown":
+            # Conservatively include stripped/empty paragraphs and every newline.
+            html_bytes += len("<section class='nb-cell nb-cell--markdown'></section>")
+            html_bytes += (newlines + 1) * len("<p></p>")
         if cell.get("cell_type") == "code":
+            html_bytes += len(
+                "<section class='nb-cell nb-cell--code'><pre><code></code></pre></section>"
+            )
             outputs = cell.get("outputs", [])
-            if not isinstance(outputs, list) or any(
-                not isinstance(output, dict) or not _is_notebook_text(output.get("text", []))
-                for output in outputs
-            ):
+            if not isinstance(outputs, list):
                 raise InvalidNotebookError("Notebook outputs must contain text objects.")
-    return notebook
+            if len(outputs) > NOTEBOOK_VIEW_OUTPUTS_PER_CELL:
+                raise NotebookSizeError("Too many notebook outputs in one cell.")
+            if outputs:
+                html_bytes += len("<div class='nb-output'><header>Output</header></div>")
+            for output in outputs:
+                if not isinstance(output, dict) or not _is_notebook_text(output.get("text", [])):
+                    raise InvalidNotebookError("Notebook outputs must contain text objects.")
+                charge_text(output.get("text", []))
+                html_bytes += len("<pre></pre>")
+        check_budget()
 
 
 def render_notebook_html(notebook: dict[str, Any]) -> str:

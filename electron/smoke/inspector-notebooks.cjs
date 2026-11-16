@@ -7,11 +7,13 @@ const { chromium } = require('playwright-core');
 
 const root = path.resolve(__dirname, '../..');
 const rendered = spawnSync(process.env.PYTHON || path.join(root, '.venv/bin/python'), ['-c', `
-import django
+import django, json
 django.setup()
 from django.core.management import call_command
 from django.test import Client, override_settings
+from django.urls import reverse
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 from djdesk.inspector.models import Workspace
 from djdesk.inspector import data_lab
 call_command('migrate', verbosity=0)
@@ -21,11 +23,20 @@ with TemporaryDirectory() as directory, override_settings(
     workspace = Workspace.objects.create(name='Synthetic drawer', project_path='/tmp/synthetic-drawer')
     data_lab.export_notebook(workspace, 'schema-audit')
     data_lab.export_notebook(workspace, 'log-study')
-    print(Client().get('/', {'workspace': workspace.slug}).content.decode())
+    client = Client()
+    html = client.get('/', {'workspace': workspace.slug}).content.decode()
+    with patch('djdesk.inspector.views.workspace_status_payload', side_effect=OSError('Synthetic inventory error')):
+        response = client.post(reverse('inspector:data-lab-export', args=[workspace.slug]), {'template': 'schema-audit'})
+    assert response.status_code == 201, response.content
+    receipt = response.json()
+    viewer = client.get(receipt['data_lab']['selected_notebook_url'])
+    assert viewer.status_code == 200
+    print(json.dumps({'html': html, 'receipt': receipt, 'viewer': viewer.content.decode()}))
 `], { cwd: root, env: { ...process.env, DJANGO_SETTINGS_MODULE: 'djdesk.settings.test' },
   encoding: 'utf8' });
 assert.equal(rendered.status, 0, rendered.stderr);
-const html = rendered.stdout.replace(/<script\b[^>]*\bsrc=[^>]*><\/script>/g, '');
+const fixture = JSON.parse(rendered.stdout);
+const html = fixture.html.replace(/<script\b[^>]*\bsrc=[^>]*><\/script>/g, '');
 const source = fs.readFileSync(path.join(root, 'src/djdesk/inspector/static/inspector/app.js'), 'utf8');
 
 async function main() {
@@ -37,9 +48,15 @@ async function main() {
     // Serve the document from a synthetic origin: about:blank denies document.cookie,
     // which the CSRF lookup reads. Every other request is aborted.
     const origin = 'http://djdesk-drawer.invalid/';
-    await page.route('**/*', (route) => (route.request().url() === origin
-      ? route.fulfill({ status: 200, contentType: 'text/html', body: html })
-      : route.abort()));
+    const viewerURL = new URL(fixture.receipt.data_lab.selected_notebook_url, origin).href;
+    await page.route('**/*', (route) => {
+      const url = route.request().url();
+      if (url === origin || url === viewerURL) {
+        return route.fulfill({ status: 200, contentType: 'text/html',
+          body: url === origin ? html : fixture.viewer });
+      }
+      return route.abort();
+    });
     await page.goto(origin);
     await page.addScriptTag({ content: source + '\nwindow.InspectorUI = InspectorUI;' });
     await page.evaluate(() => {
@@ -86,6 +103,24 @@ async function main() {
     assert.equal(await page.evaluate(() => ui.activeNotebookSlug), 'schema-audit-9', 'limited polls retain the current viewer');
     assert.equal(await page.locator('[data-data-lab-incomplete]').isVisible(), true);
     console.log('Notebook drawer DOM passed: owned POST, manual choice, retry, truncated inventory');
+
+    // Feed the real API receipt produced after publication and a failed inventory read.
+    const inventory = await page.evaluate(() => ({
+      list: ui.dataLabList.innerHTML,
+      templates: ui.dataLabForm.querySelector('select').innerHTML,
+    }));
+    await page.locator('[data-data-lab-form] button').click();
+    await page.evaluate((receipt) => requests.at(-1).resolve({
+      ok: true, json: async () => receipt,
+    }), fixture.receipt);
+    await page.waitForFunction(() => !document.querySelector('[data-data-lab-form] button').disabled);
+    assert.equal(await page.evaluate(() => ui.activeNotebookSlug), fixture.receipt.data_lab.selected_notebook);
+    assert.equal(await page.evaluate(() => requests.length), 6, 'receipt never replays export');
+    assert.equal(await page.evaluate(() => ui.dataLabList.innerHTML), inventory.list);
+    assert.equal(await page.evaluate(() => ui.dataLabForm.querySelector('select').innerHTML), inventory.templates);
+    assert.equal(await page.locator('[data-data-lab-incomplete]').isVisible(), true);
+    assert.match(await page.frameLocator('[data-data-lab-frame]').locator('h1').textContent(), /schema-audit-2/);
+    console.log('Committed export receipt DOM passed: published viewer, retained inventory/templates, one POST');
 
     // The rendered dashboard carries the server-derived ceiling (default settings).
     const ceiling = await page.evaluate(() => ui.responseBytes);

@@ -148,3 +148,49 @@ class NotebookReadTests(TestCase):
         self.assertContains(response, "Grüße")
         self.assertContains(response, "old-b")
         self.assertEqual(self.path.read_bytes(), content)
+
+    def assert_repairable(self, content):
+        self.path.write_bytes(content)
+        with mock.patch.object(data_lab, "render_notebook_html") as render:
+            response = self.client.get(self.url)
+        self.assertContains(response, "Notebook needs repair", status_code=422)
+        render.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), content)
+
+    def test_duplicate_json_members_are_refused_before_rendering(self):
+        for content in (
+            b'{"cells":[],"cells":[{"cell_type":"markdown","source":"ambiguous"}]}',
+            b'{"cells":[{"cell_type":"markdown","source":"one","source":"two"}]}',
+            b'{"cells":[{"cell_type":"markdown","cell_type":"code","source":[]}]}',
+            b'{"cells":[{"cell_type":"code","outputs":[{"text":"one","text":"two"}]}]}',
+        ):
+            with self.subTest(content=content):
+                self.assert_repairable(content)
+
+    def test_lone_surrogates_in_consumed_text_are_repairable(self):
+        for source in ("\ud800", ["ordinary", "\udfff"]):
+            for cell in (
+                {"cell_type": "markdown", "source": source},
+                {"cell_type": "code", "source": source},
+                {"cell_type": "code", "source": [], "outputs": [{"text": source}]},
+            ):
+                with self.subTest(cell=cell):
+                    self.assert_repairable(json.dumps({"cells": [cell]}).encode())
+
+    def test_scalar_unicode_and_newlines_render_exactly(self):
+        text = "Grüße 😀 e\u0301\nsecond line <script>"
+        notebook = {
+            "cells": [
+                {"cell_type": "markdown", "source": [text]},
+                {"cell_type": "code", "source": text, "outputs": [{"text": [text]}]},
+            ]
+        }
+        for ascii_json in (False, True):
+            with self.subTest(ascii_json=ascii_json):
+                content = json.dumps(notebook, ensure_ascii=ascii_json).encode()
+                self.path.write_bytes(content)
+                response = self.client.get(self.url)
+                self.assertContains(
+                    response, "Grüße 😀 e\u0301\nsecond line &lt;script&gt;", count=3
+                )
+                self.assertEqual(self.path.read_bytes(), content)

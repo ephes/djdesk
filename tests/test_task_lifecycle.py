@@ -48,11 +48,11 @@ class TaskLifecycleTests(TransactionTestCase):
             finally:
                 connections["default"].close()
 
-        def enqueue(pk):
+        def enqueue(pk, database="default"):
             self.assertFalse(connections["default"].in_atomic_block)
             with ThreadPoolExecutor(max_workers=1) as pool:
                 seen.append(pool.submit(read_run, pk).result(timeout=5))
-            execute_workspace_task.call(pk)
+            execute_workspace_task.call(pk, database=database)
             return mock.Mock(id="queued-result")
 
         with (
@@ -79,7 +79,7 @@ class TaskLifecycleTests(TransactionTestCase):
     def test_enqueue_error_cannot_overwrite_claimed_or_finished_run(self):
         for finished in (False, True):
 
-            def enqueue(pk):
+            def enqueue(pk, database="default"):
                 run = WorkspaceTaskRun.objects.get(pk=pk)
                 run.mark_running()
                 run.append_log("Retained output")
@@ -138,6 +138,68 @@ class TaskLifecycleTests(TransactionTestCase):
                 reason="Stopped",
                 stdout=StringIO(),
             )
+
+    def test_recovery_retires_paused_worker_publications(self):
+        for late_action in ("success", "log", "error"):
+            with self.subTest(late_action=late_action):
+                run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+                recovered = {}
+
+                def command(**kwargs):
+                    call_command(
+                        "recover_task_runs",
+                        run_id=[run.pk],
+                        confirm_workers_stopped=True,
+                        reason="Synthetic stopped worker",
+                        stdout=StringIO(),
+                    )
+                    recovered.update(WorkspaceTaskRun.objects.filter(pk=run.pk).values().get())
+                    if late_action == "error":
+                        raise RuntimeError("Late command error")
+                    if late_action == "log":
+                        for _ in range(WorkspaceTaskRun.LOG_BATCH_SIZE):
+                            kwargs["log_callback"]("Late output")
+                    return CommandResult(0, 0.1, 0, self.preset.command)
+
+                with mock.patch("djdesk.inspector.tasks.run_command", side_effect=command):
+                    if late_action == "error":
+                        with self.assertRaisesRegex(RuntimeError, "Late command error"):
+                            execute_workspace_task.call(run.pk)
+                    else:
+                        payload = execute_workspace_task.call(run.pk)
+                        self.assertTrue(payload["retired"])
+                        self.assertEqual(payload["status"], "failed")
+                self.assertEqual(
+                    WorkspaceTaskRun.objects.filter(pk=run.pk).values().get(), recovered
+                )
+
+    def test_recovery_between_command_metadata_and_terminal_write_wins(self):
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        finish = WorkspaceTaskRun.mark_finished
+        recovered = {}
+
+        def recover_then_finish(instance, **kwargs):
+            call_command(
+                "recover_task_runs",
+                run_id=[run.pk],
+                confirm_workers_stopped=True,
+                reason="Synthetic stopped worker",
+                stdout=StringIO(),
+            )
+            recovered.update(WorkspaceTaskRun.objects.filter(pk=run.pk).values().get())
+            return finish(instance, **kwargs)
+
+        with (
+            mock.patch(
+                "djdesk.inspector.tasks.run_command",
+                return_value=CommandResult(0, 0.1, 0, self.preset.command),
+            ),
+            mock.patch.object(
+                WorkspaceTaskRun, "mark_finished", autospec=True, side_effect=recover_then_finish
+            ),
+        ):
+            self.assertTrue(execute_workspace_task.call(run.pk)["retired"])
+        self.assertEqual(WorkspaceTaskRun.objects.filter(pk=run.pk).values().get(), recovered)
 
     def test_recovery_requires_confirmation_and_only_selected_running_rows(self):
         selected = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)

@@ -7,6 +7,20 @@ Unreleased
 Fixed
 ~~~~~
 
+- Bound notebook view admission by JSON bytes, cell/output counts and aggregate text
+  and escaped HTML work before building fragments; refuse oversized views with HTTP 422.
+- Return a committed notebook export receipt even if optional status/inventory refresh
+  or serialization fails. Keep the drawer's listing/templates until polling refreshes
+  them, open the published export and never replay the POST automatically.
+
+- Reject duplicate notebook JSON members and lone surrogates in cell sources/output
+  text before rendering; return the repairable HTTP 422 page and preserve edited bytes.
+
+- Keep task dispatch, claims, logs, metadata and outcomes on the saved database alias;
+  allow explicit alias selection for worker execution and operator recovery.
+- Fence worker publications by their running claim so operator recovery remains
+  authoritative even if an old worker returns later, without replaying commands.
+
 - Persist sample swap intents before removing the public name and reconcile interrupted
   generations under the publisher lock. Retain interrupted backups and staging for
   inspection; keep recovered samples for this invocation even with force, and refuse

@@ -149,7 +149,8 @@ class TaskRunForm(forms.Form):
         workspace: Workspace = self.cleaned_data["workspace"]
         preset: TaskPreset = self.cleaned_data["preset"]
 
-        run = WorkspaceTaskRun.objects.create(
+        database = workspace._state.db
+        run = WorkspaceTaskRun.objects.using(database).create(
             workspace=workspace,
             preset=preset,
             requested_by=self.initial.get("requested_by", "inspector"),
@@ -160,12 +161,12 @@ class TaskRunForm(forms.Form):
         def dispatch() -> None:
             nonlocal enqueue_failed
             try:
-                result = execute_workspace_task.enqueue(run.pk)
+                result = execute_workspace_task.enqueue(run.pk, database=run._state.db)
             except Exception:
                 enqueue_failed = True
                 # Immediate backends can raise after claiming/executing the command.
                 # Only settle a run which no worker has claimed.
-                WorkspaceTaskRun.objects.filter(
+                WorkspaceTaskRun.objects.using(run._state.db).filter(
                     pk=run.pk, status=WorkspaceTaskRun.Status.REQUESTED
                 ).update(
                     status=WorkspaceTaskRun.Status.FAILED,
@@ -177,12 +178,14 @@ class TaskRunForm(forms.Form):
                     ),
                 )
             else:
-                WorkspaceTaskRun.objects.filter(pk=run.pk).update(result_id=result.id)
+                WorkspaceTaskRun.objects.using(run._state.db).filter(pk=run.pk).update(
+                    result_id=result.id
+                )
 
-        transaction.on_commit(dispatch)
+        transaction.on_commit(dispatch, using=run._state.db)
         # Autocommit/immediate backends may already have completed. Within an outer
         # transaction the truthful response is still REQUESTED until its commit.
-        run.refresh_from_db()
+        run.refresh_from_db(using=run._state.db)
         if enqueue_failed and run.status == WorkspaceTaskRun.Status.FAILED:
             # Dispatch already ran (autocommit); the failed run is committed.
             raise forms.ValidationError({"__all__": ["Unable to dispatch the requested task."]})

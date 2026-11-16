@@ -759,12 +759,16 @@ class InspectorUI {
 
   updateDataLab(data) {
     if (!data) return;
-    this.updateTemplateOptions(data.templates || []);
-    if (this.dataLabIncomplete) this.dataLabIncomplete.hidden = !data.notebooks_incomplete;
+    if (data.templates) this.updateTemplateOptions(data.templates);
+    if (this.dataLabIncomplete && 'notebooks_incomplete' in data) {
+      this.dataLabIncomplete.hidden = !data.notebooks_incomplete;
+    }
     const selected = data.notebooks?.find((nb) => nb.slug === data.selected_notebook);
     if (data.selected_notebook && (data.selected_notebook_url || selected?.viewer_url)) {
       this.openNotebook(data.selected_notebook_url || selected.viewer_url, data.selected_notebook);
     }
+    // A committed export receipt can omit the optional inventory. Polling refreshes it.
+    if (!('notebooks' in data)) return;
     if (!data.notebooks?.length) {
       if (this.activeNotebookSlug) {
         this.renderDataLabList([]);

@@ -5,6 +5,7 @@ import sys
 from typing import Any
 
 from django.conf import settings
+from django.db import DEFAULT_DB_ALIAS
 from django.utils import timezone
 from django_tasks import task
 
@@ -14,7 +15,7 @@ from .command_runner import (
     run_command,
     validate_safe_command,
 )
-from .models import WorkspaceTaskRun
+from .models import TaskRunRetired, WorkspaceTaskRun
 
 logger = logging.getLogger(__name__)
 _UNEXPECTED_ERROR_CHARS = 2000
@@ -24,7 +25,7 @@ def _store_command_metadata(run: WorkspaceTaskRun, payload: dict[str, Any]) -> d
     metadata = run.metadata or {}
     metadata["command"] = payload
     run.metadata = metadata
-    run.save(update_fields=["metadata"])
+    run.publish_fields("metadata")
     return metadata["command"]
 
 
@@ -103,7 +104,9 @@ def _record_unexpected_failure(run: WorkspaceTaskRun, error: BaseException | Non
             "workspace_path": run.workspace.project_path,
             "error": message,
         }
-        WorkspaceTaskRun.objects.filter(pk=run.pk, status=WorkspaceTaskRun.Status.RUNNING).update(
+        WorkspaceTaskRun.objects.using(run._state.db).filter(
+            pk=run.pk, status=WorkspaceTaskRun.Status.RUNNING, started_at=run.started_at
+        ).update(
             status=WorkspaceTaskRun.Status.FAILED,
             completed_at=timezone.now(),
             progress=100,
@@ -115,12 +118,16 @@ def _record_unexpected_failure(run: WorkspaceTaskRun, error: BaseException | Non
 
 
 @task()
-def execute_workspace_task(task_run_id: int) -> dict[str, Any]:
+def execute_workspace_task(task_run_id: int, database: str = DEFAULT_DB_ALIAS) -> dict[str, Any]:
     """Execute a SAFE Django management command for the selected workspace."""
 
-    run = WorkspaceTaskRun.objects.select_related("workspace", "preset").get(pk=task_run_id)
+    run = (
+        WorkspaceTaskRun.objects.using(database)
+        .select_related("workspace", "preset")
+        .get(pk=task_run_id)
+    )
     if not run.mark_running():
-        run.refresh_from_db()
+        run.refresh_from_db(using=database)
         return (run.metadata or {}).get("command") or {"skipped": True, "status": run.status}
 
     # Every path that leaves a claimed run without a recorded outcome ends up in ``finally``:
@@ -128,6 +135,9 @@ def execute_workspace_task(task_run_id: int) -> dict[str, Any]:
     payload: dict[str, Any] | None = None
     try:
         payload = _execute_claimed_run(run)
+    except TaskRunRetired:
+        run.refresh_from_db(using=database)
+        payload = {"retired": True, "status": run.status}
     finally:
         if payload is None:
             _record_unexpected_failure(run, sys.exception())
@@ -142,7 +152,7 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
         return _fail_run(run, str(exc))
 
     run.progress = 5
-    run.save(update_fields=["progress"])
+    run.publish_fields("progress")
     run.append_log(f"Executing `{command}` inside {run.workspace.project_path}")
     run.flush_log_buffer()
     if run.log_truncated:
@@ -173,7 +183,7 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
         return _fail_run(run, str(exc), safe_prefix=safe_prefix)
 
     run.progress = 95
-    run.save(update_fields=["progress"])
+    run.publish_fields("progress")
     if result.output_limited:
         run.append_log("Command stopped because its output exceeded the byte budget.")
     elif result.timed_out:

@@ -63,6 +63,35 @@ class NotebookPublicationTests(TestCase):
         self.assertEqual([p.name for p in path.parent.iterdir()], [path.name])
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_committed_export_receipt_survives_optional_refresh_failure(self):
+        for failure in ("inventory", "serialization"):
+            with self.subTest(failure=failure):
+                options = (
+                    {"side_effect": RuntimeError("Synthetic inventory error")}
+                    if failure == "inventory"
+                    else {"return_value": {"data_lab": {}, "unserializable": object()}}
+                )
+                with (
+                    mock.patch("djdesk.inspector.views.workspace_status_payload", **options),
+                    self.assertLogs("djdesk.inspector.views", level="ERROR"),
+                ):
+                    response = self.client.post(
+                        reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                        {"template": "schema-audit"},
+                    )
+                self.assertEqual(response.status_code, 201)
+                receipt = response.json()["data_lab"]
+                slug = "schema-audit" if failure == "inventory" else "schema-audit-2"
+                self.assertEqual(receipt["selected_notebook"], slug)
+                self.assertEqual(self.client.get(receipt["selected_notebook_url"]).status_code, 200)
+                directory = data_lab.workspace_data_lab_dir(self.workspace)
+                self.assertEqual(
+                    len(list(directory.glob("*.ipynb"))), 1 if failure == "inventory" else 2
+                )
+                self.assertEqual(
+                    json.loads((directory / f"{slug}.ipynb").read_text())["nbformat"], 4
+                )
+
     def test_concurrent_exports_preserve_every_generation(self):
         with ThreadPoolExecutor(max_workers=6) as pool:
             paths = list(

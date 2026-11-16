@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Reject duplicate notebook JSON members and lone surrogates in cell sources/output
+  text before rendering; return the repairable HTTP 422 page and preserve edited bytes.
+
 - Keep task dispatch, claims, logs, metadata and outcomes on the saved database alias;
   allow explicit alias selection for worker execution and operator recovery.
 - Fence worker publications by their running claim so operator recovery remains

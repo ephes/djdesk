@@ -426,10 +426,25 @@ class InvalidNotebookError(ValueError):
     """The edited export cannot be rendered by the notebook viewer."""
 
 
+def _unique_notebook_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise InvalidNotebookError("Notebook JSON members must be unique.")
+        result[key] = value
+    return result
+
+
 def _is_notebook_text(value: Any) -> bool:
-    return isinstance(value, str) or (
-        isinstance(value, list) and all(isinstance(line, str) for line in value)
-    )
+    lines = [value] if isinstance(value, str) else value
+    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
+        return False
+    try:
+        for line in lines:
+            line.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
@@ -450,7 +465,7 @@ def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
             raise FileNotFoundError(
                 "Notebook kept changing while reading; finish editing and reload."
             )
-        notebook = json.loads(content.decode("utf-8"))
+        notebook = json.loads(content.decode("utf-8"), object_pairs_hook=_unique_notebook_members)
     except (ValueError, RecursionError) as exc:
         raise InvalidNotebookError("Notebook is not valid UTF-8 JSON.") from exc
     if not isinstance(notebook, dict) or not isinstance(notebook.get("cells", []), list):

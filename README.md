@@ -287,7 +287,10 @@ The listing and viewer accept only regular files directly inside the workspace e
 directory. Notebook symlinks (including internal links) and symlinked workspace export
 directories are refused. Where supported, directory-relative opens with no symlink following
 bind these checks to the opened descriptors; other systems check file identity around the open.
-Invalid UTF-8, JSON or viewer cell/output shapes return a bounded HTTP 422 repair page.
+Invalid UTF-8, ambiguous JSON (duplicate members at any nesting level), or invalid
+viewer cell/output shapes return a bounded HTTP 422 repair page. Consumed sources and
+output text must contain Unicode scalar values; escaped lone surrogates are refused.
+Ordinary Unicode, including emoji, combining characters and newlines, is preserved.
 Edit the original file and reload; the viewer preserves its bytes and escapes rendered text.
 The viewer reads bytes up to the opened file's initial size plus one, comparing descriptor
 size, nanosecond mtime and ctime before and after the read, before decoding UTF-8 or JSON.

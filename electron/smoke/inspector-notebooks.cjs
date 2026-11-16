@@ -119,7 +119,11 @@ async function main() {
     assert.equal(await page.evaluate(() => ui.dataLabList.innerHTML), inventory.list);
     assert.equal(await page.evaluate(() => ui.dataLabForm.querySelector('select').innerHTML), inventory.templates);
     assert.equal(await page.locator('[data-data-lab-incomplete]').isVisible(), true);
-    assert.match(await page.frameLocator('[data-data-lab-frame]').locator('h1').textContent(), /schema-audit-2/);
+    // The viewer heading is the template title; the published slug is in the frame URL.
+    assert.equal(new URL(await page.locator('[data-data-lab-frame]').getAttribute('src'), origin).pathname,
+      fixture.receipt.data_lab.selected_notebook_url);
+    assert.match(fixture.receipt.data_lab.selected_notebook_url, /schema-audit-2/);
+    assert.equal(await page.frameLocator('[data-data-lab-frame]').locator('h1').textContent(), 'Schema audit starter');
     console.log('Committed export receipt DOM passed: published viewer, retained inventory/templates, one POST');
 
     // The rendered dashboard carries the server-derived ceiling (default settings).

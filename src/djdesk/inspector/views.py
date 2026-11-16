@@ -4,11 +4,13 @@ import logging
 import mimetypes
 import posixpath
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 from django import forms
 from django.conf import settings
 from django.contrib import messages
+from django.core.paginator import Paginator
+from django.db.models import Q
 from django.http import (
     FileResponse,
     Http404,
@@ -40,13 +42,31 @@ class DashboardView(TemplateView):
     """Convexity-inspired inspector canvas."""
 
     template_name = "inspector/dashboard.html"
+    workspace_page_size = 50
 
     def get_context_data(self, **kwargs: Any) -> dict[str, Any]:
         context = super().get_context_data(**kwargs)
-        workspaces = list(
-            Workspace.objects.only("id", "name", "slug", "project_path").order_by("name", "pk")
+        selector = Workspace.objects.only("id", "name", "slug", "project_path").order_by(
+            "name", "pk"
         )
-        workspace = self._resolve_workspace(workspaces)
+        workspace = self._resolve_workspace(selector)
+        search = self.request.GET.get("workspace_search", "").strip()[:120]
+        if search:
+            selector = selector.filter(
+                Q(name__icontains=search) | Q(project_path__icontains=search)
+            )
+        page = Paginator(selector, self.workspace_page_size).get_page(
+            self.request.GET.get("workspace_page")
+        )
+
+        def page_url(number):
+            params = {"workspace_page": number}
+            if workspace:
+                params["workspace"] = workspace.slug
+            if search:
+                params["workspace_search"] = search
+            return "?" + urlencode(params)
+
         scans, tasks = [], []
         if workspace:
             workspace, scans, tasks = workspace_snapshot(workspace)
@@ -61,7 +81,13 @@ class DashboardView(TemplateView):
         context.update(
             {
                 "workspace": workspace,
-                "workspaces": workspaces,
+                "workspaces": list(page.object_list),
+                "workspace_page": page,
+                "workspace_search": search,
+                "workspace_next_url": page_url(page.next_page_number()) if page.has_next() else "",
+                "workspace_previous_url": (
+                    page_url(page.previous_page_number()) if page.has_previous() else ""
+                ),
                 "recent_scans": scans,
                 "recent_task_runs": tasks,
                 "docs_base_url": docs_source["base_url"],
@@ -90,8 +116,8 @@ class DashboardView(TemplateView):
     def _resolve_workspace(self, workspaces: Any) -> Workspace | None:
         slug = self.request.GET.get("workspace")
         if slug:
-            return next((ws for ws in workspaces if ws.slug == slug), None)
-        return next(iter(workspaces), None)
+            return workspaces.filter(slug=slug).first()
+        return workspaces.first()
 
     def _docs_source(self) -> dict[str, Any]:
         offline = assets.docs_bundle_available()

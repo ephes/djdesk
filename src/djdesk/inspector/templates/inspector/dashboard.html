@@ -44,18 +44,29 @@
                         <span>Workspaces</span>
                         <a href="{% url 'inspector:wizard' %}">New</a>
                     </div>
+                    <form method="get">
+                        {% if workspace %}<input type="hidden" name="workspace" value="{{ workspace.slug }}">{% endif %}
+                        <label for="workspace-search">Find a workspace</label>
+                        <input id="workspace-search" name="workspace_search" type="search" maxlength="120" value="{{ workspace_search }}" placeholder="Name or path">
+                        <button type="submit">Search</button>
+                    </form>
                     <ul class="workspace-list">
                         {% for ws in workspaces %}
                         <li class="workspace-list-item {% if ws.pk == workspace.pk %}is-active{% endif %}">
-                            <a href="?workspace={{ ws.slug }}">
+                            <a href="{% querystring workspace=ws.slug %}">
                                 <span class="workspace-name">{{ ws.name }}</span>
                                 <span class="workspace-path">{{ ws.project_path }}</span>
                             </a>
                         </li>
                         {% empty %}
-                        <li class="workspace-list-item is-empty">No workspaces yet.</li>
+                        <li class="workspace-list-item is-empty">{% if workspace_search %}No matching workspaces.{% else %}No workspaces yet.{% endif %}</li>
                         {% endfor %}
                     </ul>
+                    <nav aria-label="Workspace pages">
+                        {% if workspace_previous_url %}<a href="{{ workspace_previous_url }}">Previous</a>{% endif %}
+                        <span>Page {{ workspace_page.number }} of {{ workspace_page.paginator.num_pages }}</span>
+                        {% if workspace_next_url %}<a href="{{ workspace_next_url }}">Next</a>{% endif %}
+                    </nav>
                 </div>
                 <div class="rail-section">
                     <div class="workspace-dropzone" data-dropzone>

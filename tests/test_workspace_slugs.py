@@ -68,8 +68,8 @@ class PostgresSlugCollisionTests(TransactionTestCase):
         generate = Workspace._generate_unique_slug
         seen = threading.local()
 
-        def generate_together(workspace):
-            slug = generate(workspace)
+        def generate_together(workspace, *, using):
+            slug = generate(workspace, using=using)
             if not getattr(seen, "waited", False):
                 seen.waited = True
                 barrier.wait(timeout=10)

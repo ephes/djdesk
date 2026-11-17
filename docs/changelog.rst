@@ -211,6 +211,21 @@ Added
 Security
 ~~~~~~~~
 
+- Remove native browser dispatch from all popup requests, including remote docs,
+  missing referrers and trusted-looking referrers. Deliberate app outbound links
+  retain the sender-validated IPC bridge and HTTP(S) allowlist. Extend the installed
+  handler regressions and real remote-iframe fixture for popup and IPC dispatch.
+  In the shell, Cmd/Ctrl/Shift- and middle-clicked external documentation links open through that
+  bridge and local documentation links open in the drawer, instead of becoming
+  denied popups. Top-level navigations started by embedded documentation (for
+  example ``target="_top"``) are cancelled without system-browser dispatch; only
+  navigations started by the trusted top-level page are handed to the browser.
+
+- Install both Electron session permission handlers before loading the window.
+  Deny all renderer capability requests/checks, including remote documentation,
+  unknown frames and the trusted app; native notifications retain their validated
+  IPC path. Add handler wiring tests and a real remote-iframe Electron fixture.
+
 - Anchor notebook export creation, publication and owned-inode cleanup to the same
   no-follow directory descriptor used by readers. Refuse invalid workspace directory
   names and fail closed before writes where these export facilities are unavailable
@@ -239,7 +254,7 @@ Security
   grouped short options) are refused, so presets can no longer overwrite files.
 - The Electron shell now keeps the privileged window on the exact local Django origin: foreign
   top-level navigations and redirects are cancelled, new windows and ``<webview>`` tags are
-  denied, and external ``http(s)`` links open in the system browser instead.
+  denied, and cancelled top-level ``http(s)`` navigation links open in the system browser instead.
 - ``djdeskNative.openExternal`` only dispatches ``http:``/``https:`` URLs without credentials and,
   like ``djdeskNative.notify``, only answers the top-level frame showing the DJDesk origin, so
   ``file:`` and custom protocol handlers can no longer be launched from page content.

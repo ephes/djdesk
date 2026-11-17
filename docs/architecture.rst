@@ -24,19 +24,40 @@ The window that carries the preload bridge must only ever display the local Djan
 * **Trusted origin.** The only trusted origin is the exact ``http://127.0.0.1:<port>`` the shell
   started Django on. A different port, ``localhost``, or ``https`` does not match.
 * **Navigation and redirects.** Top-level navigations and redirects that leave the trusted origin
-  are cancelled. A cancelled top-level ``http(s)`` link is handed to the system browser instead;
-  redirects are only cancelled. Sub frames (the docs drawer ``<iframe>``) may load the trusted
+  are cancelled. A cancelled top-level ``http(s)`` link is handed to the system browser instead
+  only when the navigation's initiator is the top-level frame showing the trusted origin;
+  navigations started by sub frames (``target="_top"``, ``top.location``) or by an unknown or
+  destroyed initiator are only cancelled, as are redirects. Sub frames (the docs drawer ``<iframe>``) may load the trusted
   origin or plain ``http(s)`` pages, never ``file:``, ``data:``, ``javascript:``, or custom schemes.
 * **New windows.** ``window.open`` and ``target="_blank"`` never create an Electron window.
-  ``http(s)`` targets (local DJDesk pages included) open in the system browser; everything else
-  is dropped. ``<webview>``
-  attachment is blocked.
+  They also never dispatch to the system browser, including local DJDesk targets,
+  trusted-looking referrers and requests without referrers. Popup details do not
+  authenticate the requesting frame. Deliberate app outbound links use
+  ``djdeskNative.openExternal`` and its validated IPC sender instead; this includes
+  Cmd/Ctrl/Shift- and middle-clicked external inspector documentation links (local documentation links
+  open in the drawer).
+  ``<webview>`` attachment is blocked.
 * **IPC senders.** ``djdesk:open-external`` and ``djdesk:notify`` only answer the top-level frame
   while it displays the trusted origin. Sub frames and foreign pages get ``false``.
+* **Session capabilities.** Both public session permission-request and permission-check
+  handlers are installed before ``loadURL``. Their allowlist is empty: all renderer
+  permissions are denied, even for the trusted app, unknown requesters or destroyed
+  frames. DJDesk needs no camera, microphone, geolocation or Web Notification grants.
+  Desktop notifications use the validated main-process IPC path instead. A future
+  capability requires explicit admission and requester validation in both handlers;
+  loading remote documentation grants no OS capabilities.
 * **URL dispatch.** ``shell.openExternal`` only receives ``http:``/``https:`` URLs without embedded
   credentials, so ``file:`` paths and custom protocol handlers cannot be launched from the page.
 
 ``just electron-test`` runs the guard tests under ``electron/test/`` with ``node --test``.
+With the Electron development dependencies installed, ``cd electron && npm run test:frames``
+also exercises an actual remote iframe on a second synthetic loopback origin. It checks
+permission denials and the notification bridge without using real media devices or
+displaying OS notifications. Remote/no-referrer and trusted-page popup links exercise
+the installed handler without creating windows or native side effects. A remote
+``target="_top"`` link is cancelled without dispatch, while a trusted top-level link and
+a trusted IPC outbound link each dispatch exactly once to an inert shell recorder. Use a graphical
+session or Xvfb on headless Linux.
 
 Renderer data flow
 ------------------

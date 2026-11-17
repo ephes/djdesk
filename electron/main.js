@@ -7,6 +7,7 @@ const {
   buildTrustedOrigin,
   createOpenExternalHandler,
   installNavigationGuards,
+  installSessionPermissionGuards,
   isTrustedSender,
 } = require('./boundary-guards');
 
@@ -260,6 +261,7 @@ function createWindow() {
   });
 
   // Keep the privileged window on the local Django origin (see boundary-guards.js).
+  installSessionPermissionGuards(mainWindow.webContents.session);
   installNavigationGuards(mainWindow.webContents, { shell, getTrustedOrigin });
 
   mainWindow.loadURL(`${getTrustedOrigin()}/`);

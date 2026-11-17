@@ -127,6 +127,23 @@ function eventIsMainFrame(event, legacyIsMainFrame) {
 }
 
 /**
+ * True only when a navigation was started by the top-level frame while it
+ * displays the trusted origin. Sub frames (remote docs), unknown, missing or
+ * destroyed initiators fail closed.
+ */
+function isTrustedInitiator(event, trustedOrigin) {
+  try {
+    const frame = event?.initiator;
+    if (!frame || frame.parent || typeof frame.url !== 'string') {
+      return false;
+    }
+    return isTrustedUrl(frame.url, trustedOrigin);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Decide what to do with a navigation or redirect target.
  *
  * - main frame: only the trusted origin may load.
@@ -151,6 +168,15 @@ function isNavigationAllowed(url, isMainFrame, trustedOrigin) {
 }
 
 /**
+ * No renderer capability grants are required, including on the trusted origin.
+ * Native notifications use sender-validated IPC instead of Web Notifications.
+ */
+function installSessionPermissionGuards(session) {
+  session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  session.setPermissionCheckHandler(() => false);
+}
+
+/**
  * Attach navigation, redirect, popup, and webview restrictions to a
  * webContents instance.
  */
@@ -172,8 +198,13 @@ function installNavigationGuards(webContents, { shell, getTrustedOrigin, logger 
     event.preventDefault();
     logger.warn(`Blocked ${isMainFrame ? 'window' : 'frame'} ${kind} outside the DJDesk origin`);
     if (dispatchExternally && isMainFrame) {
-      // A user-facing link to the wider web belongs in the system browser.
-      void openExternalSafely(shell, url, logger);
+      // An app link to the wider web belongs in the system browser; navigations
+      // started by embedded documentation (e.g. target="_top") are only cancelled.
+      if (isTrustedInitiator(event, getTrustedOrigin())) {
+        void openExternalSafely(shell, url, logger);
+      } else {
+        logger.warn('Blocked external dispatch of a navigation not started by the DJDesk page');
+      }
     }
   };
 
@@ -189,19 +220,18 @@ function installNavigationGuards(webContents, { shell, getTrustedOrigin, logger 
     logger.warn('Blocked <webview> attachment');
   });
 
-  webContents.setWindowOpenHandler((details) => {
-    // Never create a second privileged window; http(s) targets (including
-    // local DJDesk pages) open in the system browser, everything else is dropped.
-    void openExternalSafely(shell, details?.url, logger);
-    return { action: 'deny' };
-  });
+  // Popup details do not authenticate a requesting frame. Deliberate app links
+  // use sender-validated open-external IPC; popups never gain a native fallback.
+  webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
 
 module.exports = {
   buildTrustedOrigin,
   createOpenExternalHandler,
   installNavigationGuards,
+  installSessionPermissionGuards,
   isNavigationAllowed,
+  isTrustedInitiator,
   isTrustedSender,
   isTrustedUrl,
   normalizeExternalUrl,

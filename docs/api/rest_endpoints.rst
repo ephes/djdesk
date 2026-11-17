@@ -61,6 +61,10 @@ reopening at most 50 selected files for current admission and modification times
 overlapping a directory change is retried up to three times.
 ``data_lab.notebooks_incomplete`` is true if either limit was reached or some entries
 could not be admitted. All exports remain on disk and direct viewer URLs still work.
+Notebook modification times must be finite and representable as UTC dates in years
+1–9999. An entry outside this display domain is omitted and sets
+``data_lab.notebooks_incomplete`` without interrupting status polling or hiding valid
+siblings. No replacement modification time is invented; a valid epoch time stays exact.
 
 ``POST /api/workspaces/<slug>/data-lab/export/``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

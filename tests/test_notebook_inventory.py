@@ -29,6 +29,61 @@ class NotebookInventoryTests(TestCase):
         future = time.time_ns() + 10 * data_lab.EXPORT_RACY_WINDOW_NS
         return mock.patch.object(data_lab.time, "time_ns", return_value=future)
 
+    def notebook_mtime(self, path, value):
+        identity = path.stat()
+        fstat = os.fstat
+
+        def changed_mtime(fd):
+            info = fstat(fd)
+            if os.path.samestat(identity, info):
+                return os.stat_result((*info[:8], value, info.st_ctime))
+            return info
+
+        return mock.patch.object(data_lab.os, "fstat", side_effect=changed_mtime)
+
+    def test_undisplayable_timestamps_omit_only_the_bad_notebook(self):
+        bad = self.directory / "bad-time.ipynb"
+        bad.write_text('{"cells": []}')
+        good = data_lab.export_notebook(self.workspace, "schema-audit")
+        os.utime(good, (1234567890, 1234567890))
+        status_url = reverse("inspector:workspace-status", args=[self.workspace.slug])
+        for timestamp in (
+            -62135596801,  # Before year 1.
+            253402300800,  # After year 9999.
+            -1e300,
+            1e300,
+            float("nan"),
+            float("-inf"),
+            float("inf"),
+        ):
+            with self.subTest(timestamp=timestamp), self.notebook_mtime(bad, timestamp):
+                exports, incomplete = data_lab.workspace_export_inventory(self.workspace)
+                self.assertEqual([entry["slug"] for entry in exports], ["schema-audit"])
+                self.assertTrue(incomplete)
+                response = self.client.get(status_url)
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()["data_lab"]
+                self.assertEqual([row["slug"] for row in payload["notebooks"]], ["schema-audit"])
+                self.assertEqual(
+                    payload["notebooks"][0]["modified_at"], "2009-02-13T23:31:30+00:00"
+                )
+                self.assertTrue(payload["notebooks_incomplete"])
+
+    def test_displayable_timestamp_boundaries_remain_exact_and_complete(self):
+        path = data_lab.export_notebook(self.workspace, "schema-audit")
+        for timestamp, expected in (
+            (-62135596800, "0001-01-01T00:00:00+00:00"),
+            (0, "1970-01-01T00:00:00+00:00"),
+            (253402300799, "9999-12-31T23:59:59+00:00"),
+        ):
+            with self.subTest(timestamp=timestamp), self.notebook_mtime(path, timestamp):
+                exports, incomplete = data_lab.workspace_export_inventory(self.workspace)
+                self.assertEqual(exports[0]["modified_at"], timestamp)
+                self.assertFalse(incomplete)
+                payload = workspace_data_lab_payload(self.workspace)
+                self.assertEqual(payload["notebooks"][0]["modified_at"], expected)
+                self.assertFalse(payload["notebooks_incomplete"])
+
     def test_large_inventory_has_bounded_work_and_direct_view_remains_available(self):
         for index in range(2000):
             (self.directory / f"notes-{index:04}.ipynb").write_text('{"cells": []}')

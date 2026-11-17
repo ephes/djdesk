@@ -9,6 +9,8 @@ import time
 import uuid
 from collections import OrderedDict
 from contextlib import ExitStack, contextmanager
+from datetime import datetime
+from datetime import timezone as datetime_timezone
 from itertools import islice
 from pathlib import Path
 from typing import Any
@@ -404,7 +406,9 @@ def workspace_export_inventory(workspace: Workspace) -> tuple[list[dict[str, Any
         try:
             with _open_notebook(workspace, path.name) as handle:
                 modified_at = os.fstat(handle.fileno()).st_mtime
-        except FileNotFoundError:
+            # Admit the UTC display domain before a bad timestamp reaches any consumer.
+            datetime.fromtimestamp(modified_at, tz=datetime_timezone.utc)
+        except (OSError, ValueError, OverflowError):
             incomplete = True
             continue
         slug = path.stem

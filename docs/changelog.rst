@@ -7,6 +7,10 @@ Unreleased
 Fixed
 ~~~~~
 
+- Omit notebook inventory entries with nonfinite or undisplayable modification times
+  and report an incomplete inventory, preserving valid siblings and status polling
+  without substituting fabricated dates. Keep representable boundary and epoch times.
+
 - Make task execution history read-only in the admin, preserving worker-owned
   claims, outcomes and provenance against stale or forged forms and arbitrary adds.
 - Refuse workspace/preset single and bulk deletion while task runs are requested

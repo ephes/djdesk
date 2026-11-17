@@ -69,7 +69,13 @@ to lock-file existence markers. A waiting non-force publisher rechecks existence
 after taking the lock; force publishers replace complete generations in serial order.
 Each replacement is written and synced beside the destination first, along with an
 owner-only `.slug.swap.json` intent recording the root, staging and old/new directory
-identities. The rename parents are synced before the old backup is retired. On macOS,
+identities. One root descriptor covers the lock, recovery check and publication.
+Publication and recovery hold no-follow root/staging directory descriptors;
+journal operations, renames, rollback and cleanup use those owners with relative names.
+They recheck named generations before changing names or deleting contents. A replaced
+root, staging name or generation stops publication and retains owned recovery data;
+errors include the recorded path and directory identities if the tree has moved.
+The rename parents are synced before the old backup is retired. On macOS,
 file and directory syncs also use `F_FULLFSYNC` where the filesystem supports it.
 A write failure preserves the old sample; a failed install attempts restoration.
 A sync failure after installation reports that the new sample is already visible but

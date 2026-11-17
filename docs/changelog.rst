@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Anchor sample publication, recovery, rollback and cleanup to held no-follow directory
+  descriptors. Recheck named generations before mutations, refuse replaced namespaces
+  and retain recovery data with directory identity diagnostics instead of following
+  a swapped parent into another tree.
+
 - Index recent scan and task-run history by workspace, creation time and primary key,
   preserving four/five-row windows and deferred logs without sorting full histories.
 

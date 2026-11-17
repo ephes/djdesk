@@ -1,4 +1,5 @@
 import errno
+import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -40,29 +41,29 @@ class SampleRefreshTests(SimpleTestCase):
         )
 
     def test_later_write_failure_preserves_original(self):
-        write_text = Path.write_text
+        open_file = os.open
 
         def fail_later(path, *args, **kwargs):
-            if path.name == "later.txt":
+            if Path(path).name == "later.txt":
                 raise OSError("synthetic disk full")
-            return write_text(path, *args, **kwargs)
+            return open_file(path, *args, **kwargs)
 
-        with mock.patch.object(Path, "write_text", autospec=True, side_effect=fail_later):
+        with mock.patch.object(os, "open", side_effect=fail_later):
             with self.assertRaisesRegex(OSError, "synthetic disk full"):
                 samples.ensure_sample_projects(self.root, force=True)
         self.assert_original()
 
     def test_publication_failure_rolls_back(self):
-        rename = Path.rename
+        rename = os.rename
         attempted = []
 
-        def fail_publish(path, target):
-            if path.name == "replacement":
+        def fail_publish(path, target, **kwargs):
+            if path == "replacement":
                 attempted.append(path)
                 raise OSError("synthetic rename failure")
-            return rename(path, target)
+            return rename(path, target, **kwargs)
 
-        with mock.patch.object(Path, "rename", autospec=True, side_effect=fail_publish):
+        with mock.patch.object(os, "rename", side_effect=fail_publish):
             with self.assertRaisesRegex(OSError, "synthetic rename failure"):
                 samples.ensure_sample_projects(self.root, force=True)
         self.assertEqual(len(attempted), 1)
@@ -81,14 +82,14 @@ class SampleRefreshTests(SimpleTestCase):
         )
 
     def test_failed_rollback_retains_recovery_copy(self):
-        rename = Path.rename
+        rename = os.rename
 
-        def fail_publish_and_restore(path, target):
-            if path.name in {"replacement", "backup"}:
+        def fail_publish_and_restore(path, target, **kwargs):
+            if path in {"replacement", "backup"}:
                 raise OSError("synthetic publication and rollback failure")
-            return rename(path, target)
+            return rename(path, target, **kwargs)
 
-        with mock.patch.object(Path, "rename", autospec=True, side_effect=fail_publish_and_restore):
+        with mock.patch.object(os, "rename", side_effect=fail_publish_and_restore):
             with self.assertRaisesRegex(OSError, "rollback failure"):
                 samples.ensure_sample_projects(self.root, force=True)
         backups = list(self.root.glob(".fixture-*/backup"))

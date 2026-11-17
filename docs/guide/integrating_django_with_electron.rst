@@ -214,7 +214,8 @@ deliberately retrying, since a retry creates another file. There is no automatic
 Success and error replies share the Inspector's ``DJDESK_INSPECTOR_RESPONSE_BYTES``
 ceiling before JSON parsing, even with missing or inaccurate ``Content-Length``.
 Overflow cancels the read, preserves notebook selection and reports the same uncertain
-outcome. Small HTTP error diagnostics remain visible in the form's notification.
+outcome. Small HTTP error diagnostics remain visible in the form's notification. A
+parsed 4xx reply is a definite refusal and omits the uncertainty guidance.
 
 Exports fsync an owner-only hidden ``.notebook-*.tmp`` file, then publish a hard link
 atomically without overwriting another file. Polling sees only complete exports.

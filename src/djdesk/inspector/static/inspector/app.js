@@ -382,7 +382,11 @@ class InspectorUI {
               throw new Error('Notebook export response timed out.');
             }
             const payload = await readInspectorJSON(response, this.responseBytes, { allowHttpError: true });
-            if (!response.ok) throw new Error(this.formatErrors(payload.errors));
+            if (!response.ok) {
+              // A parsed 4xx is a definite refusal before any export was written.
+              throw Object.assign(new Error(this.formatErrors(payload?.errors)),
+                { refused: response.status >= 400 && response.status < 500 });
+            }
             return payload;
           })();
           // Race the whole read so even an unresponsive transport releases the form.
@@ -393,7 +397,8 @@ class InspectorUI {
             this.updateDataLab(payload.data_lab || null);
           }
         } catch (error) {
-          this.showToast(`${error.message || 'Unable to export notebook.'} `
+          const message = error.message || 'Unable to export notebook.';
+          this.showToast(error.refused ? message : `${message} `
             + 'The export may already have completed. Inspect the notebook listing or export directory '
             + 'before a deliberate retry; retrying creates another file.', 'danger');
         } finally {

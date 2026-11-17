@@ -14,6 +14,7 @@ Fixed
 - Bound notebook export acknowledgement to 30 seconds across request and body reads.
   Abort timed-out requests, restore form controls and ignore late success without
   automatic retries; explain the uncertain outcome and inspection before retrying.
+  Parsed 4xx refusals stay definite and omit that guidance.
 
 - Anchor sample publication, recovery, rollback and cleanup to held no-follow directory
   descriptors. Recheck named generations before mutations, refuse replaced namespaces

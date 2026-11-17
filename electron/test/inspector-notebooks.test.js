@@ -101,7 +101,12 @@ test('export accepts exact byte limit with split Unicode and retains bounded HTT
   requests[1].resolve(jsonResponse({ errors: { template: ['Synthetic refusal'] } }, 400));
   await refused;
   assert.match(toasts.at(-1).message, /Synthetic refusal/);
+  assert.doesNotMatch(toasts.at(-1).message, /may already have completed/, 'a 4xx refusal is definite');
   assert.equal(ui.activeNotebookSlug, 'é€');
+  const durability = submit();
+  requests[2].resolve(jsonResponse({ errors: { template: ['Synthetic durability'] } }, 500));
+  await durability;
+  assert.match(toasts.at(-1).message, /Synthetic durability.*may already have completed/);
 });
 
 for (const stage of ['headers', 'body']) {

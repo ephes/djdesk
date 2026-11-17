@@ -334,6 +334,8 @@ One 30-second deadline covers the POST and its response body. Timeout aborts the
 restores the controls and ignores late acknowledgements. A missing acknowledgement does
 not prove the export failed: inspect the notebook listing or export directory before
 a deliberate retry, which creates another file. The form never repeats the POST itself.
+A parsed 4xx reply (for example an invalid template) is a definite refusal and is
+shown without that guidance.
 A successful HTTP 201 is a receipt for an already published and synced notebook. If the
 optional workspace/inventory refresh or its serialization fails, the response still
 returns `data_lab.selected_notebook` and `data_lab.selected_notebook_url`. The drawer

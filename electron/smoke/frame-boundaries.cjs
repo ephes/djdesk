@@ -19,9 +19,12 @@ async function main() {
   const servers = [];
   let app;
   try {
-    const remote = await serve('<h1>Remote synthetic documentation</h1>');
+    const remote = await serve(`<h1>Remote synthetic documentation</h1>
+      <a id="remote-popup" target="_blank" href="https://popup.invalid/remote">Popup</a>
+      <a id="anonymous-popup" target="_blank" rel="noreferrer" href="https://popup.invalid/anonymous">No referrer</a>`);
     servers.push(remote.server);
     const trusted = await serve(`<h1>Synthetic DJDesk</h1>
+      <a id="trusted-popup" target="_blank" href="https://popup.invalid/trusted">Popup</a>
       <iframe src="${remote.origin}/docs" allow="camera; microphone; geolocation"></iframe>`);
     servers.push(trusted.server);
     app = await electron.launch({
@@ -69,7 +72,20 @@ async function main() {
     assert.deepEqual(await app.evaluate(() => global.frameFixture.notifications), [
       { title: 'Synthetic task', body: 'Done' },
     ]);
-    console.log('Electron remote iframe passed: docs load, capabilities denied, native bridge retained');
+    await frame.locator('#remote-popup').click();
+    await frame.locator('#anonymous-popup').click();
+    await page.locator('#trusted-popup').click();
+    const popups = await app.evaluate(() => global.frameFixture.popups);
+    assert.equal(popups.length, 3, 'exercise the installed handler, not browser popup blocking');
+    assert.ok(popups.some((entry) => entry.referrer.url.startsWith(remote.origin)));
+    assert.ok(popups.some((entry) => !entry.referrer.url), 'include a real no-referrer popup');
+    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened), []);
+    assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+    assert.equal(await page.evaluate(() => window.djdeskNative.openExternal('https://docs.invalid/')), true);
+    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened), ['https://docs.invalid/']);
+    assert.equal(await page.evaluate(() => window.djdeskNative.openExternal('file:///synthetic')), false);
+    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened), ['https://docs.invalid/']);
+    console.log('Electron remote iframe passed: docs, denied capabilities/popups, validated native bridges');
   } finally {
     try { await app?.close(); }
     finally {

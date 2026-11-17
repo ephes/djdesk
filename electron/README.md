@@ -84,6 +84,13 @@ requesters receive the same denial as the trusted app. Native notifications stil
 use the existing sender-validated `djdeskNative.notify` IPC path. Adding a renderer
 capability requires an explicit policy change and requester validation in both handlers.
 
+Popups (`window.open`, `target="_blank"`, including local app targets) are denied
+without calling the system browser. A popup's destination or referrer does not
+authenticate its requester. Deliberate app outbound links use
+`djdeskNative.openExternal`, which validates the live top-level sender and accepts
+only credential-free HTTP(S) URLs. Remote documentation cannot use this bridge;
+its popup links, including no-referrer links, have no native fallback.
+
 ```bash
 cd electron
 npm ci --omit=dev --ignore-scripts  # runtime modules only; does not install Electron
@@ -114,6 +121,9 @@ npm run test:frames
 It serves invented app and documentation pages on two loopback origins using a
 temporary profile. It checks real camera/microphone, geolocation and notification
 denials, documentation rendering and the isolated native notification bridge.
+It also exercises actual remote, no-referrer and trusted-page popup callbacks,
+checks that no new window or native dispatch occurs, and verifies a trusted IPC
+outbound link dispatches exactly once while unsafe schemes remain blocked.
 Media devices are synthetic; native notification delivery is recorded rather than
 shown. No system browser is opened. A graphical Electron session is required
 (on headless Linux, use `xvfb-run -a npm run test:frames`). This runtime check is

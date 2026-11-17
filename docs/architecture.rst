@@ -28,9 +28,11 @@ The window that carries the preload bridge must only ever display the local Djan
   redirects are only cancelled. Sub frames (the docs drawer ``<iframe>``) may load the trusted
   origin or plain ``http(s)`` pages, never ``file:``, ``data:``, ``javascript:``, or custom schemes.
 * **New windows.** ``window.open`` and ``target="_blank"`` never create an Electron window.
-  ``http(s)`` targets (local DJDesk pages included) open in the system browser; everything else
-  is dropped. ``<webview>``
-  attachment is blocked.
+  They also never dispatch to the system browser, including local DJDesk targets,
+  trusted-looking referrers and requests without referrers. Popup details do not
+  authenticate the requesting frame. Deliberate app outbound links use
+  ``djdeskNative.openExternal`` and its validated IPC sender instead.
+  ``<webview>`` attachment is blocked.
 * **IPC senders.** ``djdesk:open-external`` and ``djdesk:notify`` only answer the top-level frame
   while it displays the trusted origin. Sub frames and foreign pages get ``false``.
 * **Session capabilities.** Both public session permission-request and permission-check
@@ -47,7 +49,10 @@ The window that carries the preload bridge must only ever display the local Djan
 With the Electron development dependencies installed, ``cd electron && npm run test:frames``
 also exercises an actual remote iframe on a second synthetic loopback origin. It checks
 permission denials and the notification bridge without using real media devices or
-displaying OS notifications. Use a graphical session or Xvfb on headless Linux.
+displaying OS notifications. Remote/no-referrer and trusted-page popup links exercise
+the installed handler without creating windows or native side effects; a trusted
+IPC outbound link dispatches exactly once to an inert shell recorder. Use a graphical
+session or Xvfb on headless Linux.
 
 Renderer data flow
 ------------------

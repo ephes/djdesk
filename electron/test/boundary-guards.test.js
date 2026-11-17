@@ -285,16 +285,15 @@ test('sub frames may load http(s) docs but not local or custom schemes', async (
   assert.deepEqual(shell.opened, []);
 });
 
-test('popups are always denied; http(s) targets open in the browser', async () => {
+test('popups never dispatch externally, regardless of target or claimed referrer', async () => {
   const { contents, shell } = guardedContents();
-  assert.deepEqual(contents.windowOpenHandler({ url: 'https://example.com/docs' }), { action: 'deny' });
-  assert.deepEqual(contents.windowOpenHandler({ url: 'file:///etc/passwd' }), { action: 'deny' });
-  assert.deepEqual(contents.windowOpenHandler({ url: 'custom://x' }), { action: 'deny' });
-  assert.deepEqual(contents.windowOpenHandler({ url: `${TRUSTED}/admin/` }), { action: 'deny' });
-  assert.deepEqual(contents.windowOpenHandler({ url: 'about:blank' }), { action: 'deny' });
-  assert.deepEqual(contents.windowOpenHandler({}), { action: 'deny' });
+  for (const referrer of [undefined, { url: '' }, { url: 'https://remote-docs.invalid/' }, { url: `${TRUSTED}/` }]) {
+    for (const url of ['https://example.com/docs', `${TRUSTED}/admin/`, 'file:///etc/passwd', 'custom://x', 'about:blank', undefined]) {
+      assert.deepEqual(contents.windowOpenHandler({ url, referrer }), { action: 'deny' });
+    }
+  }
   await flush();
-  assert.deepEqual(shell.opened, ['https://example.com/docs', `${TRUSTED}/admin/`]);
+  assert.deepEqual(shell.opened, []);
 });
 
 test('webview attachment is blocked', () => {

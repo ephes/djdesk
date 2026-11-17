@@ -2,15 +2,16 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('node:path');
 const {
-  installNavigationGuards, installSessionPermissionGuards, isTrustedSender,
+  createOpenExternalHandler, installNavigationGuards, installSessionPermissionGuards, isTrustedSender,
 } = require('../boundary-guards');
 
 app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 const origin = process.env.DJDESK_TEST_APP_ORIGIN;
-global.frameFixture = { checks: [], requests: [], notifications: [] };
+global.frameFixture = { checks: [], requests: [], notifications: [], opened: [], popups: [] };
+let window;
 
 app.whenReady().then(async () => {
-  const window = new BrowserWindow({
+  window = new BrowserWindow({
     show: false,
     webPreferences: {
       preload: path.join(__dirname, '../preload.cjs'),
@@ -33,10 +34,22 @@ app.whenReady().then(async () => {
       });
     },
   });
-  installNavigationGuards(window.webContents, {
+  const shell = { async openExternal(url) { global.frameFixture.opened.push(url); } };
+  installNavigationGuards({
+    on: window.webContents.on.bind(window.webContents),
+    setWindowOpenHandler(handler) {
+      window.webContents.setWindowOpenHandler((details) => {
+        global.frameFixture.popups.push({ url: details.url, referrer: details.referrer });
+        return handler(details);
+      });
+    },
+  }, {
     getTrustedOrigin: () => origin,
-    shell: { openExternal() { throw new Error('Unexpected external dispatch'); } },
+    shell,
   });
+  ipcMain.handle('djdesk:open-external', createOpenExternalHandler({
+    shell, getTrustedOrigin: () => origin,
+  }));
   ipcMain.handle('djdesk:notify', (event, options) => {
     if (!isTrustedSender(event, origin)) return false;
     global.frameFixture.notifications.push(options);

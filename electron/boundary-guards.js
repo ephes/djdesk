@@ -198,12 +198,9 @@ function installNavigationGuards(webContents, { shell, getTrustedOrigin, logger 
     logger.warn('Blocked <webview> attachment');
   });
 
-  webContents.setWindowOpenHandler((details) => {
-    // Never create a second privileged window; http(s) targets (including
-    // local DJDesk pages) open in the system browser, everything else is dropped.
-    void openExternalSafely(shell, details?.url, logger);
-    return { action: 'deny' };
-  });
+  // Popup details do not authenticate a requesting frame. Deliberate app links
+  // use sender-validated open-external IPC; embeds never gain a native fallback.
+  webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
 
 module.exports = {

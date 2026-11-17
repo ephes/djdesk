@@ -133,3 +133,18 @@ test('window session policies precede loading and preserve validated native noti
   assert.equal(await notify(frameEvent(window.loaded[0]), { title: 'Synthetic task', body: 'Done' }), true);
   assert.deepEqual(notifications, [{ title: 'Synthetic task', body: 'Done' }]);
 });
+
+test('installed popup handler has no native dispatch; trusted outbound IPC dispatches once', async () => {
+  const { setPort, createWindow, windows, handlers, opened } = loadMain();
+  setPort(8000);
+  createWindow();
+  const popup = windows[0].webContents.windowOpenHandler;
+  for (const referrer of [undefined, { url: '' }, { url: 'https://remote-docs.invalid/' }, { url: 'http://127.0.0.1:8000/' }]) {
+    assert.deepEqual(popup({ url: 'https://popup.invalid/', referrer }), { action: 'deny' });
+  }
+  assert.deepEqual(opened, []);
+  assert.equal(await handlers.get('djdesk:open-external')(
+    frameEvent('http://127.0.0.1:8000/'), 'https://docs.invalid/'
+  ), true);
+  assert.deepEqual(opened, ['https://docs.invalid/']);
+});

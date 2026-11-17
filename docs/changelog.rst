@@ -211,6 +211,11 @@ Added
 Security
 ~~~~~~~~
 
+- Remove native browser dispatch from all popup requests, including remote docs,
+  missing referrers and trusted-looking referrers. Deliberate app outbound links
+  retain the sender-validated IPC bridge and HTTP(S) allowlist. Extend the installed
+  handler regressions and real remote-iframe fixture for popup and IPC dispatch.
+
 - Install both Electron session permission handlers before loading the window.
   Deny all renderer capability requests/checks, including remote documentation,
   unknown frames and the trusted app; native notifications retain their validated
@@ -244,7 +249,7 @@ Security
   grouped short options) are refused, so presets can no longer overwrite files.
 - The Electron shell now keeps the privileged window on the exact local Django origin: foreign
   top-level navigations and redirects are cancelled, new windows and ``<webview>`` tags are
-  denied, and external ``http(s)`` links open in the system browser instead.
+  denied, and cancelled top-level ``http(s)`` navigation links open in the system browser instead.
 - ``djdeskNative.openExternal`` only dispatches ``http:``/``https:`` URLs without credentials and,
   like ``djdeskNative.notify``, only answers the top-level frame showing the DJDesk origin, so
   ``file:`` and custom protocol handlers can no longer be launched from page content.

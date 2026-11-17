@@ -21,10 +21,12 @@ async function main() {
   try {
     const remote = await serve(`<h1>Remote synthetic documentation</h1>
       <a id="remote-popup" target="_blank" href="https://popup.invalid/remote">Popup</a>
-      <a id="anonymous-popup" target="_blank" rel="noreferrer" href="https://popup.invalid/anonymous">No referrer</a>`);
+      <a id="anonymous-popup" target="_blank" rel="noreferrer" href="https://popup.invalid/anonymous">No referrer</a>
+      <a id="remote-top" target="_top" href="https://top.invalid/remote">Top</a>`);
     servers.push(remote.server);
     const trusted = await serve(`<h1>Synthetic DJDesk</h1>
       <a id="trusted-popup" target="_blank" href="https://popup.invalid/trusted">Popup</a>
+      <a id="trusted-top" href="https://top.invalid/trusted">Top</a>
       <iframe src="${remote.origin}/docs" allow="camera; microphone; geolocation"></iframe>`);
     servers.push(trusted.server);
     app = await electron.launch({
@@ -81,11 +83,35 @@ async function main() {
     assert.ok(popups.some((entry) => !entry.referrer.url), 'include a real no-referrer popup');
     assert.deepEqual(await app.evaluate(() => global.frameFixture.opened), []);
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+    const navigationTo = (url) => app.evaluate(async (_electron, target) => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const entry = global.frameFixture.navigations.find((item) => item.url === target);
+        if (entry) return entry;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      return null;
+    }, url);
+    // A remote docs frame navigating the top-level window is cancelled, never dispatched.
+    await frame.locator('#remote-top').click({ noWaitAfter: true });
+    const remoteTop = await navigationTo('https://top.invalid/remote');
+    assert.ok(remoteTop, 'exercise the installed will-navigate handler');
+    assert.ok(remoteTop.initiator?.startsWith(remote.origin), JSON.stringify(remoteTop));
+    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened), []);
+    assert.equal(page.url(), `${trusted.origin}/`);
+    // A top-level app link is cancelled in the window and handed to the browser once.
+    await page.evaluate(() => document.getElementById('trusted-top').click());
+    const trustedTop = await navigationTo('https://top.invalid/trusted');
+    assert.ok(trustedTop?.initiator?.startsWith(trusted.origin), JSON.stringify(trustedTop));
+    await page.waitForTimeout(100);
+    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened), ['https://top.invalid/trusted']);
+    assert.equal(page.url(), `${trusted.origin}/`);
     assert.equal(await page.evaluate(() => window.djdeskNative.openExternal('https://docs.invalid/')), true);
-    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened), ['https://docs.invalid/']);
+    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened),
+      ['https://top.invalid/trusted', 'https://docs.invalid/']);
     assert.equal(await page.evaluate(() => window.djdeskNative.openExternal('file:///synthetic')), false);
-    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened), ['https://docs.invalid/']);
-    console.log('Electron remote iframe passed: docs, denied capabilities/popups, validated native bridges');
+    assert.deepEqual(await app.evaluate(() => global.frameFixture.opened),
+      ['https://top.invalid/trusted', 'https://docs.invalid/']);
+    console.log('Electron remote iframe passed: docs, denied capabilities/popups/top navigation, validated native bridges');
   } finally {
     try { await app?.close(); }
     finally {

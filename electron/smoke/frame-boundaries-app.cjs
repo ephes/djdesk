@@ -7,7 +7,9 @@ const {
 
 app.commandLine.appendSwitch('use-fake-device-for-media-stream');
 const origin = process.env.DJDESK_TEST_APP_ORIGIN;
-global.frameFixture = { checks: [], requests: [], notifications: [], opened: [], popups: [] };
+global.frameFixture = {
+  checks: [], requests: [], notifications: [], opened: [], popups: [], navigations: [],
+};
 let window;
 
 app.whenReady().then(async () => {
@@ -36,7 +38,14 @@ app.whenReady().then(async () => {
   });
   const shell = { async openExternal(url) { global.frameFixture.opened.push(url); } };
   installNavigationGuards({
-    on: window.webContents.on.bind(window.webContents),
+    on(name, handler) {
+      window.webContents.on(name, (event, ...rest) => {
+        if (name === 'will-navigate') {
+          global.frameFixture.navigations.push({ url: event.url, initiator: event.initiator?.url ?? null });
+        }
+        return handler(event, ...rest);
+      });
+    },
     setWindowOpenHandler(handler) {
       window.webContents.setWindowOpenHandler((details) => {
         global.frameFixture.popups.push({ url: details.url, referrer: details.referrer });

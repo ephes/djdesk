@@ -127,6 +127,23 @@ function eventIsMainFrame(event, legacyIsMainFrame) {
 }
 
 /**
+ * True only when a navigation was started by the top-level frame while it
+ * displays the trusted origin. Sub frames (remote docs), unknown, missing or
+ * destroyed initiators fail closed.
+ */
+function isTrustedInitiator(event, trustedOrigin) {
+  try {
+    const frame = event?.initiator;
+    if (!frame || frame.parent || typeof frame.url !== 'string') {
+      return false;
+    }
+    return isTrustedUrl(frame.url, trustedOrigin);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Decide what to do with a navigation or redirect target.
  *
  * - main frame: only the trusted origin may load.
@@ -181,8 +198,13 @@ function installNavigationGuards(webContents, { shell, getTrustedOrigin, logger 
     event.preventDefault();
     logger.warn(`Blocked ${isMainFrame ? 'window' : 'frame'} ${kind} outside the DJDesk origin`);
     if (dispatchExternally && isMainFrame) {
-      // A user-facing link to the wider web belongs in the system browser.
-      void openExternalSafely(shell, url, logger);
+      // An app link to the wider web belongs in the system browser; navigations
+      // started by embedded documentation (e.g. target="_top") are only cancelled.
+      if (isTrustedInitiator(event, getTrustedOrigin())) {
+        void openExternalSafely(shell, url, logger);
+      } else {
+        logger.warn('Blocked external dispatch of a navigation not started by the DJDesk page');
+      }
     }
   };
 
@@ -199,7 +221,7 @@ function installNavigationGuards(webContents, { shell, getTrustedOrigin, logger 
   });
 
   // Popup details do not authenticate a requesting frame. Deliberate app links
-  // use sender-validated open-external IPC; embeds never gain a native fallback.
+  // use sender-validated open-external IPC; popups never gain a native fallback.
   webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 }
 
@@ -209,6 +231,7 @@ module.exports = {
   installNavigationGuards,
   installSessionPermissionGuards,
   isNavigationAllowed,
+  isTrustedInitiator,
   isTrustedSender,
   isTrustedUrl,
   normalizeExternalUrl,

@@ -30,16 +30,21 @@ function clickDocLink({ bridge, external, modifier }) {
   return { opened, drawer, prevented: event.prevented };
 }
 
-test('modifier-clicked doc links use the validated bridge instead of a denied popup', () => {
-  for (const external of [true, false]) {
-    assert.deepEqual(clickDocLink({ bridge: true, external, modifier: true }),
-      { opened: ['https://docs.invalid/guide/'], drawer: [], prevented: true });
-  }
+test('modifier-clicked external doc links use the validated bridge instead of a denied popup', () => {
+  assert.deepEqual(clickDocLink({ bridge: true, external: true, modifier: true }),
+    { opened: ['https://docs.invalid/guide/'], drawer: [], prevented: true });
+});
+
+test('modifier-clicked local doc links stay in the drawer inside the shell', () => {
+  assert.deepEqual(clickDocLink({ bridge: true, external: false, modifier: true }),
+    { opened: [], drawer: ['https://docs.invalid/guide/'], prevented: true });
 });
 
 test('modifier clicks keep browser defaults without the native bridge', () => {
-  assert.deepEqual(clickDocLink({ bridge: false, external: true, modifier: true }),
-    { opened: [], drawer: [], prevented: false });
+  for (const external of [true, false]) {
+    assert.deepEqual(clickDocLink({ bridge: false, external, modifier: true }),
+      { opened: [], drawer: [], prevented: false });
+  }
 });
 
 test('plain doc link clicks open the drawer and dispatch external links once', () => {

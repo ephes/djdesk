@@ -37,10 +37,13 @@ function subFrameEvent(url) {
   return { senderFrame: frame, sender: { mainFrame } };
 }
 
-function navEvent(url, isMainFrame = true) {
+const TRUSTED_INITIATOR = Object.freeze({ url: `${TRUSTED}/dashboard/`, parent: null });
+
+function navEvent(url, isMainFrame = true, initiator = TRUSTED_INITIATOR) {
   return {
     url,
     isMainFrame,
+    initiator,
     defaultPrevented: false,
     preventDefault() {
       this.defaultPrevented = true;
@@ -189,13 +192,13 @@ test('isTrustedSender requires the top-level trusted frame', () => {
  * Mirror Electron's dispatch order: `will-frame-navigate` first, and
  * `will-navigate` (main frame only) only when the first was not cancelled.
  */
-function emitNavigation(contents, url, isMainFrame = true) {
-  const frameEvent = navEvent(url, isMainFrame);
+function emitNavigation(contents, url, isMainFrame = true, initiator = TRUSTED_INITIATOR) {
+  const frameEvent = navEvent(url, isMainFrame, initiator);
   contents.emit('will-frame-navigate', frameEvent);
   if (frameEvent.defaultPrevented || !isMainFrame) {
     return frameEvent.defaultPrevented;
   }
-  const event = navEvent(url, true);
+  const event = navEvent(url, true, initiator);
   contents.emit('will-navigate', event);
   return event.defaultPrevented;
 }
@@ -215,6 +218,32 @@ test('foreign main-frame navigation is blocked and handed to the browser once', 
   assert.equal(emitNavigation(contents, url), true);
   await flush();
   assert.deepEqual(shell.opened, [url]);
+});
+
+test('top-level navigations not started by the trusted page are cancelled without dispatch', async () => {
+  const { contents, shell } = guardedContents();
+  const mainFrame = { url: `${TRUSTED}/`, parent: null };
+  const destroyed = { get url() { throw new Error('Object has been destroyed'); }, parent: null };
+  for (const initiator of [
+    null,
+    { url: 'https://remote-docs.invalid/docs', parent: mainFrame },
+    { url: `${TRUSTED}/docs/`, parent: mainFrame },
+    { url: 'https://remote-docs.invalid/', parent: null },
+    { parent: null },
+    destroyed,
+  ]) {
+    assert.equal(emitNavigation(contents, 'https://top.invalid/', true, initiator), true);
+  }
+  const missing = navEvent('https://top.invalid/');
+  delete missing.initiator;
+  contents.emit('will-navigate', missing);
+  assert.equal(missing.defaultPrevented, true);
+  const throwing = navEvent('https://top.invalid/');
+  Object.defineProperty(throwing, 'initiator', { get() { throw new Error('destroyed'); } });
+  contents.emit('will-navigate', throwing);
+  assert.equal(throwing.defaultPrevented, true);
+  await flush();
+  assert.deepEqual(shell.opened, []);
 });
 
 test('will-frame-navigate leaves main-frame decisions to will-navigate', () => {

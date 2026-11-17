@@ -270,17 +270,22 @@ class InspectorUI {
     if (!this.docLinks.length) return;
     this.docLinks.forEach((link) => {
       link.addEventListener('click', (event) => {
-        if (event.metaKey || event.ctrlKey) {
-          // Electron denies popups without a native fallback; use the validated bridge.
-          if (this.nativeBridge?.openExternal) {
-            event.preventDefault();
-            this.openExternal(link.href);
-          }
-          return;
-        }
-        event.preventDefault();
         const url = link.dataset.docUrl || link.href;
         const external = link.dataset.docExternal === 'true';
+        if (event.metaKey || event.ctrlKey) {
+          // Browsers keep their new-tab default. Electron denies popups without a
+          // native fallback: external docs use the validated bridge, local docs
+          // stay in the drawer instead of opening the loopback server elsewhere.
+          if (!this.nativeBridge?.openExternal) {
+            return;
+          }
+          if (external) {
+            event.preventDefault();
+            this.openExternal(url);
+            return;
+          }
+        }
+        event.preventDefault();
         this.openDocsDrawer(url);
         this.navigateToPane(link.dataset.paneTarget);
         if (external) {

@@ -90,8 +90,11 @@ authenticate its requester. Deliberate app outbound links use
 `djdeskNative.openExternal`, which validates the live top-level sender and accepts
 only credential-free HTTP(S) URLs. Remote documentation cannot use this bridge;
 its popup links, including no-referrer links, have no native fallback.
-Inside the shell, Cmd/Ctrl-clicked documentation links in the inspector therefore
-call `djdeskNative.openExternal` instead of requesting a popup.
+Inside the shell, Cmd/Ctrl-clicked external documentation links in the inspector
+therefore call `djdeskNative.openExternal`; local (offline bundle) documentation
+links open in the drawer. Cancelled top-level navigations reach the system browser
+only when the trusted top-level page started them; navigations started by embedded
+documentation (e.g. `target="_top"` or `top.location`) are cancelled without dispatch.
 
 ```bash
 cd electron
@@ -124,8 +127,9 @@ It serves invented app and documentation pages on two loopback origins using a
 temporary profile. It checks real camera/microphone, geolocation and notification
 denials, documentation rendering and the isolated native notification bridge.
 It also exercises actual remote, no-referrer and trusted-page popup callbacks,
-checks that no new window or native dispatch occurs, and verifies a trusted IPC
-outbound link dispatches exactly once while unsafe schemes remain blocked.
+checks that no new window or native dispatch occurs, cancels a remote `target="_top"`
+navigation without dispatch, and verifies that a trusted top-level link and a trusted
+IPC outbound link each dispatch exactly once while unsafe schemes remain blocked.
 Media devices are synthetic; native notification delivery is recorded rather than
 shown. No system browser is opened. A graphical Electron session is required
 (on headless Linux, use `xvfb-run -a npm run test:frames`). This runtime check is

@@ -24,15 +24,18 @@ The window that carries the preload bridge must only ever display the local Djan
 * **Trusted origin.** The only trusted origin is the exact ``http://127.0.0.1:<port>`` the shell
   started Django on. A different port, ``localhost``, or ``https`` does not match.
 * **Navigation and redirects.** Top-level navigations and redirects that leave the trusted origin
-  are cancelled. A cancelled top-level ``http(s)`` link is handed to the system browser instead;
-  redirects are only cancelled. Sub frames (the docs drawer ``<iframe>``) may load the trusted
+  are cancelled. A cancelled top-level ``http(s)`` link is handed to the system browser instead
+  only when the navigation's initiator is the top-level frame showing the trusted origin;
+  navigations started by sub frames (``target="_top"``, ``top.location``) or by an unknown or
+  destroyed initiator are only cancelled, as are redirects. Sub frames (the docs drawer ``<iframe>``) may load the trusted
   origin or plain ``http(s)`` pages, never ``file:``, ``data:``, ``javascript:``, or custom schemes.
 * **New windows.** ``window.open`` and ``target="_blank"`` never create an Electron window.
   They also never dispatch to the system browser, including local DJDesk targets,
   trusted-looking referrers and requests without referrers. Popup details do not
   authenticate the requesting frame. Deliberate app outbound links use
   ``djdeskNative.openExternal`` and its validated IPC sender instead; this includes
-  Cmd/Ctrl-clicked inspector documentation links.
+  Cmd/Ctrl-clicked external inspector documentation links (local documentation links
+  open in the drawer).
   ``<webview>`` attachment is blocked.
 * **IPC senders.** ``djdesk:open-external`` and ``djdesk:notify`` only answer the top-level frame
   while it displays the trusted origin. Sub frames and foreign pages get ``false``.
@@ -51,8 +54,9 @@ With the Electron development dependencies installed, ``cd electron && npm run t
 also exercises an actual remote iframe on a second synthetic loopback origin. It checks
 permission denials and the notification bridge without using real media devices or
 displaying OS notifications. Remote/no-referrer and trusted-page popup links exercise
-the installed handler without creating windows or native side effects; a trusted
-IPC outbound link dispatches exactly once to an inert shell recorder. Use a graphical
+the installed handler without creating windows or native side effects. A remote
+``target="_top"`` link is cancelled without dispatch, while a trusted top-level link and
+a trusted IPC outbound link each dispatch exactly once to an inert shell recorder. Use a graphical
 session or Xvfb on headless Linux.
 
 Renderer data flow

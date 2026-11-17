@@ -211,6 +211,11 @@ Added
 Security
 ~~~~~~~~
 
+- Install both Electron session permission handlers before loading the window.
+  Deny all renderer capability requests/checks, including remote documentation,
+  unknown frames and the trusted app; native notifications retain their validated
+  IPC path. Add handler wiring tests and a real remote-iframe Electron fixture.
+
 - Anchor notebook export creation, publication and owned-inode cleanup to the same
   no-follow directory descriptor used by readers. Refuse invalid workspace directory
   names and fail closed before writes where these export facilities are unavailable

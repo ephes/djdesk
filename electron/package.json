@@ -6,6 +6,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test test/*.test.js",
+    "test:frames": "node smoke/frame-boundaries.cjs",
     "test:drawer": "node smoke/inspector-notebooks.cjs",
     "test:schema": "node smoke/inspector-schema.cjs",
     "test:schema:headless": "node smoke/inspector-schema.cjs --headless",

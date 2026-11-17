@@ -151,6 +151,15 @@ function isNavigationAllowed(url, isMainFrame, trustedOrigin) {
 }
 
 /**
+ * No renderer capability grants are required, including on the trusted origin.
+ * Native notifications use sender-validated IPC instead of Web Notifications.
+ */
+function installSessionPermissionGuards(session) {
+  session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  session.setPermissionCheckHandler(() => false);
+}
+
+/**
  * Attach navigation, redirect, popup, and webview restrictions to a
  * webContents instance.
  */
@@ -201,6 +210,7 @@ module.exports = {
   buildTrustedOrigin,
   createOpenExternalHandler,
   installNavigationGuards,
+  installSessionPermissionGuards,
   isNavigationAllowed,
   isTrustedSender,
   isTrustedUrl,

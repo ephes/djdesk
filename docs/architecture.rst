@@ -33,10 +33,21 @@ The window that carries the preload bridge must only ever display the local Djan
   attachment is blocked.
 * **IPC senders.** ``djdesk:open-external`` and ``djdesk:notify`` only answer the top-level frame
   while it displays the trusted origin. Sub frames and foreign pages get ``false``.
+* **Session capabilities.** Both public session permission-request and permission-check
+  handlers are installed before ``loadURL``. Their allowlist is empty: all renderer
+  permissions are denied, even for the trusted app, unknown requesters or destroyed
+  frames. DJDesk needs no camera, microphone, geolocation or Web Notification grants.
+  Desktop notifications use the validated main-process IPC path instead. A future
+  capability requires explicit admission and requester validation in both handlers;
+  loading remote documentation grants no OS capabilities.
 * **URL dispatch.** ``shell.openExternal`` only receives ``http:``/``https:`` URLs without embedded
   credentials, so ``file:`` paths and custom protocol handlers cannot be launched from the page.
 
 ``just electron-test`` runs the guard tests under ``electron/test/`` with ``node --test``.
+With the Electron development dependencies installed, ``cd electron && npm run test:frames``
+also exercises an actual remote iframe on a second synthetic loopback origin. It checks
+permission denials and the notification bridge without using real media devices or
+displaying OS notifications. Use a graphical session or Xvfb on headless Linux.
 
 Renderer data flow
 ------------------

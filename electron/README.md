@@ -76,6 +76,14 @@ The bundle is ignored by Git and may be regenerated at any time.
 
 `boundary-guards.js` keeps the window on the local Django origin, denies popups and `<webview>` tags, validates IPC sender frames, and limits `shell.openExternal` to `http(s)` URLs. See "Shell boundary" in `docs/architecture.rst`.
 
+Before loading any page, both permission-request and permission-check handlers are
+installed on the window's session. The renderer capability allowlist is empty:
+neither DJDesk nor embedded documentation needs camera, microphone, geolocation,
+Web Notifications or other permission grants. Remote, unknown and destroyed
+requesters receive the same denial as the trusted app. Native notifications still
+use the existing sender-validated `djdeskNative.notify` IPC path. Adding a renderer
+capability requires an explicit policy change and requester validation in both handlers.
+
 ```bash
 cd electron
 npm ci --omit=dev --ignore-scripts  # runtime modules only; does not install Electron
@@ -94,6 +102,22 @@ and bootstrapping runtime modules only when TOML is missing. An existing full
 development install is preserved, and repeat test runs need no registry access.
 After a runtime-only install, run `npm install` to restore development dependencies
 before launching or packaging Electron.
+
+Run the separate real Electron remote-iframe fixture with a development install:
+
+```bash
+cd electron
+npm ci
+npm run test:frames
+```
+
+It serves invented app and documentation pages on two loopback origins using a
+temporary profile. It checks real camera/microphone, geolocation and notification
+denials, documentation rendering and the isolated native notification bridge.
+Media devices are synthetic; native notification delivery is recorded rather than
+shown. No system browser is opened. A graphical Electron session is required
+(on headless Linux, use `xvfb-run -a npm run test:frames`). This runtime check is
+separate from the Node tests and must pass before adopting desktop boundary changes.
 
 ## Running the App
 

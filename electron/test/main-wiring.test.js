@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
 const Module = require('node:module');
 const path = require('node:path');
 const { test } = require('node:test');
@@ -28,11 +29,17 @@ function loadMain() {
         this.webContents.windowOpenHandler = handler;
       };
       this.webContents.openDevTools = () => {};
+      this.webContents.session = {
+        setPermissionRequestHandler: (handler) => { this.requestPermission = handler; },
+        setPermissionCheckHandler: (handler) => { this.checkPermission = handler; },
+      };
       this.loaded = [];
       windows.push(this);
     }
 
     loadURL(url) {
+      assert.equal(typeof this.requestPermission, 'function', 'request policy must precede loadURL');
+      assert.equal(typeof this.checkPermission, 'function', 'check policy must precede loadURL');
       this.loaded.push(url);
     }
   }
@@ -71,12 +78,19 @@ function loadMain() {
     }
     return originalLoad.call(this, request, ...rest);
   };
+  let entry;
   try {
-    require(mainPath);
+    entry = new Module(mainPath, module);
+    entry.filename = mainPath;
+    entry.paths = Module._nodeModulePaths(path.dirname(mainPath));
+    // Expose lexical startup functions only in this test copy of the entrypoint.
+    entry._compile(fs.readFileSync(mainPath, 'utf8') + `
+      module.exports = { createWindow, setPort(port) { djangoPort = port; } };
+    `, mainPath);
   } finally {
     Module._load = originalLoad;
   }
-  return { app, handlers, opened, notifications, windows };
+  return { app, handlers, opened, notifications, windows, ...entry.exports };
 }
 
 function frameEvent(url) {
@@ -103,4 +117,19 @@ test('main.js IPC handlers refuse requests before Django is running', async () =
   } finally {
     console.warn = warn;
   }
+});
+
+test('window session policies precede loading and preserve validated native notifications', async () => {
+  const { setPort, createWindow, windows, handlers, notifications } = loadMain();
+  setPort(8000);
+  createWindow();
+  const window = windows[0];
+  assert.deepEqual(window.loaded, ['http://127.0.0.1:8000/']);
+  assert.equal(window.checkPermission(null, 'notifications', 'https://remote-docs.invalid'), false);
+  const replies = [];
+  window.requestPermission(null, 'media', (allowed) => replies.push(allowed));
+  assert.deepEqual(replies, [false]);
+  const notify = handlers.get('djdesk:notify');
+  assert.equal(await notify(frameEvent(window.loaded[0]), { title: 'Synthetic task', body: 'Done' }), true);
+  assert.deepEqual(notifications, [{ title: 'Synthetic task', body: 'Done' }]);
 });

@@ -42,7 +42,8 @@ The `just install` recipe wraps `uv sync` so dependency installs stay consistent
 
 - `just dev` – start the Django development server (`manage.py runserver`) using `djdesk.settings.local`.
 - `just install` – install/update dependencies via `uv sync`.
-- `just test` – run Django's test suite (`manage.py test tests`) using `djdesk.settings.test`.
+- `just test` – run Django's test suite (`manage.py test tests`) using `djdesk.settings.test`; it fails when models and committed migrations diverge (`tests/test_migration_drift.py`).
+- `just check-migrations` – run only the migration drift check (`makemigrations --check --dry-run --noinput` under `djdesk.settings.test`). After a model change, run `uv run python manage.py makemigrations` and commit the new migration.
 - `just lint` – run Ruff’s lint checks across the codebase; use `uv run ruff format .` to auto-format.
 - `just ci` – run everything the push/PR workflow runs: locked install with the `dev` extra, Ruff, the Django tests, and the Electron guard tests.
 - `just hooks` – run every pre-commit hook against the full codebase.
@@ -139,7 +140,7 @@ regressions, including concurrent processes and filesystem failure injection.
 1. `uv sync --locked --extra dev --extra audit` – install exactly what `uv.lock` pins (the job fails if the lock is stale).
 2. `uv run --no-sync python scripts/audit_dependencies.py` – audit the frozen production lock.
 3. `uv run ruff check .` – the same lint as `just lint`.
-4. `python manage.py test tests` with `DJANGO_SETTINGS_MODULE=djdesk.settings.test` – in-memory SQLite, no real workspace or home database.
+4. `python manage.py test tests` with `DJANGO_SETTINGS_MODULE=djdesk.settings.test` – in-memory SQLite, no real workspace or home database. Includes the migration drift check, so a model change without its migration fails.
 5. `npm ci --omit=dev --ignore-scripts` then `npm test` in `electron/` – shell guards and synthetic build-contract tests using an existing Python 3, without installing Electron or downloading an interpreter.
 
 Run `just ci` locally before opening a pull request; a change is only ready for review once both CI jobs are green. Cross-platform packaging stays in the manual `electron-desktop` workflow and is not part of these checks.

@@ -201,6 +201,12 @@ Fixed
 Added
 ~~~~~
 
+- Fail ``just test`` and ``just ci`` when models and committed migrations diverge:
+  ``tests.test_migration_drift`` runs ``makemigrations --check --dry-run --noinput`` under
+  ``djdesk.settings.test`` and proves the check detects a missing migration
+  and fails on rename candidates instead of prompting.
+  ``just check-migrations`` runs the same check on its own.
+
 - Exercise generated bundle launchers, runtime dependency selection, collectstatic
   paths and interpreter/Django verification in synthetic build-contract tests.
   Normal PR CI installs only runtime npm dependencies for these tests, with no

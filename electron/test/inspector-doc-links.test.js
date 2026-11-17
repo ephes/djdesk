@@ -10,23 +10,23 @@ const InspectorUI = vm.runInNewContext(source + '\nInspectorUI;', {
   document: { addEventListener() {} },
 });
 
-function clickDocLink({ bridge, external, modifier }) {
+function clickDocLink({ bridge, external, modifier, type = 'click', button = 0, shift = false }) {
   const ui = Object.create(InspectorUI.prototype);
   const opened = [];
   const drawer = [];
   ui.nativeBridge = bridge ? { openExternal: (url) => opened.push(url) } : null;
   ui.openDocsDrawer = (url) => drawer.push(url);
   ui.navigateToPane = () => {};
-  let listener;
+  const listeners = {};
   ui.docLinks = [{
     href: 'https://docs.invalid/guide/',
     dataset: { docUrl: 'https://docs.invalid/guide/', docExternal: String(external) },
-    addEventListener: (_type, handler) => { listener = handler; },
+    addEventListener: (name, handler) => { listeners[name] = handler; },
   }];
   ui.bindDocLinks();
-  const event = { metaKey: modifier, ctrlKey: false, prevented: false,
+  const event = { type, button, metaKey: modifier, ctrlKey: false, shiftKey: shift, prevented: false,
     preventDefault() { this.prevented = true; } };
-  listener(event);
+  listeners[type](event);
   return { opened, drawer, prevented: event.prevented };
 }
 
@@ -52,4 +52,20 @@ test('plain doc link clicks open the drawer and dispatch external links once', (
     { opened: ['https://docs.invalid/guide/'], drawer: ['https://docs.invalid/guide/'], prevented: true });
   assert.deepEqual(clickDocLink({ bridge: true, external: false, modifier: false }),
     { opened: [], drawer: ['https://docs.invalid/guide/'], prevented: true });
+});
+
+test('middle-click and shift-click follow the modifier-click routing', () => {
+  for (const options of [{ type: 'auxclick', button: 1 }, { shift: true }]) {
+    assert.deepEqual(clickDocLink({ bridge: true, external: true, modifier: false, ...options }),
+      { opened: ['https://docs.invalid/guide/'], drawer: [], prevented: true });
+    assert.deepEqual(clickDocLink({ bridge: true, external: false, modifier: false, ...options }),
+      { opened: [], drawer: ['https://docs.invalid/guide/'], prevented: true });
+    assert.deepEqual(clickDocLink({ bridge: false, external: true, modifier: false, ...options }),
+      { opened: [], drawer: [], prevented: false });
+  }
+});
+
+test('other auxiliary buttons are ignored', () => {
+  assert.deepEqual(clickDocLink({ bridge: true, external: true, modifier: false, type: 'auxclick', button: 2 }),
+    { opened: [], drawer: [], prevented: false });
 });

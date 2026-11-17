@@ -215,7 +215,7 @@ Security
   missing referrers and trusted-looking referrers. Deliberate app outbound links
   retain the sender-validated IPC bridge and HTTP(S) allowlist. Extend the installed
   handler regressions and real remote-iframe fixture for popup and IPC dispatch.
-  In the shell, Cmd/Ctrl-clicked external documentation links open through that
+  In the shell, Cmd/Ctrl/Shift- and middle-clicked external documentation links open through that
   bridge and local documentation links open in the drawer, instead of becoming
   denied popups. Top-level navigations started by embedded documentation (for
   example ``target="_top"``) are cancelled without system-browser dispatch; only

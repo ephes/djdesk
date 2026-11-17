@@ -269,10 +269,11 @@ class InspectorUI {
   bindDocLinks() {
     if (!this.docLinks.length) return;
     this.docLinks.forEach((link) => {
-      link.addEventListener('click', (event) => {
+      const handle = (event) => {
         const url = link.dataset.docUrl || link.href;
         const external = link.dataset.docExternal === 'true';
-        if (event.metaKey || event.ctrlKey) {
+        // Cmd/Ctrl/Shift-click and middle-click request a new tab or window.
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.type === 'auxclick') {
           // Browsers keep their new-tab default. Electron denies popups without a
           // native fallback: external docs use the validated bridge, local docs
           // stay in the drawer instead of opening the loopback server elsewhere.
@@ -291,6 +292,10 @@ class InspectorUI {
         if (external) {
           this.openExternal(url);
         }
+      };
+      link.addEventListener('click', handle);
+      link.addEventListener('auxclick', (event) => {
+        if (event.button === 1) handle(event);
       });
     });
   }

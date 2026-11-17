@@ -34,7 +34,7 @@ The window that carries the preload bridge must only ever display the local Djan
   trusted-looking referrers and requests without referrers. Popup details do not
   authenticate the requesting frame. Deliberate app outbound links use
   ``djdeskNative.openExternal`` and its validated IPC sender instead; this includes
-  Cmd/Ctrl-clicked external inspector documentation links (local documentation links
+  Cmd/Ctrl/Shift- and middle-clicked external inspector documentation links (local documentation links
   open in the drawer).
   ``<webview>`` attachment is blocked.
 * **IPC senders.** ``djdesk:open-external`` and ``djdesk:notify`` only answer the top-level frame

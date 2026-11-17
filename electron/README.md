@@ -90,7 +90,7 @@ authenticate its requester. Deliberate app outbound links use
 `djdeskNative.openExternal`, which validates the live top-level sender and accepts
 only credential-free HTTP(S) URLs. Remote documentation cannot use this bridge;
 its popup links, including no-referrer links, have no native fallback.
-Inside the shell, Cmd/Ctrl-clicked external documentation links in the inspector
+Inside the shell, Cmd/Ctrl/Shift- and middle-clicked external documentation links in the inspector
 therefore call `djdeskNative.openExternal`; local (offline bundle) documentation
 links open in the drawer. Cancelled top-level navigations reach the system browser
 only when the trusted top-level page started them; navigations started by embedded

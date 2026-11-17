@@ -271,6 +271,11 @@ class InspectorUI {
     this.docLinks.forEach((link) => {
       link.addEventListener('click', (event) => {
         if (event.metaKey || event.ctrlKey) {
+          // Electron denies popups without a native fallback; use the validated bridge.
+          if (this.nativeBridge?.openExternal) {
+            event.preventDefault();
+            this.openExternal(link.href);
+          }
           return;
         }
         event.preventDefault();

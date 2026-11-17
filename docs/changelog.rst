@@ -215,6 +215,8 @@ Security
   missing referrers and trusted-looking referrers. Deliberate app outbound links
   retain the sender-validated IPC bridge and HTTP(S) allowlist. Extend the installed
   handler regressions and real remote-iframe fixture for popup and IPC dispatch.
+  Modifier-clicked documentation links in the shell now open through that bridge
+  instead of becoming denied popups.
 
 - Install both Electron session permission handlers before loading the window.
   Deny all renderer capability requests/checks, including remote documentation,

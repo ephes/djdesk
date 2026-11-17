@@ -173,6 +173,11 @@ class ScanJob(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["workspace", "-created_at", "-id"], name="scan_workspace_recent_idx"
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover - helper
         return f"{self.get_kind_display()} ({self.get_status_display()})"
@@ -261,6 +266,11 @@ class WorkspaceTaskRun(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["workspace", "-created_at", "-id"], name="task_workspace_recent_idx"
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover - helper
         return f"{self.preset.label} ({self.get_status_display()})"

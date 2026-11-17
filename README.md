@@ -69,7 +69,13 @@ to lock-file existence markers. A waiting non-force publisher rechecks existence
 after taking the lock; force publishers replace complete generations in serial order.
 Each replacement is written and synced beside the destination first, along with an
 owner-only `.slug.swap.json` intent recording the root, staging and old/new directory
-identities. The rename parents are synced before the old backup is retired. On macOS,
+identities. One root descriptor covers the lock, recovery check and publication.
+Publication and recovery hold no-follow root/staging directory descriptors;
+journal operations, renames, rollback and cleanup use those owners with relative names.
+They recheck named generations before changing names or deleting contents. A replaced
+root, staging name or generation stops publication and retains owned recovery data;
+errors include the recorded path and directory identities if the tree has moved.
+The rename parents are synced before the old backup is retired. On macOS,
 file and directory syncs also use `F_FULLFSYNC` where the filesystem supports it.
 A write failure preserves the old sample; a failed install attempts restoration.
 A sync failure after installation reports that the new sample is already visible but
@@ -199,6 +205,9 @@ collisions are retried, at most five attempts.
 
 The dashboard loads four recent scans and five recent task runs for the selected
 workspace only, ordered newest first with the primary key breaking timestamp ties.
+Composite workspace/created-at/ID indexes serve these windows without sorting the
+workspace's complete history. Migration 0006 builds both indexes on existing history;
+allow time for the index build when updating a large database.
 The workspace selector loads at most 50 names and paths per page, ordered by name
 then primary key, without historical logs or metadata. Use Previous/Next or search
 by name/path (at most 120 characters); the URL parameters are `workspace_page`

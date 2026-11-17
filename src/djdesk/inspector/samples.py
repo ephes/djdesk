@@ -8,7 +8,13 @@ from typing import Iterable
 from filelock import FileLock
 
 from .assets import sample_root
-from .sample_publication import prepare_sample_root, publish_sample, recover_sample
+from .sample_publication import (
+    prepare_sample_root,
+    publish_sample,
+    recover_sample,
+    sample_lock,
+    sample_root_owner,
+)
 
 DJANGO_APPS = [
     "django.contrib.admin",
@@ -656,20 +662,25 @@ def ensure_sample_projects(
     target_root = Path(root) if root else sample_root()
     prepare_sample_root(target_root)
     results: list[tuple[str, Path, bool]] = []
-    for project in SAMPLE_PROJECTS:
-        project_dir = target_root / project.slug
-        # Never unlink this stable lock: waiters must share the same inode.
-        with FileLock(
-            target_root / f".{project.slug}.lock",
-            timeout=10,
-            preserve_lock_file=True,
-            fallback_to_soft=False,
-        ):
-            recovered = recover_sample(project_dir)
-            if project_dir.exists() and (not force or recovered):
-                results.append((project.slug, project_dir, False))
-                continue
-            publish_sample(project_dir, project.files)
-            results.append((project.slug, project_dir, True))
+    with sample_root_owner(target_root) as root_fd:
+        for project in SAMPLE_PROJECTS:
+            project_dir = target_root / project.slug
+            if root_fd is None:  # pragma: no cover - Windows has no directory descriptors
+                # Never unlink this stable lock: waiters must share the same inode.
+                lock = FileLock(
+                    target_root / f".{project.slug}.lock",
+                    timeout=10,
+                    preserve_lock_file=True,
+                    fallback_to_soft=False,
+                )
+            else:
+                lock = sample_lock(target_root, root_fd, project.slug)
+            with lock:
+                recovered = recover_sample(project_dir, root_fd=root_fd)
+                if project_dir.exists() and (not force or recovered):
+                    results.append((project.slug, project_dir, False))
+                    continue
+                publish_sample(project_dir, project.files, root_fd=root_fd)
+                results.append((project.slug, project_dir, True))
 
     return results

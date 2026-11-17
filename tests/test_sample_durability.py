@@ -63,26 +63,26 @@ class SampleDurabilityTests(SimpleTestCase):
 
     def test_files_and_directories_sync_before_backup_is_deleted(self):
         events = []
-        fsync, rename, rmtree = os.fsync, Path.rename, sample_publication.shutil.rmtree
+        fsync, rename, remove_tree = os.fsync, os.rename, sample_publication._remove_tree
 
         def record_sync(fd):
             info = os.fstat(fd)
             events.append(("dir" if stat.S_ISDIR(info.st_mode) else "file", info.st_ino))
             return fsync(fd)
 
-        def record_rename(path, target):
-            events.append(("rename", path.name))
-            return rename(path, target)
+        def record_rename(path, target, **kwargs):
+            events.append(("rename", path))
+            return rename(path, target, **kwargs)
 
         def record_remove(path, *args, **kwargs):
-            if (path / "backup").exists():
+            if path == "backup":
                 events.append(("delete-backup", None))
-            return rmtree(path, *args, **kwargs)
+            return remove_tree(path, *args, **kwargs)
 
         with (
             mock.patch.object(os, "fsync", side_effect=record_sync),
-            mock.patch.object(Path, "rename", autospec=True, side_effect=record_rename),
-            mock.patch.object(sample_publication.shutil, "rmtree", side_effect=record_remove),
+            mock.patch.object(os, "rename", side_effect=record_rename),
+            mock.patch.object(sample_publication, "_remove_tree", side_effect=record_remove),
         ):
             samples.ensure_sample_projects(self.root, force=True)
         moved_old = events.index(("rename", "fixture"))

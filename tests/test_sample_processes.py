@@ -13,47 +13,47 @@ from django.test import SimpleTestCase
 from djdesk.inspector import samples
 
 PUBLISHER = """
-import sys, time
+import os, sys, time
 from pathlib import Path
 from djdesk.inspector import samples
 root, signals, mode = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 samples.SAMPLE_PROJECTS = [samples.SampleProject(
     'fixture', 'Fixture', 'Synthetic', 'fixture', {'value.txt': mode})]
-rename = Path.rename
-def controlled_rename(path, target):
-    if mode == 'second' and path.name == 'replacement':
+rename = os.rename
+def controlled_rename(path, target, **kwargs):
+    if mode == 'second' and path == 'replacement':
         raise OSError('second install failed')
-    result = rename(path, target)
-    if mode == 'first' and path.name == 'fixture':
+    result = rename(path, target, **kwargs)
+    if mode == 'first' and path == 'fixture':
         (signals / 'paused').touch()
         while not (signals / 'release').exists():
             time.sleep(.01)
     return result
-Path.rename = controlled_rename
+os.rename = controlled_rename
 (signals / (mode + '-started')).touch()
 samples.ensure_sample_projects(root, force=True)
 """
 
 CRASH_PUBLISHER = """
-import sys, time
+import os, sys, time
 from pathlib import Path
 from djdesk.inspector import samples
 root, signals, boundary = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3]
 samples.SAMPLE_PROJECTS = [samples.SampleProject(
     'fixture', 'Fixture', 'Synthetic', 'fixture', {'value.txt': 'new'})]
-rename = Path.rename
-def controlled_rename(path, target):
-    action = 'backup' if path.name == 'fixture' else 'install'
+rename = os.rename
+def controlled_rename(path, target, **kwargs):
+    action = 'backup' if path == 'fixture' else 'install'
     def pause(when):
         if boundary == when + '-' + action:
             (signals / 'paused').touch()
             while True:
                 time.sleep(.01)
     pause('before')
-    result = rename(path, target)
+    result = rename(path, target, **kwargs)
     pause('after')
     return result
-Path.rename = controlled_rename
+os.rename = controlled_rename
 samples.ensure_sample_projects(root, force=True)
 """
 

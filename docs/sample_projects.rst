@@ -21,6 +21,27 @@ Directory fsync and no-follow directory opens are required: unsupported filesyst
 and Windows refuse creation/replacement before changing an existing sample. Skipping
 an existing sample without force still works.
 
+Publication and recovery keep verified root and staging directory descriptors open
+through their final mutation. One root owner spans lock acquisition and the gap between
+recovery/existence checks and publication. Each stable ``.<slug>.lock`` file is created and
+locked relative to that held root, and the root name is checked again before and after
+acquisition, so a root swapped before or between samples cannot be locked or published. Staged writes, journal creation/removal, renames,
+rollback and destructive cleanup use directory-relative public filesystem APIs,
+so renaming a parent or replacing it with a symlink cannot redirect them into another
+tree. Named root/staging and generation identities are checked again before namespace
+changes and cleanup. Cleanup opens and verifies the admitted backup before deleting
+its contents, without following symlinks inside it. Unsupported platforms refuse
+publication rather than fall back to absolute-path mutations.
+
+If a root, staging name or generation changes, stop publishers and inspect the retained
+data manually. An error records the staging path and root/staging device/inode identities;
+the recorded path may have moved or now name a foreign tree. Locate the owned directories
+by those identities before repairing names. Do not remove or force-replace the new tree
+at the original path. A rename already performed through held owners can be visible
+in the moved original root, even though its old pathname now points elsewhere. A change
+detected after installation is reported without rollback, retaining the backup. If cleanup
+has already started after durable publication, a retained backup may be incomplete.
+
 A failed install attempts to restore the old sample. If restoration fails, the error
 names the retained recovery files. After a successful rename, a sync failure reports
 that the new sample is already installed but its durability is uncertain. It leaves
@@ -55,4 +76,7 @@ The two renames form a recoverable swap, not an atomic directory exchange. Reade
 can briefly observe a missing public name. Tests use synthetic files, real publisher
 subprocesses killed at each rename boundary, and injected file/directory sync failures:
 ``uv run python manage.py test tests.test_samples tests.test_sample_processes
-tests.test_sample_durability tests.test_sample_intent --settings=djdesk.settings.test``.
+tests.test_sample_durability tests.test_sample_intent tests.test_sample_authority
+--settings=djdesk.settings.test``. Authority tests replace real parent/staging directories
+with symlinks or foreign directories at journal, rename, recovery and cleanup barriers;
+a separate publisher process also pauses while its parent namespace is replaced.

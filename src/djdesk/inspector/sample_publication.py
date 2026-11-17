@@ -6,11 +6,18 @@ import json
 import os
 import shutil
 import stat
-import tempfile
+import time
+import uuid
 import warnings
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from .filesystem import sync_descriptor
+
+try:  # pragma: no cover - absent on Windows
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 
 class SampleDurabilityError(OSError):
@@ -35,15 +42,43 @@ def _sync_directory(path: Path) -> None:
         os.close(fd)
 
 
-def _sync_tree(path: Path) -> None:
-    for directory, _, files in os.walk(path, topdown=False):
-        for name in files:
-            fd = os.open(Path(directory) / name, os.O_RDONLY | os.O_NOFOLLOW)
-            try:
-                sync_descriptor(fd)
-            finally:
-                os.close(fd)
-        _sync_directory(Path(directory))
+@contextmanager
+def _directory(path, *, dir_fd=None):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+    try:
+        yield fd
+    finally:
+        os.close(fd)
+
+
+def _write_files(directory: int, files: dict[str, str]) -> None:
+    for relative, content in files.items():
+        path = Path(relative)
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise ValueError("Invalid sample file path")
+        with ExitStack() as stack:
+            parent = directory
+            ancestors = [directory]
+            for name in path.parts[:-1]:
+                try:
+                    os.mkdir(name, dir_fd=parent)
+                except FileExistsError:
+                    pass
+                parent = stack.enter_context(_directory(name, dir_fd=parent))
+                ancestors.append(parent)
+            fd = os.open(
+                path.name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o644,
+                dir_fd=parent,
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content.rstrip() + "\n")
+                handle.flush()
+                sync_descriptor(handle.fileno())
+            for ancestor in reversed(ancestors):
+                sync_descriptor(ancestor)
+    sync_descriptor(directory)
 
 
 def prepare_sample_root(root: Path) -> None:
@@ -57,14 +92,99 @@ def prepare_sample_root(root: Path) -> None:
         _sync_directory(directory.parent)
 
 
-def _identity(path: Path) -> list[int] | None:
+def _identity(path, *, dir_fd=None) -> list[int] | None:
     try:
-        info = path.lstat()
+        info = os.stat(path, dir_fd=dir_fd, follow_symlinks=False)
     except FileNotFoundError:
         return None
     if not stat.S_ISDIR(info.st_mode):
         raise OSError(f"Sample path needs manual inspection (not a directory): {path}")
     return [info.st_dev, info.st_ino]
+
+
+def _fd_identity(fd: int) -> list[int]:
+    info = os.fstat(fd)
+    return [info.st_dev, info.st_ino]
+
+
+def _check_root(root: Path, fd: int) -> None:
+    if _identity(root) != _fd_identity(fd):
+        raise OSError(f"Sample root name changed; preserve owned root identity {_fd_identity(fd)}")
+
+
+@contextmanager
+def sample_root_owner(root: Path):
+    """Keep one root generation across lock acquisition, recovery and publication."""
+    if os.name == "nt":  # pragma: no cover - existing samples may still be skipped
+        yield None
+        return
+    with _directory(root) as fd:
+        _check_root(root, fd)
+        yield fd
+        _check_root(root, fd)
+
+
+@contextmanager
+def sample_lock(root: Path, root_fd: int, slug: str, *, timeout: float = 10):
+    """Hold the stable per-sample lock created inside the held root generation."""
+    _check_root(root, root_fd)
+    name = f".{slug}.lock"
+    # Never unlink this stable lock: waiters must share the same inode.
+    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+    fd = os.open(name, flags, 0o644, dir_fd=root_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"Sample lock needs manual inspection (not a regular file): {name}")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for sample lock {root / name}") from None
+                time.sleep(0.05)
+        try:
+            # The lock inode is anchored to root_fd; the root name must still point there.
+            _check_root(root, root_fd)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _check_names(destination, root_fd, stage_fd, intent):
+    if (
+        _identity(destination.parent) != _fd_identity(root_fd)
+        or _fd_identity(root_fd) != intent["root"]
+        or _identity(intent["stage"]["name"], dir_fd=root_fd) != _fd_identity(stage_fd)
+        or _fd_identity(stage_fd) != intent["stage"]["identity"]
+    ):
+        raise OSError("Sample root/staging name changed; preserve all related paths")
+
+
+def _state(destination, root_fd, stage_fd):
+    return (
+        _identity(destination.name, dir_fd=root_fd),
+        _identity("backup", dir_fd=stage_fd),
+        _identity("replacement", dir_fd=stage_fd),
+    )
+
+
+def _check_state(destination, root_fd, stage_fd, intent, expected):
+    _check_names(destination, root_fd, stage_fd, intent)
+    if _state(destination, root_fd, stage_fd) != expected:
+        raise OSError("Sample generation changed; preserve all related paths")
+
+
+def _unlink_intent(destination, root_fd, identity):
+    name = _intent_path(destination).name
+    info = os.stat(name, dir_fd=root_fd, follow_symlinks=False)
+    if not stat.S_ISREG(info.st_mode) or [info.st_dev, info.st_ino] != identity:
+        raise OSError("Sample intent changed; preserve all related paths")
+    os.unlink(name, dir_fd=root_fd)
+    sync_descriptor(root_fd)
 
 
 def _intent_path(destination: Path) -> Path:
@@ -80,14 +200,10 @@ def _unique_members(pairs):
     return result
 
 
-def _read_intent(destination: Path):
+def _read_intent(destination: Path, root_fd: int):
     journal = _intent_path(destination)
-    if os.name == "nt":  # pragma: no cover
-        if journal.exists() or journal.is_symlink():
-            raise OSError("Sample recovery requires directory fsync (unsupported on Windows)")
-        return None
     try:
-        fd = os.open(journal, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(journal.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root_fd)
     except FileNotFoundError:
         return None
     with os.fdopen(fd, "rb") as handle:
@@ -118,43 +234,57 @@ def _read_intent(destination: Path):
             and all(type(value) is int and value >= 0 for value in identity)
         ):
             raise ValueError("Invalid swap directory identity")
-    return intent
+    return intent, [info.st_dev, info.st_ino]
 
 
-def recover_sample(destination: Path) -> bool:
+def recover_sample(destination: Path, *, root_fd: int | None = None) -> bool:
     """Called only under the stable publisher lock; never delete interrupted trees."""
     journal = _intent_path(destination)
+    intent = None
+    if os.name == "nt":  # pragma: no cover
+        if journal.exists() or journal.is_symlink():
+            raise OSError("Sample recovery requires directory fsync (unsupported on Windows)")
+        return False
     try:
-        intent = _read_intent(destination)
-        if intent is None:
-            return False
-        stage = destination.parent / intent["stage"]["name"]
-        if (
-            _identity(destination.parent) != intent["root"]
-            or _identity(stage) != intent["stage"]["identity"]
-        ):
-            raise ValueError("Swap root/staging identity changed")
-        current = _identity(destination)
-        backup = _identity(stage / "backup")
-        replacement = _identity(stage / "replacement")
-        old, new = intent["old"], intent["new"]
-        if current == new and replacement is None and backup == old:
-            pass  # New sample is already visible; retain the old backup for inspection.
-        elif current is None and backup == old and replacement == new:
-            source = stage / ("backup" if old is not None else "replacement")
-            source.rename(destination)
-        elif current == old and backup is None and replacement == new:
-            pass  # The old name was never removed (or rollback finished).
-        else:
-            raise ValueError("Swap generation identities do not match")
-        _sync_directory(stage)
-        _sync_directory(destination.parent)
-        journal.unlink()
-        _sync_directory(destination.parent)
+        with ExitStack() as stack:
+            if root_fd is None:
+                root_fd = stack.enter_context(sample_root_owner(destination.parent))
+            _check_root(destination.parent, root_fd)
+            result = _read_intent(destination, root_fd)
+            if result is None:
+                _check_root(destination.parent, root_fd)
+                return False
+            intent, journal_identity = result
+            stage = destination.parent / intent["stage"]["name"]
+            stage_fd = stack.enter_context(_directory(stage.name, dir_fd=root_fd))
+            current, backup, replacement = expected = _state(destination, root_fd, stage_fd)
+            old, new = intent["old"], intent["new"]
+            _check_state(destination, root_fd, stage_fd, intent, expected)
+            if current == new and replacement is None and backup == old:
+                pass  # Installed generation is visible; retain the backup.
+            elif current is None and backup == old and replacement == new:
+                source = "backup" if old is not None else "replacement"
+                _check_state(destination, root_fd, stage_fd, intent, expected)
+                os.rename(source, destination.name, src_dir_fd=stage_fd, dst_dir_fd=root_fd)
+                expected = (old, None, new) if old is not None else (new, None, None)
+            elif current == old and backup is None and replacement == new:
+                pass  # The old name was never removed (or rollback finished).
+            else:
+                raise ValueError("Swap generation identities do not match")
+            sync_descriptor(stage_fd)
+            sync_descriptor(root_fd)
+            _check_state(destination, root_fd, stage_fd, intent, expected)
+            _unlink_intent(destination, root_fd, journal_identity)
     except (OSError, ValueError, TypeError, RecursionError) as error:
-        raise OSError(
+        failure = OSError(
             f"Sample swap needs manual inspection: {journal}; preserve all related paths"
-        ) from error
+        )
+        if intent is not None:
+            failure.add_note(
+                f"Retained root identity {intent['root']}, staging {intent['stage']}; "
+                "recorded paths may have moved"
+            )
+        raise failure from error
     warnings.warn(
         f"Retained interrupted sample files for manual inspection: {stage}; "
         "recovered sample kept even with --force. Inspect before replacing it again.",
@@ -163,79 +293,148 @@ def recover_sample(destination: Path) -> bool:
     return True
 
 
-def publish_sample(destination: Path, files: dict[str, str]) -> None:
-    """Publish a complete tree; caller owns the stable destination lock."""
-    # Establish the root's own directory entry before promising durable children.
+def _remove_tree(name, parent_fd, identity, check_names):
+    # Open the admitted generation before deleting any contents. Never reopen its
+    # absolute pathname, even if its parent/name is moved during retirement.
+    with _directory(name, dir_fd=parent_fd) as fd:
+        if _fd_identity(fd) != identity:
+            raise OSError("Cleanup generation changed; preserve all related paths")
+
+        def check():
+            check_names()
+            if _identity(name, dir_fd=parent_fd) != identity:
+                raise OSError("Cleanup name changed; preserve all related paths")
+
+        check()
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                check()
+                if entry.is_dir(follow_symlinks=False):
+                    shutil.rmtree(entry.name, dir_fd=fd)
+                else:
+                    os.unlink(entry.name, dir_fd=fd)
+        check()
+        os.rmdir(name, dir_fd=parent_fd)
+
+
+def _cleanup_stage(destination, root_fd, stage_fd, intent, expected):
+    _check_state(destination, root_fd, stage_fd, intent, expected)
+    for name, identity in zip(("backup", "replacement"), expected[1:]):
+        if identity is not None:
+            _remove_tree(
+                name,
+                stage_fd,
+                identity,
+                lambda: _check_names(destination, root_fd, stage_fd, intent),
+            )
+    _check_names(destination, root_fd, stage_fd, intent)
+    os.rmdir(intent["stage"]["name"], dir_fd=root_fd)
+
+
+def publish_sample(destination: Path, files: dict[str, str], *, root_fd: int | None = None) -> None:
+    """Publish through held directory owners; caller owns the stable sample lock."""
+    if os.name == "nt" or not shutil.rmtree.avoids_symlink_attacks:  # pragma: no cover
+        raise OSError("Sample publication requires safe directory-relative filesystem APIs")
+    # Establish the root's directory entry before promising durable children.
     _sync_directory(destination.parent.parent)
-    _sync_directory(destination.parent)
-    stage = Path(tempfile.mkdtemp(prefix=f".{destination.name}-", dir=destination.parent))
-    replacement, backup = stage / "replacement", stage / "backup"
-    journal = _intent_path(destination)
-    promoted = False
-    journal_owned = False
-    try:
-        replacement.mkdir()
-        for relative_path, content in files.items():
-            full_path = replacement / relative_path
-            full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(content.rstrip() + "\n", encoding="utf-8")
-        _sync_tree(replacement)
-        _sync_directory(stage)
+    with ExitStack() as stack:
+        if root_fd is None:
+            root_fd = stack.enter_context(sample_root_owner(destination.parent))
+        _check_root(destination.parent, root_fd)
+        sync_descriptor(root_fd)
+        old_identity = _identity(destination.name, dir_fd=root_fd)
+        stage_name = f".{destination.name}-{uuid.uuid4().hex}"
+        os.mkdir(stage_name, 0o700, dir_fd=root_fd)
+        stage = destination.parent / stage_name
+        stage_identity = _identity(stage_name, dir_fd=root_fd)
+        stage_fd = stack.enter_context(_directory(stage_name, dir_fd=root_fd))
         intent = {
             "version": 1,
-            "root": _identity(destination.parent),
-            "stage": {"name": stage.name, "identity": _identity(stage)},
-            "old": _identity(destination),
-            "new": _identity(replacement),
+            "root": _fd_identity(root_fd),
+            "stage": {"name": stage_name, "identity": stage_identity},
+            "old": old_identity,
+            "new": None,
         }
-        fd = os.open(journal, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            journal_owned = True
-            json.dump(intent, handle)
-            handle.flush()
-            sync_descriptor(handle.fileno())
-        _sync_directory(destination.parent)
+        journal = _intent_path(destination)
+        promoted = False
+        journal_identity = None
+        expected = (intent["old"], None, None)
         try:
-            if intent["old"] is not None:
-                destination.rename(backup)
-                _sync_directory(stage)
-                _sync_directory(destination.parent)
-            replacement.rename(destination)
-        except BaseException as error:
-            if backup.exists():
-                try:
-                    if destination.exists() or destination.is_symlink():
-                        raise OSError("Destination changed; refusing to overwrite during rollback")
-                    backup.rename(destination)
-                    _sync_directory(stage)
-                    _sync_directory(destination.parent)
-                except BaseException as restore_error:
-                    error.add_note(f"Restoration failed: {restore_error}; recovery copy: {backup}")
-                    raise error
-            journal.unlink()
-            _sync_directory(destination.parent)
-            journal_owned = False
-            raise
-        promoted = True
-        try:
-            _sync_directory(stage)
-            _sync_directory(destination.parent)
-            journal.unlink()
-            _sync_directory(destination.parent)
-        except OSError as error:
-            raise SampleDurabilityError(destination, stage) from error
-        journal_owned = False
-        shutil.rmtree(stage)
-    except BaseException as error:
-        if promoted:
-            error.add_note(
-                f"New sample installed at {destination}; inspect retained files at {stage}"
+            _check_state(destination, root_fd, stage_fd, intent, expected)
+            os.mkdir("replacement", dir_fd=stage_fd)
+            with _directory("replacement", dir_fd=stage_fd) as replacement_fd:
+                intent["new"] = _fd_identity(replacement_fd)
+                expected = (intent["old"], None, intent["new"])
+                _write_files(replacement_fd, files)
+            sync_descriptor(stage_fd)
+            _check_state(destination, root_fd, stage_fd, intent, expected)
+            fd = os.open(
+                journal.name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=root_fd,
             )
-        elif backup.exists() or journal_owned:
-            error.add_note(f"Recovery intent: {journal}; retained sample files: {stage}")
-        else:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                journal_identity = _fd_identity(handle.fileno())
+                json.dump(intent, handle)
+                handle.flush()
+                sync_descriptor(handle.fileno())
+            sync_descriptor(root_fd)
             try:
-                shutil.rmtree(stage)
-            except OSError as cleanup_error:
-                error.add_note(f"Could not clean sample staging {stage}: {cleanup_error}")
-        raise
+                _check_state(destination, root_fd, stage_fd, intent, expected)
+                if intent["old"] is not None:
+                    os.rename(destination.name, "backup", src_dir_fd=root_fd, dst_dir_fd=stage_fd)
+                    expected = (None, intent["old"], intent["new"])
+                    sync_descriptor(stage_fd)
+                    sync_descriptor(root_fd)
+                _check_state(destination, root_fd, stage_fd, intent, expected)
+                os.rename("replacement", destination.name, src_dir_fd=stage_fd, dst_dir_fd=root_fd)
+            except BaseException as error:
+                try:
+                    # A failed rename may have changed names before raising. Admit
+                    # only the exact before/after-backup states for restoration.
+                    _check_names(destination, root_fd, stage_fd, intent)
+                    state = _state(destination, root_fd, stage_fd)
+                    if intent["old"] is not None and state == (None, intent["old"], intent["new"]):
+                        _check_state(destination, root_fd, stage_fd, intent, state)
+                        os.rename(
+                            "backup", destination.name, src_dir_fd=stage_fd, dst_dir_fd=root_fd
+                        )
+                        sync_descriptor(stage_fd)
+                        sync_descriptor(root_fd)
+                    expected = (intent["old"], None, intent["new"])
+                    _check_state(destination, root_fd, stage_fd, intent, expected)
+                    _unlink_intent(destination, root_fd, journal_identity)
+                    journal_identity = None
+                except BaseException as restore_error:
+                    error.add_note(
+                        f"Restoration refused/failed: {restore_error}; "
+                        f"recovery copy: {stage / 'backup'}"
+                    )
+                raise
+            promoted = True
+            expected = (intent["new"], intent["old"], None)
+            try:
+                sync_descriptor(stage_fd)
+                sync_descriptor(root_fd)
+                _check_state(destination, root_fd, stage_fd, intent, expected)
+                _unlink_intent(destination, root_fd, journal_identity)
+            except OSError as error:
+                raise SampleDurabilityError(destination, stage) from error
+            journal_identity = None
+            _cleanup_stage(destination, root_fd, stage_fd, intent, expected)
+        except BaseException as error:
+            location = (
+                f"{stage} (root identity {intent['root']}, "
+                f"staging identity {intent['stage']['identity']}; paths may have moved)"
+            )
+            if promoted:
+                error.add_note(f"New sample installed at {destination}; retained files: {location}")
+            elif journal_identity is not None:
+                error.add_note(f"Recovery intent: {journal}; retained sample files: {location}")
+            else:
+                try:
+                    _cleanup_stage(destination, root_fd, stage_fd, intent, expected)
+                except OSError as cleanup_error:
+                    error.add_note(f"Retained sample staging {location}: {cleanup_error}")
+            raise

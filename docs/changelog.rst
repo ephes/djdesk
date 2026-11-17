@@ -7,6 +7,14 @@ Unreleased
 Fixed
 ~~~~~
 
+- Apply the Inspector response-byte ceiling to notebook export success and error
+  replies before JSON parsing. Cancel oversized streams, retain selection and bounded
+  diagnostics, and require inspection before any deliberate retry.
+
+- Bound notebook export acknowledgement to 30 seconds across request and body reads.
+  Abort timed-out requests, restore form controls and ignore late success without
+  automatic retries; explain the uncertain outcome and inspection before retrying.
+
 - Anchor sample publication, recovery, rollback and cleanup to held no-follow directory
   descriptors. Recheck named generations before mutations, refuse replaced namespaces
   and retain recovery data with directory identity diagnostics instead of following

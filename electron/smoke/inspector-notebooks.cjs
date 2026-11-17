@@ -61,7 +61,7 @@ async function main() {
     await page.addScriptTag({ content: source + '\nwindow.InspectorUI = InspectorUI;' });
     await page.evaluate(() => {
       window.requests = [];
-      window.fetch = () => new Promise((resolve, reject) => requests.push({ resolve, reject }));
+      window.fetch = (url, options) => new Promise((resolve, reject) => requests.push({ resolve, reject, options }));
       window.ui = new InspectorUI(document.querySelector('[data-inspector-shell]'));
       ui.bindDataLab();
       const form = document.querySelector('[data-data-lab-form]');
@@ -71,11 +71,11 @@ async function main() {
     assert.equal(await page.evaluate(() => requests.length), 1, 'one owner must issue only one POST');
     assert.equal(await page.locator('[data-data-lab-form] button').isDisabled(), true);
     await page.locator('[data-notebook-slug="log-study"]').click();
-    await page.evaluate(() => requests[0].resolve({ ok: true, json: async () => ({
+    await page.evaluate(() => requests[0].resolve(new Response(JSON.stringify({
       data_lab: { selected_notebook: 'schema-audit-2', notebooks: [
         { slug: 'schema-audit-2', viewer_url: '/synthetic-new', title: 'New' },
       ] },
-    }) }));
+    }))));
     await page.waitForFunction(() => !document.querySelector('[data-data-lab-form] button').disabled);
     assert.equal(await page.evaluate(() => ui.activeNotebookSlug), 'log-study', 'manual choice owns selection');
     assert.match(await page.locator('[data-data-lab-frame]').getAttribute('src'), /log-study/);
@@ -86,18 +86,19 @@ async function main() {
       await page.evaluate((kind) => {
         const pending = requests.at(-1);
         if (kind === 'network') pending.reject(new Error('Synthetic network failure'));
-        else if (kind === 'http') pending.resolve({ ok: false,
-          json: async () => ({ errors: { template: ['Synthetic refusal'] } }) });
-        else pending.resolve({ ok: true, json: async () => { throw new Error('Synthetic JSON failure'); } });
+        else if (kind === 'http') pending.resolve(new Response(JSON.stringify({
+          errors: { template: ['Synthetic refusal'] },
+        }), { status: 400 }));
+        else pending.resolve(new Response('invalid JSON'));
       }, failure);
       await page.waitForFunction(() => !document.querySelector('[data-data-lab-form] button').disabled);
     }
     assert.equal(await page.evaluate(() => requests.length), 4, 'no automatic POST retries');
     await page.locator('[data-data-lab-form] button').click();
-    await page.evaluate(() => requests.at(-1).resolve({ ok: true, json: async () => ({
+    await page.evaluate(() => requests.at(-1).resolve(new Response(JSON.stringify({
       data_lab: { selected_notebook: 'schema-audit-9', selected_notebook_url: '/synthetic-new-9',
         notebooks: [], notebooks_incomplete: true },
-    }) }));
+    }))));
     await page.waitForFunction(() => ui.activeNotebookSlug === 'schema-audit-9');
     await page.evaluate(() => ui.updateDataLab({ notebooks: [], notebooks_incomplete: true }));
     assert.equal(await page.evaluate(() => ui.activeNotebookSlug), 'schema-audit-9', 'limited polls retain the current viewer');
@@ -110,9 +111,7 @@ async function main() {
       templates: ui.dataLabForm.querySelector('select').innerHTML,
     }));
     await page.locator('[data-data-lab-form] button').click();
-    await page.evaluate((receipt) => requests.at(-1).resolve({
-      ok: true, json: async () => receipt,
-    }), fixture.receipt);
+    await page.evaluate((receipt) => requests.at(-1).resolve(new Response(JSON.stringify(receipt))), fixture.receipt);
     await page.waitForFunction(() => !document.querySelector('[data-data-lab-form] button').disabled);
     assert.equal(await page.evaluate(() => ui.activeNotebookSlug), fixture.receipt.data_lab.selected_notebook);
     assert.equal(await page.evaluate(() => requests.length), 6, 'receipt never replays export');
@@ -172,6 +171,70 @@ async function main() {
     });
     assert.equal(unicode, 'é€');
     console.log('Inspector response DOM passed: bounded streams, preserved status/drawer, retry, Unicode boundary');
+
+    // Exercise the export handler against a real stalled body and late headers.
+    await page.clock.install();
+    for (const stage of ['headers', 'body']) {
+      const selected = await page.evaluate(() => {
+        window.requests = [];
+        window.toasts = [];
+        ui.showToast = (message, level) => toasts.push({ message, level });
+        window.fetch = (url, options) => new Promise((resolve) => requests.push({ resolve, options }));
+        ui.dataLabForm.dispatchEvent(new Event('submit', { cancelable: true }));
+        return ui.activeNotebookSlug;
+      });
+      // Receiving headers must not reset the total budget.
+      await page.clock.fastForward(20000);
+      if (stage === 'body') {
+        await page.evaluate(() => requests[0].resolve(new Response(new ReadableStream({
+          start(controller) { window.lateBody = controller; },
+        }))));
+      }
+      await page.clock.fastForward(9999);
+      assert.equal(await page.locator('[data-data-lab-form] button').isDisabled(), true);
+      await page.clock.fastForward(1);
+      assert.equal(await page.locator('[data-data-lab-form] button').isDisabled(), false);
+      assert.equal(await page.evaluate(() => requests[0].options.signal.aborted), true);
+      assert.match(await page.evaluate(() => toasts[0].message), /may already have completed.*Inspect.*retry/);
+      await page.evaluate((stage) => {
+        const payload = JSON.stringify({ data_lab: { selected_notebook: 'obsolete' } });
+        if (stage === 'body') {
+          lateBody.enqueue(new TextEncoder().encode(payload));
+          lateBody.close();
+        } else requests[0].resolve(new Response(payload));
+      }, stage);
+      assert.equal(await page.evaluate(() => ui.activeNotebookSlug), selected);
+      assert.equal(await page.evaluate(() => toasts.some((toast) => toast.level === 'success')), false);
+      assert.equal(await page.evaluate(() => requests.length), 1, 'no automatic retry after timeout');
+    }
+
+    await page.evaluate(() => {
+      ui.responseBytes = 64;
+      window.exportCancelled = false;
+      window.unboundedExportParses = 0;
+      window.fetch = async () => {
+        const response = new Response(new ReadableStream({
+          start(controller) { controller.enqueue(new Uint8Array(65)); },
+          cancel() { exportCancelled = true; },
+        }), { status: 400, headers: { 'Content-Length': '1' } });
+        response.json = async () => { unboundedExportParses++; return {}; };
+        return response;
+      };
+      ui.dataLabForm.dispatchEvent(new Event('submit', { cancelable: true }));
+    });
+    await page.waitForFunction(() => !ui.dataLabExportPending);
+    assert.equal(await page.evaluate(() => exportCancelled), true);
+    assert.equal(await page.evaluate(() => unboundedExportParses), 0);
+    assert.match(await page.evaluate(() => toasts.at(-1).message), /byte limit.*may already have completed/);
+    await page.evaluate(() => {
+      window.fetch = async () => new Response(JSON.stringify({ data_lab: {
+        selected_notebook: 'small', selected_notebook_url: '/small',
+      } }));
+      ui.responseBytes = 1024;
+      ui.dataLabForm.dispatchEvent(new Event('submit', { cancelable: true }));
+    });
+    await page.waitForFunction(() => ui.activeNotebookSlug === 'small');
+    console.log('Export acknowledgement DOM passed: total deadline, late response fence, bounded error, deliberate retry');
   } finally {
     await browser.close();
   }

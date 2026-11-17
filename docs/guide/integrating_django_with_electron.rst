@@ -206,6 +206,17 @@ Filename stems must contain only ASCII letters, digits, underscores and hyphens,
 at least one character. Other names remain untouched but are omitted from listings;
 rename them to a supported stem to make them visible in DJDesk.
 
+The export form owns one POST at a time. A total 30-second deadline covers response
+headers and body consumption, aborting the request and restoring controls on timeout.
+Late acknowledgements cannot select a notebook or announce success. A lost response
+may hide an already completed export: inspect the listing or export directory before
+deliberately retrying, since a retry creates another file. There is no automatic retry.
+Success and error replies share the Inspector's ``DJDESK_INSPECTOR_RESPONSE_BYTES``
+ceiling before JSON parsing, even with missing or inaccurate ``Content-Length``.
+Overflow cancels the read, preserves notebook selection and reports the same uncertain
+outcome. Small HTTP error diagnostics remain visible in the form's notification. A
+parsed 4xx reply is a definite refusal and omits the uncertainty guidance.
+
 Exports fsync an owner-only hidden ``.notebook-*.tmp`` file, then publish a hard link
 atomically without overwriting another file. Polling sees only complete exports.
 The opened workspace directory is fsynced after publication before reporting success.

@@ -1,5 +1,6 @@
 const WIZARD_STORAGE_KEY = 'djdesk.wizard.projectPath';
 const INSPECTOR_RESPONSE_BYTES = 8 * 1024 * 1024;
+const NOTEBOOK_EXPORT_TIMEOUT_MS = 30000;
 
 // The server derives the ceiling from its task-log budget; fall back to the default.
 function inspectorResponseBytes(value) {
@@ -8,7 +9,9 @@ function inspectorResponseBytes(value) {
   return Number.isSafeInteger(bytes) ? bytes : undefined;
 }
 
-async function readInspectorJSON(response, maxBytes = INSPECTOR_RESPONSE_BYTES) {
+async function readInspectorJSON(
+  response, maxBytes = INSPECTOR_RESPONSE_BYTES, { allowHttpError = false } = {},
+) {
   const overflow = () => Object.assign(new Error('Inspector response byte limit exceeded'),
     { code: 'INSPECTOR_RESPONSE_TOO_LARGE' });
   const length = response.headers.get('Content-Length');
@@ -16,7 +19,7 @@ async function readInspectorJSON(response, maxBytes = INSPECTOR_RESPONSE_BYTES) 
     await response.body?.cancel().catch(() => {});
     throw overflow();
   }
-  if (!response.ok || !response.body) throw new Error('Inspector response unavailable');
+  if ((!response.ok && !allowHttpError) || !response.body) throw new Error('Inspector response unavailable');
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const parts = [];
@@ -355,25 +358,51 @@ class InspectorUI {
         const controls = Array.from(this.dataLabForm.querySelectorAll('button, input, select'))
           .map((control) => [control, control.disabled]);
         controls.forEach(([control]) => { control.disabled = true; });
+        const controller = new AbortController();
+        let timeout;
         try {
-          const response = await fetch(this.dataLabExportUrl, {
-            method: 'POST',
-            body: formData,
-            headers: {
-              'X-Requested-With': 'XMLHttpRequest',
-              'X-CSRFToken': this.getCsrfToken(),
-            },
+          const expired = new Promise((_, reject) => {
+            timeout = window.setTimeout(() => {
+              reject(new Error('Notebook export response timed out.'));
+              controller.abort();
+            }, NOTEBOOK_EXPORT_TIMEOUT_MS);
           });
-          const payload = await response.json();
-          if (!response.ok) throw new Error(this.formatErrors(payload.errors));
+          const request = (async () => {
+            const response = await fetch(this.dataLabExportUrl, {
+              method: 'POST',
+              body: formData,
+              signal: controller.signal,
+              headers: {
+                'X-Requested-With': 'XMLHttpRequest',
+                'X-CSRFToken': this.getCsrfToken(),
+              },
+            });
+            if (controller.signal.aborted) {
+              await response.body?.cancel().catch(() => {});
+              throw new Error('Notebook export response timed out.');
+            }
+            const payload = await readInspectorJSON(response, this.responseBytes, { allowHttpError: true });
+            if (!response.ok) {
+              // A parsed 4xx is a definite refusal before any export was written.
+              throw Object.assign(new Error(this.formatErrors(payload?.errors)),
+                { refused: response.status >= 400 && response.status < 500 });
+            }
+            return payload;
+          })();
+          // Race the whole read so even an unresponsive transport releases the form.
+          const payload = await Promise.race([request, expired]);
           this.showToast('Notebook exported.', 'success');
           // Export responses own the new notebook, never a stale workspace snapshot.
           if (generation === this.notebookSelectionGeneration) {
             this.updateDataLab(payload.data_lab || null);
           }
         } catch (error) {
-          this.showToast(error.message || 'Unable to export notebook.', 'danger');
+          const message = error.message || 'Unable to export notebook.';
+          this.showToast(error.refused ? message : `${message} `
+            + 'The export may already have completed. Inspect the notebook listing or export directory '
+            + 'before a deliberate retry; retrying creates another file.', 'danger');
         } finally {
+          window.clearTimeout(timeout);
           this.dataLabExportPending = false;
           controls.forEach(([control, disabled]) => { control.disabled = disabled; });
         }

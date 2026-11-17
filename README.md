@@ -310,14 +310,17 @@ Commands whose normal output fits the budgets behave as before.
 Line framing scans only newly decoded text and joins each completed/final line once,
 so newline-free output uses linear work within the same byte limit.
 
-Inspector status and task-detail responses stream through a byte ceiling before JSON
-parsing, regardless of missing or inaccurate Content-Length. The ceiling is
+Inspector status, task-detail and export responses (including export errors) stream
+through a byte ceiling before JSON parsing, regardless of missing or inaccurate
+Content-Length. The ceiling is
 `DJDESK_INSPECTOR_RESPONSE_BYTES` (default 8 MiB plus 30 times the task-log budget, enough
 for five logs made only of JSON-escaped control characters; raising the task-log budget
 raises this default), passed to the dashboard as `data-response-bytes`; without a valid
 attribute the reader falls back to 8 MiB. Overflow cancels the
 read and preserves the last displayed status/log; later polls or a drawer reload can
 recover with a smaller response. The drawer DOM test also covers this response boundary.
+An oversized export reply preserves the current notebook and reports an uncertain
+outcome with the same inspection guidance as a timed-out acknowledgement.
 
 Data Lab exports exclusively claim a fresh filename on every export: the template
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
@@ -327,6 +330,12 @@ with the actual filename stem, and the viewer opens that newly created export.
 bounded listing. The export form permits one in-flight POST, restores its controls
 after success or failure, and never retries automatically. A notebook selected while
 the POST is pending keeps the viewer; export responses do not replace polled workspace state.
+One 30-second deadline covers the POST and its response body. Timeout aborts the request,
+restores the controls and ignores late acknowledgements. A missing acknowledgement does
+not prove the export failed: inspect the notebook listing or export directory before
+a deliberate retry, which creates another file. The form never repeats the POST itself.
+A parsed 4xx reply (for example an invalid template) is a definite refusal and is
+shown without that guidance.
 A successful HTTP 201 is a receipt for an already published and synced notebook. If the
 optional workspace/inventory refresh or its serialization fails, the response still
 returns `data_lab.selected_notebook` and `data_lab.selected_notebook_url`. The drawer

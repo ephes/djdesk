@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Index recent scan and task-run history by workspace, creation time and primary key,
+  preserving four/five-row windows and deferred logs without sorting full histories.
+
 - Omit notebook inventory entries with nonfinite or undisplayable modification times
   and report an incomplete inventory, preserving valid siblings and status polling
   without substituting fabricated dates. Keep representable boundary and epoch times.

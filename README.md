@@ -199,6 +199,9 @@ collisions are retried, at most five attempts.
 
 The dashboard loads four recent scans and five recent task runs for the selected
 workspace only, ordered newest first with the primary key breaking timestamp ties.
+Composite workspace/created-at/ID indexes serve these windows without sorting the
+workspace's complete history. Migration 0006 builds both indexes on existing history;
+allow time for the index build when updating a large database.
 The workspace selector loads at most 50 names and paths per page, ordered by name
 then primary key, without historical logs or metadata. Use Previous/Next or search
 by name/path (at most 120 characters); the URL parameters are `workspace_page`

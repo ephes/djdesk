@@ -15,6 +15,20 @@ to ``BASE_DIR / "sample_projects"``. Existing applied migrations are not replaye
 these safeguards affect future installations, historical restores and rollbacks.
 Do not fake-unapply/reapply them to update an existing installation's content.
 
+Migration drift gate
+--------------------
+
+``just test`` and ``just ci`` include ``tests.test_migration_drift``, which runs
+``makemigrations --check --dry-run --noinput`` under ``djdesk.settings.test`` and
+fails when a model change has no committed migration. A renamed field or model is
+reported as remove/add drift instead of prompting, so the gate never waits for input. ``just check-migrations`` runs the same
+check on its own. The test also proves the check is not vacuous by pointing the
+inspector app at a history containing only ``0001_initial`` and expecting a
+failure, and it refuses a ``MIGRATION_MODULES`` override that would disable the
+inspector migrations. To fix a failure, run ``uv run python manage.py
+makemigrations``, review the generated migration and commit it with the model
+change.
+
 Seed rollback
 -------------
 

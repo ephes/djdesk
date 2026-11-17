@@ -30,7 +30,8 @@ specs/                   # Internal planning notes (NEVER commit these!)
 ```bash
 just install              # uv sync (install deps + editable package)
 just dev                  # Start Django dev server (local settings)
-just test                 # Run Django tests (test settings)
+just test                 # Run Django tests (test settings), incl. migration drift check
+just check-migrations     # Only makemigrations --check --dry-run --noinput (test settings)
 just lint                 # Run Ruff checks
 just hooks                # Run all pre-commit hooks
 ```

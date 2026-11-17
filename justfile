@@ -32,6 +32,10 @@ hooks:
 test:
     DJANGO_SETTINGS_MODULE=djdesk.settings.test uv run python manage.py test tests
 
+# Fail when models and committed migrations diverge (also enforced by `just test`).
+check-migrations:
+    DJANGO_SETTINGS_MODULE=djdesk.settings.test uv run python manage.py makemigrations --check --dry-run --noinput
+
 # Install Electron dependencies under ./electron (once per clone or after package upgrades).
 electron-install:
     cd electron && npm install

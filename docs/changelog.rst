@@ -10,7 +10,8 @@ Fixed
 - Anchor sample publication, recovery, rollback and cleanup to held no-follow directory
   descriptors. Recheck named generations before mutations, refuse replaced namespaces
   and retain recovery data with directory identity diagnostics instead of following
-  a swapped parent into another tree.
+  a swapped parent into another tree. Per-sample locks are created inside the held root
+  descriptor and recheck the root name after acquisition.
 
 - Index recent scan and task-run history by workspace, creation time and primary key,
   preserving four/five-row windows and deferred logs without sorting full histories.

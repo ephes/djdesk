@@ -291,3 +291,71 @@ class SampleAuthorityTests(SimpleTestCase):
                 samples.ensure_sample_projects(self.root, force=True)
         self.assertEqual((self.root / "fixture/value.txt").read_text(), "sentinel")
         self.assertEqual((self.base / "samples-saved/fixture/value.txt").read_text(), "old")
+
+    def test_root_replaced_before_and_between_locks_never_locks_foreign_tree(self):
+        projects = [
+            samples.SampleProject(slug, slug, "Synthetic", slug, {"value.txt": "new"})
+            for slug in ("fixture", "second")
+        ]
+        for swap_before in ("fixture", "second"):
+            for symlink in (True, False):
+                with self.subTest(before=swap_before, symlink=symlink):
+                    self.new_namespace(f"lock-{swap_before}-{symlink}")
+                    lock = samples.sample_lock
+                    saved = None
+
+                    def replace_before_lock(root, root_fd, slug, **kwargs):
+                        nonlocal saved
+                        if slug == swap_before:
+                            saved = self.replace(self.root, symlink)
+                        return lock(root, root_fd, slug, **kwargs)
+
+                    with (
+                        mock.patch.object(samples, "SAMPLE_PROJECTS", projects),
+                        mock.patch.object(samples, "sample_lock", side_effect=replace_before_lock),
+                    ):
+                        with self.assertRaises(OSError):
+                            samples.ensure_sample_projects(self.root, force=True)
+                    self.assertEqual(sorted(p.name for p in self.foreign.iterdir()), ["fixture"])
+                    self.assertEqual((self.foreign / "fixture/value.txt").read_text(), "sentinel")
+                    if not symlink:
+                        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["sentinel"])
+                    self.assertFalse((saved / ".second.lock").exists())
+                    self.assertEqual((saved / ".fixture.lock").exists(), swap_before == "second")
+                    if symlink:
+                        self.root.unlink()
+
+    def test_root_replaced_while_waiting_for_lock_is_refused_after_acquisition(self):
+        import fcntl
+
+        with publication._directory(self.root) as root_fd:
+            holder = os.open(".fixture.lock", os.O_RDWR | os.O_CREAT, 0o644, dir_fd=root_fd)
+            self.addCleanup(os.close, holder)
+            fcntl.flock(holder, fcntl.LOCK_EX)
+            saved = None
+            sleep = time.sleep
+
+            def swap_then_release(seconds):
+                nonlocal saved
+                if saved is None:
+                    saved = self.replace(self.root, False)
+                    fcntl.flock(holder, fcntl.LOCK_UN)
+                sleep(seconds)
+
+            with mock.patch.object(publication.time, "sleep", side_effect=swap_then_release):
+                with self.assertRaises(OSError):
+                    with publication.sample_lock(self.root, root_fd, "fixture"):
+                        self.fail("lock body must not run after the root name changed")
+        self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["sentinel"])
+        self.assertTrue((saved / ".fixture.lock").exists())
+
+    def test_held_root_lock_times_out_and_shares_the_inode_with_filelock(self):
+        from filelock import FileLock
+
+        with publication.sample_root_owner(self.root) as root_fd:
+            with FileLock(self.root / ".fixture.lock", preserve_lock_file=True):
+                with self.assertRaises(TimeoutError):
+                    with publication.sample_lock(self.root, root_fd, "fixture", timeout=0.1):
+                        self.fail("lock must stay exclusive")
+            with publication.sample_lock(self.root, root_fd, "fixture", timeout=0.1):
+                pass

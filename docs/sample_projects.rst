@@ -23,7 +23,9 @@ an existing sample without force still works.
 
 Publication and recovery keep verified root and staging directory descriptors open
 through their final mutation. One root owner spans lock acquisition and the gap between
-recovery/existence checks and publication. Staged writes, journal creation/removal, renames,
+recovery/existence checks and publication. Each stable ``.<slug>.lock`` file is created and
+locked relative to that held root, and the root name is checked again before and after
+acquisition, so a root swapped before or between samples cannot be locked or published. Staged writes, journal creation/removal, renames,
 rollback and destructive cleanup use directory-relative public filesystem APIs,
 so renaming a parent or replacing it with a symlink cannot redirect them into another
 tree. Named root/staging and generation identities are checked again before namespace

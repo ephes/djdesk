@@ -6,12 +6,18 @@ import json
 import os
 import shutil
 import stat
+import time
 import uuid
 import warnings
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from .filesystem import sync_descriptor
+
+try:  # pragma: no cover - absent on Windows
+    import fcntl
+except ImportError:  # pragma: no cover
+    fcntl = None
 
 
 class SampleDurabilityError(OSError):
@@ -116,6 +122,36 @@ def sample_root_owner(root: Path):
         _check_root(root, fd)
         yield fd
         _check_root(root, fd)
+
+
+@contextmanager
+def sample_lock(root: Path, root_fd: int, slug: str, *, timeout: float = 10):
+    """Hold the stable per-sample lock created inside the held root generation."""
+    _check_root(root, root_fd)
+    name = f".{slug}.lock"
+    # Never unlink this stable lock: waiters must share the same inode.
+    flags = os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+    fd = os.open(name, flags, 0o644, dir_fd=root_fd)
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(f"Sample lock needs manual inspection (not a regular file): {name}")
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for sample lock {root / name}") from None
+                time.sleep(0.05)
+        try:
+            # The lock inode is anchored to root_fd; the root name must still point there.
+            _check_root(root, root_fd)
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def _check_names(destination, root_fd, stage_fd, intent):

@@ -59,6 +59,14 @@ class HistoryIndexTests(TestCase):
             )
         executor = MigrationExecutor(self.connection)
         executor.migrate(executor.loader.graph.leaf_nodes())
+        if self.connection.vendor == "postgresql":
+            # Autovacuum would gather these statistics on a populated installation;
+            # without them the planner sizes the fresh bulk-loaded tables as tiny.
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    "ANALYZE inspector_workspace, inspector_scanjob, "
+                    "inspector_workspacetaskrun, inspector_taskpreset"
+                )
 
     def close_alias(self):
         connections[self.alias].close()

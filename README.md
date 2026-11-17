@@ -365,6 +365,9 @@ times. Directory changes invalidate the window; editing file contents does not r
 a new scan. `data_lab.notebooks_incomplete` and the drawer notice indicate a limited or
 unavailable inventory. All files remain untouched, and older direct viewer URLs continue
 to work. Polls keep an already open notebook even if it is outside their window.
+Entries whose modification time is nonfinite or cannot be displayed as a UTC date
+in years 1–9999 are omitted and mark the inventory incomplete. Valid siblings remain
+visible; no current or epoch time is substituted. A valid epoch timestamp is preserved.
 
 Run the real drawer DOM regression separately with development npm dependencies and an
 installed Chromium (`npm ci --ignore-scripts` in `electron/`, then `npm run test:drawer`).

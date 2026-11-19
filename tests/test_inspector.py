@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -18,7 +19,7 @@ from djdesk.inspector import data_lab
 from djdesk.inspector import forms as inspector_forms
 from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm, WorkspaceWizardForm
-from djdesk.inspector.models import ScanJob, TaskPreset, Workspace, WorkspaceTaskRun
+from djdesk.inspector.models import DocLink, ScanJob, TaskPreset, Workspace, WorkspaceTaskRun
 from djdesk.inspector.tasks import execute_workspace_task
 from djdesk.inspector.views import DashboardView
 
@@ -490,6 +491,31 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Offline bundle", response.content)
         self.assertIn(b'/docs/offline/"', response.content)
+
+    @override_settings(INSPECTOR_DOCS_BASE_URL="https://docs.example.com/en/latest/")
+    def test_offline_dashboard_renders_link_policy_for_each_resolved_url(self) -> None:
+        external = "https://reference.example.org/docs/offline/reference.html"
+        DocLink.objects.create(
+            slug="mapped-synthetic",
+            title="Mapped guide",
+            url="https://docs.example.com/en/latest/guide.html#details",
+        )
+        DocLink.objects.create(slug="external-synthetic", title="External reference", url=external)
+        offline_root = reverse("inspector:docs-offline-root")
+        mapped = f"{offline_root}guide.html#details"
+        with TemporaryDirectory() as temp_dir:
+            (Path(temp_dir) / "index.html").write_text("<html>Docs</html>")
+            with override_settings(INSPECTOR_DOCS_BUNDLE_ROOT=temp_dir):
+                response = self.client.get(reverse("inspector:dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["docs_base_url"], offline_root)
+        html = response.content.decode()
+        self.assertRegex(html, rf'<a\s+href="{re.escape(mapped)}"[^>]*data-doc-external="false"')
+        self.assertRegex(
+            html,
+            rf'<a\s+href="{re.escape(external)}"[^>]*target="_blank"[^>]*data-doc-external="true"',
+        )
 
     @override_settings(INSPECTOR_DOCS_BASE_URL="https://docs.example.com/en/latest/")
     def test_doc_url_skips_external_hosts(self) -> None:

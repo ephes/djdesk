@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Verify that the offline docs index is readable as a regular file before
+  advertising the bundle. Use the online docs when the index fails admission.
+- Preserve external navigation for docs links whose resolved destination stays
+  external while the drawer defaults to the offline bundle.
+
 - Return HTTP 201 with the saved task receipt if the optional workspace refresh
   fails, and keep the inspector panels intact until polling refreshes them.
 - Keep the task creation receipt when the backend accepts dispatch but its result

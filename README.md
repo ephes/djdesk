@@ -103,7 +103,12 @@ Creation/replacement requires no-follow directory opens and directory fsync; uns
 filesystems and Windows refuse before replacing existing samples. Existing samples can
 still be skipped without force. See [sample publication and recovery](docs/sample_projects.rst).
 
-The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
+The Electron docs drawer prefers a local Sphinx bundle when its index can be opened
+as a verified regular file. Run `just docs-bundle` to copy `docs/_build/html` into
+`var/docs_bundle/`. The drawer falls back to https://djdesk.readthedocs.io/ when
+the index is missing or fails admission.
+Links mapped into the bundle use the local drawer. Links that resolve to an
+external destination retain their external navigation behavior in offline mode.
 
 Offline assets are served from verified regular-file handles anchored to the admitted
 bundle directory. Directory-relative no-follow opens prevent swapped paths from redirecting

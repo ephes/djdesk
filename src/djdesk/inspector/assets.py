@@ -47,14 +47,14 @@ def docs_bundle_root() -> Path:
     return Path(raw).expanduser().resolve()
 
 
-def docs_bundle_index() -> Path:
-    """Path to the offline docs entry point (``index.html``)."""
-    return docs_bundle_root() / "index.html"
-
-
 def docs_bundle_available() -> bool:
     """Return True if an offline docs build can be read safely on this platform."""
-    return hasattr(os, "O_NONBLOCK") and docs_bundle_index().exists()
+    try:
+        _, handle = open_docs_asset(None)
+        handle.close()
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def resolve_docs_asset(path_fragment: str | None) -> Path:

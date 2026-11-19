@@ -121,8 +121,9 @@ class DashboardView(TemplateView):
 
     def _docs_source(self) -> dict[str, Any]:
         offline = assets.docs_bundle_available()
+        offline_root = reverse("inspector:docs-offline-root")
         if offline:
-            base_url = reverse("inspector:docs-offline-root")
+            base_url = offline_root
             label = "Offline bundle"
         else:
             base_url = settings.INSPECTOR_DOCS_BASE_URL
@@ -138,7 +139,7 @@ class DashboardView(TemplateView):
                     "url": url,
                     "icon": link.icon,
                     "pane_target": link.pane_target,
-                    "external": not offline,
+                    "external": not url.startswith(offline_root),
                 }
             )
         return {"base_url": base_url, "links": links, "offline": offline, "label": label}
@@ -344,7 +345,7 @@ class OfflineDocsView(View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, resource: str = "") -> FileResponse:
-        if not assets.docs_bundle_available():
+        if resource and not assets.docs_bundle_available():
             raise Http404("Offline docs bundle not found.")
         try:
             asset_path, handle = assets.open_docs_asset(resource)

@@ -103,7 +103,12 @@ Creation/replacement requires no-follow directory opens and directory fsync; uns
 filesystems and Windows refuse before replacing existing samples. Existing samples can
 still be skipped without force. See [sample publication and recovery](docs/sample_projects.rst).
 
-The Electron docs drawer prefers a local Sphinx bundle when it exists. Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`; the drawer automatically falls back to https://djdesk.readthedocs.io/ when the offline bundle is missing.
+The Electron docs drawer prefers a local Sphinx bundle when its index can be opened
+as a verified regular file. Run `just docs-bundle` to copy `docs/_build/html` into
+`var/docs_bundle/`. The drawer falls back to https://djdesk.readthedocs.io/ when
+the index is missing or fails admission.
+Links mapped into the bundle use the local drawer. Links that resolve to an
+external destination retain their external navigation behavior in offline mode.
 
 Offline assets are served from verified regular-file handles anchored to the admitted
 bundle directory. Directory-relative no-follow opens prevent swapped paths from redirecting
@@ -190,6 +195,11 @@ Queued workspace tasks atomically claim only `REQUESTED` runs. Duplicate deliver
 returns the persisted command outcome, or `{skipped: true, status: ...}` while a
 run is in progress or has no outcome. It never resets logs or timestamps and
 holds no database transaction open while executing a command.
+The worker publishes the final command receipt with status, completion time and
+progress in one ownership-checked update. Logs can appear earlier during execution.
+Unexpected failures include a bounded diagnostic in the receipt and log. The worker
+records the exception category if its message cannot be formatted, and the original
+exception continues to the task backend.
 Task dispatch carries the saved run's database alias through claim, logs, metadata,
 result ID and terminal writes. Programmatic callers use
 `execute_workspace_task.enqueue(run_id, database="alias")` (or `.call` for immediate
@@ -237,6 +247,12 @@ The immediate backend executes after commit and can return a finished outcome;
 the database backend queues the committed ID for workers. An enqueue error marks
 only an unclaimed request failed, preserving a worker's running or completed outcome.
 Poll task status for the final outcome, including deferred enqueue failures.
+HTTP 201 includes a `task_run` receipt with the saved ID and current state. If the
+optional workspace snapshot or its serialization fails, the response contains
+only the receipt, and the drawer retains its existing panels until the next poll.
+If the backend accepts the enqueue but saving its result ID fails, the server logs
+a warning with the run ID. The receipt still reports the saved run's state and
+dispatch is attempted only once.
 
 After a worker crash, stop all workers owning the selected runs and terminate/check
 their command process trees before recovery. Age alone does not establish abandonment.

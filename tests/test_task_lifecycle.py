@@ -5,12 +5,13 @@ from unittest import mock
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import connections, transaction
+from django.db import DatabaseError, connections, transaction
+from django.db.models import QuerySet
 from django.db.models.deletion import ProtectedError
 from django.test import TransactionTestCase
 from django.urls import reverse
 
-from djdesk.inspector.command_runner import CommandResult
+from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm
 from djdesk.inspector.models import TaskPreset, Workspace, WorkspaceTaskRun
 from djdesk.inspector.tasks import execute_workspace_task
@@ -174,7 +175,75 @@ class TaskLifecycleTests(TransactionTestCase):
                     WorkspaceTaskRun.objects.filter(pk=run.pk).values().get(), recovered
                 )
 
-    def test_recovery_between_command_metadata_and_terminal_write_wins(self):
+    def test_terminal_update_failure_leaves_status_and_receipt_unsettled(self):
+        for outcome in (CommandResult(0, 0.1, 0, "check"), CommandExecutionError("Stopped")):
+            with self.subTest(outcome=outcome):
+                run = WorkspaceTaskRun.objects.create(
+                    workspace=self.workspace, preset=self.preset, metadata={"notes": "keep"}
+                )
+                runner = (
+                    {"side_effect": outcome}
+                    if isinstance(outcome, Exception)
+                    else {"return_value": outcome}
+                )
+
+                with (
+                    mock.patch("djdesk.inspector.tasks.run_command", **runner) as command,
+                    mock.patch.object(
+                        WorkspaceTaskRun, "mark_finished", side_effect=OSError("write failed")
+                    ),
+                    mock.patch("djdesk.inspector.tasks._record_unexpected_failure"),
+                    self.assertRaisesRegex(OSError, "write failed"),
+                ):
+                    execute_workspace_task.call(run.pk)
+                command.assert_called_once()
+                run.refresh_from_db()
+                self.assertEqual(run.status, WorkspaceTaskRun.Status.RUNNING)
+                self.assertIsNone(run.completed_at)
+                self.assertEqual(run.metadata, {"notes": "keep"})
+
+    def test_terminal_update_publishes_status_and_command_receipt(self):
+        for outcome in (CommandResult(0, 0.1, 0, "check"), CommandExecutionError("Stopped")):
+            with self.subTest(outcome=outcome):
+                run = WorkspaceTaskRun.objects.create(
+                    workspace=self.workspace, preset=self.preset, metadata={"notes": "keep"}
+                )
+                failed = isinstance(outcome, Exception)
+                runner = {"side_effect": outcome} if failed else {"return_value": outcome}
+                with mock.patch("djdesk.inspector.tasks.run_command", **runner):
+                    payload = execute_workspace_task.call(run.pk)
+                run.refresh_from_db()
+                self.assertEqual(run.status, "failed" if failed else "succeeded")
+                self.assertEqual(run.progress, 100)
+                self.assertIsNotNone(run.completed_at)
+                self.assertEqual(run.metadata, {"notes": "keep", "command": payload})
+                if failed:
+                    self.assertEqual(payload["error"], "Stopped")
+                else:
+                    self.assertEqual(payload["exit_code"], 0)
+
+    def test_unprintable_runner_error_settles_run_and_preserves_original_error(self):
+        class BrokenDiagnosticError(Exception):
+            def __str__(self):
+                raise RuntimeError("formatting failed")
+
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        error = BrokenDiagnosticError()
+        with (
+            mock.patch("djdesk.inspector.tasks.run_command", side_effect=error),
+            self.assertRaises(BrokenDiagnosticError) as raised,
+        ):
+            execute_workspace_task.call(run.pk)
+        self.assertIs(raised.exception, error)
+        run.refresh_from_db()
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertEqual(run.progress, 100)
+        self.assertIsNotNone(run.completed_at)
+        diagnostic = "Command execution failed unexpectedly: BrokenDiagnosticError"
+        self.assertEqual(run.metadata["command"]["error"], diagnostic)
+        self.assertIn(diagnostic, run.log)
+
+    def test_recovery_before_terminal_publication_wins(self):
         run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
         finish = WorkspaceTaskRun.mark_finished
         recovered = {}
@@ -277,6 +346,84 @@ class TaskLifecycleTests(TransactionTestCase):
         )
         other.refresh_from_db()
         self.assertEqual(other.status, "running")
+
+    def test_create_returns_receipt_when_optional_status_refresh_fails(self):
+        for failure in (
+            {"side_effect": RuntimeError("snapshot failed")},
+            {
+                "return_value": {
+                    "unserializable": object(),
+                }
+            },
+        ):
+            with (
+                self.subTest(failure=failure),
+                mock.patch("djdesk.inspector.forms.execute_workspace_task") as task,
+                mock.patch("djdesk.inspector.views.workspace_status_payload", **failure),
+                self.assertLogs("djdesk.inspector.views", level="ERROR"),
+            ):
+                task.enqueue.return_value.id = "queued-result"
+                response = self.client.post(
+                    reverse("inspector:task-run-create"),
+                    {
+                        "workspace": self.workspace.slug,
+                        "preset": self.preset.key,
+                        "confirm_safe": "on",
+                    },
+                )
+                self.assertEqual(response.status_code, 201)
+                receipt = response.json()["task_run"]
+                run = WorkspaceTaskRun.objects.get(pk=receipt["id"])
+                task.enqueue.assert_called_once_with(run.pk, database="default")
+                self.assertEqual(run.result_id, "queued-result")
+                self.assertEqual(receipt["status"], WorkspaceTaskRun.Status.REQUESTED)
+                self.assertEqual(set(response.json()), {"task_run"})
+
+    def test_create_keeps_accepted_run_when_result_id_write_fails(self):
+        update = QuerySet.update
+
+        def fail_result_id(queryset, **fields):
+            if "result_id" in fields:
+                raise DatabaseError("synthetic backend detail " * 200)
+            return update(queryset, **fields)
+
+        for immediate in (False, True):
+
+            def enqueue(pk, *, database):
+                if immediate:
+                    execute_workspace_task.call(pk, database=database)
+                return mock.Mock(id="accepted-result")
+
+            with (
+                self.subTest(immediate=immediate),
+                mock.patch("djdesk.inspector.forms.execute_workspace_task") as task,
+                mock.patch(
+                    "djdesk.inspector.tasks.run_command",
+                    return_value=CommandResult(0, 0.1, 0, "check"),
+                ),
+                mock.patch.object(QuerySet, "update", autospec=True, side_effect=fail_result_id),
+                self.assertLogs("djdesk.inspector.forms", level="WARNING") as logs,
+            ):
+                task.enqueue.side_effect = enqueue
+                response = self.client.post(
+                    reverse("inspector:task-run-create"),
+                    {
+                        "workspace": self.workspace.slug,
+                        "preset": self.preset.key,
+                        "confirm_safe": "on",
+                    },
+                )
+                self.assertEqual(response.status_code, 201)
+                receipt = response.json()["task_run"]
+                run = WorkspaceTaskRun.objects.get(pk=receipt["id"])
+                task.enqueue.assert_called_once_with(run.pk, database="default")
+                expected = "succeeded" if immediate else "requested"
+                self.assertEqual((receipt["status"], run.status), (expected, expected))
+                self.assertEqual(run.result_id, "")
+                self.assertIn(f"Task run {run.pk}", logs.output[0])
+                self.assertNotIn("synthetic backend detail", logs.output[0])
+                if immediate:
+                    self.assertEqual(run.metadata["command"]["exit_code"], 0)
 
     def test_view_reports_immediate_enqueue_failure(self):
         with mock.patch(

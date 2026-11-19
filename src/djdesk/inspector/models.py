@@ -292,12 +292,16 @@ class WorkspaceTaskRun(models.Model):
             self.started_at = started_at
         return bool(claimed)
 
-    def mark_finished(self, *, success: bool) -> None:
+    def mark_finished(self, *, success: bool, command: dict[str, Any] | None = None) -> None:
         self.flush_log_buffer()
         self.status = self.Status.SUCCEEDED if success else self.Status.FAILED
         self.completed_at = timezone.now()
         self.progress = 100
-        self.publish_fields("status", "completed_at", "progress")
+        fields = ["status", "completed_at", "progress"]
+        if command is not None:
+            self.metadata = {**(self.metadata or {}), "command": command}
+            fields.append("metadata")
+        self.publish_fields(*fields)
 
     def publish_fields(self, *fields: str) -> None:
         """Publish only while this instance's claim still owns the row."""

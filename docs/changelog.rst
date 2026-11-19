@@ -7,6 +7,21 @@ Unreleased
 Fixed
 ~~~~~
 
+- Verify that the offline docs index is readable as a regular file before
+  advertising the bundle. Use the online docs when the index fails admission.
+- Preserve external navigation for docs links whose resolved destination stays
+  external while the drawer defaults to the offline bundle.
+
+- Return HTTP 201 with the saved task receipt if the optional workspace refresh
+  fails, and keep the inspector panels intact until polling refreshes them.
+- Keep the task creation receipt when the backend accepts dispatch but its result
+  ID cannot be saved. Log the run ID and preserve the worker's state.
+
+- Publish task command receipts and terminal status in one ownership-checked update,
+  while retaining batched logs and explicit recovery for unsettled runs.
+- Settle a failed task even when its exception message cannot be formatted. Store
+  the exception category and let the original exception reach the task backend.
+
 - Apply the Inspector response-byte ceiling to notebook export success and error
   replies before JSON parsing. Cancel oversized streams, retain selection and bounded
   diagnostics, and require inspection before any deliberate retry.

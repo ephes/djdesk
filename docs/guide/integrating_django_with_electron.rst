@@ -160,7 +160,11 @@ The inspector's Docs drawer now prefers a local Sphinx export so tutorial captur
     just docs-bundle                   # builds docs/_build/html + copies into var/docs_bundle
     ls var/docs_bundle/index.html      # entry point served by OfflineDocsView
 
-``DashboardView`` checks ``var/docs_bundle/index.html`` and swaps the drawer + deep links to ``/docs/offline/...`` when available. The renderer still opens the external Read the Docs URL in the user's browser, but the iframe stays pinned to the offline build so QA and Electron demos render deterministically. Delete ``var/docs_bundle`` (or skip ``just docs-bundle``) to fall back to ``INSPECTOR_DOCS_BASE_URL``.
+``DashboardView`` opens ``var/docs_bundle/index.html`` using the same regular-file
+checks as the offline docs view before choosing ``/docs/offline/`` for the drawer.
+The drawer uses ``INSPECTOR_DOCS_BASE_URL`` when the index is missing or invalid.
+With the bundle active, links under the configured docs base can map to local
+pages. Links whose destinations remain external still use the external link policy.
 
 .. _guide-safe-automation:
 

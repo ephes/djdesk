@@ -22,6 +22,21 @@ class AdmittedAssetTests(TestCase):
         self.settings_override.enable()
         self.addCleanup(self.settings_override.disable)
 
+    @override_settings(INSPECTOR_DOCS_BASE_URL="https://docs.example.com/en/latest/")
+    def test_dashboard_falls_back_when_bundle_index_is_a_directory(self):
+        index = self.root / "index.html"
+        index.unlink()
+        index.mkdir()
+        (index / "index.html").write_text("nested page")
+        (self.root / "guide.html").write_text("valid alternate page")
+
+        response = self.client.get(reverse("inspector:dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["docs_source"]["offline"])
+        self.assertEqual(response.context["docs_base_url"], "https://docs.example.com/en/latest/")
+        self.assertContains(response, "Read the Docs")
+        self.assertEqual(self.client.get(reverse("inspector:docs-offline-root")).status_code, 404)
+
     def test_replacement_after_resolution_cannot_serve_outside_file(self):
         outside = Path(self.temp.name) / "private.html"
         outside.write_text("synthetic outside secret")
@@ -51,8 +66,9 @@ class AdmittedAssetTests(TestCase):
 
         def replace(resource):
             path = resolve(resource)
-            child.rename(self.root / "old-guide")
-            child.symlink_to(outside, target_is_directory=True)
+            if resource == "guide/page.html":
+                child.rename(self.root / "old-guide")
+                child.symlink_to(outside, target_is_directory=True)
             return path
 
         with mock.patch.object(assets, "resolve_docs_asset", side_effect=replace):

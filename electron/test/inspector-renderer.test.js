@@ -50,6 +50,38 @@ print(json.dumps(nodes))
 
 const hostile = '\"><img src=x onerror="sentinel"><span data-injected="';
 
+test('task creation updates panels only when the receipt includes a workspace snapshot', async () => {
+  const receipt = { task_run: { id: 42, status: 'requested' } };
+  const snapshot = { ...receipt, workspace: 'synthetic' };
+  for (const payload of [receipt, snapshot]) {
+    const TaskUI = vm.runInNewContext(source + '\nInspectorUI;', {
+      document: { addEventListener() {} },
+      FormData: class {},
+      fetch: async () => ({ ok: true, json: async () => payload }),
+    });
+    const ui = Object.create(TaskUI.prototype);
+    const updates = [];
+    const toasts = [];
+    let submit;
+    let resets = 0;
+    const form = {
+      addEventListener(event, handler) { submit = handler; },
+      reset() { resets++; },
+    };
+    ui.root = { querySelector: () => form };
+    ui.taskEndpoint = '/api/task-runs/';
+    ui.getCsrfToken = () => '';
+    ui.updateFromPayload = (data) => updates.push(data);
+    ui.showToast = (message) => toasts.push(message);
+    ui.bindTaskForm();
+    submit({ preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(resets, 1);
+    assert.deepEqual(toasts, []);
+    assert.deepEqual(updates, payload === snapshot ? [snapshot] : []);
+  }
+});
+
 test('metadata cannot create renderer elements or attributes', () => {
   const ui = uiFixture();
   ui.updateScans([{ status: hostile, kind: hostile, kind_label: hostile,

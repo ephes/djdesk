@@ -6,7 +6,7 @@ const { createHash } = require('node:crypto');
 const { Transform } = require('node:stream');
 const { pipeline } = require('node:stream/promises');
 
-async function checksum(file, expected, { maxBytes, signal }) {
+async function* readPythonArchive(file, { maxBytes, signal }) {
   signal.throwIfAborted();
   const before = await fsp.lstat(file);
   if (!before.isFile()) throw new Error('Python cache must be a regular file, not a symbolic link');
@@ -19,23 +19,35 @@ async function checksum(file, expected, { maxBytes, signal }) {
       stat.mtimeMs === admitted.mtimeMs && stat.ctimeMs === admitted.ctimeMs;
     if (!sameFile(before)) throw new Error('Python cache changed during admission');
     if (admitted.size > maxBytes) throw new Error('Python cache byte limit exceeded');
-    const hash = createHash('sha256');
     let bytes = 0;
     for await (const chunk of handle.createReadStream({ autoClose: false, signal,
       highWaterMark: Math.min(65536, maxBytes + 1) })) {
       signal.throwIfAborted();
       bytes += chunk.length;
       if (bytes > maxBytes) throw new Error('Python cache byte limit exceeded');
-      hash.update(chunk);
+      yield chunk;
     }
     signal.throwIfAborted();
     if (!sameFile(await handle.stat()) || !sameFile(await fsp.lstat(file))) {
       throw new Error('Python cache changed during validation');
     }
-    return hash.digest('hex') === expected;
   } finally {
     await handle.close();
   }
+}
+
+async function checksum(file, expected, limits) {
+  const hash = createHash('sha256');
+  for await (const chunk of readPythonArchive(file, limits)) {
+    hash.update(chunk);
+  }
+  return hash.digest('hex') === expected;
+}
+
+async function snapshotPythonArchive(source, snapshot, limits) {
+  await pipeline(readPythonArchive(source, limits),
+    fs.createWriteStream(snapshot, { flags: 'wx', mode: 0o600 }),
+    { signal: limits.signal });
 }
 
 // Only a fully downloaded, verified candidate may replace the cache entry.
@@ -94,4 +106,4 @@ async function downloadPython(url, destination, expected, {
   }
 }
 
-module.exports = { downloadPython, checksum };
+module.exports = { downloadPython, checksum, snapshotPythonArchive };

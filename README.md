@@ -488,6 +488,8 @@ Cache validation shares the transfer deadline. Downloads stage beside the cache,
 allow at most five HTTPS redirects and 256 MiB, and have a two minute total deadline.
 Only a matching registered SHA256 is published. Failed attempts remove their own
 partials and preserve the prior cache; a stale or interrupted cache is retried automatically.
+Extraction reads a bounded private snapshot after verifying its own registered SHA256,
+so a cache refresh cannot change the archive passed to tar.
 Runtime builds reserve their destination, construct and verify unique sibling staging,
 then promote with restoration of the old bundle on failure. See
 [build and recovery details](electron/README.md#building-the-django-bundle-phase-3),

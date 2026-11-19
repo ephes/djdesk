@@ -4,7 +4,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const { downloadPython, checksum } = require('./python-download');
+const { downloadPython, checksum, snapshotPythonArchive } = require('./python-download');
 const toml = require('toml');
 const { spawn, spawnSync, execSync } = require('child_process');
 
@@ -91,25 +91,22 @@ async function publishRuntime(destination, operations, io) {
   try {
     await io.mkdir(staging);
     await buildRuntime(staging, operations);
-    let hadPrevious = false;
-    try {
-      await io.rename(destination, backup);
-      hadPrevious = true;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+    const candidate = await io.lstat(staging, { bigint: true });
+    const previous = await runtimeIdentity(destination, io);
+    if (previous) {
+      try {
+        await io.rename(destination, backup);
+      } catch (error) {
+        retained = await reconcileRuntime({ previous, destination, backup, error, io }) === 'retained';
+        throw error;
+      }
     }
     try {
       await io.rename(staging, destination);
     } catch (error) {
-      if (hadPrevious) {
-        try {
-          await io.rename(backup, destination);
-        } catch (restoreError) {
-          retained = true;
-          error.recoveryPath = backup;
-          error.message += `; restoration failed: ${restoreError.message}; recover from ${backup}`;
-        }
-      }
+      const outcome = await reconcileRuntime({ previous, destination, backup, error, io, candidate });
+      if (outcome === 'installed') return;
+      retained = outcome === 'retained';
       throw error;
     }
   } catch (error) {
@@ -124,6 +121,38 @@ async function publishRuntime(destination, operations, io) {
         failure.message += `; staging cleanup failed: ${error.message}`;
       }
     }
+  }
+}
+
+async function runtimeIdentity(file, io) {
+  try {
+    return await io.lstat(file, { bigint: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function sameRuntime(expected, actual) {
+  return actual && expected.dev === actual.dev && expected.ino === actual.ino;
+}
+
+async function reconcileRuntime({ previous, destination, backup, error, io, candidate }) {
+  try {
+    const installed = await runtimeIdentity(destination, io);
+    if (candidate && sameRuntime(candidate, installed)) return 'installed';
+    if (!previous) return 'failed';
+    const saved = await runtimeIdentity(backup, io);
+    if (!saved && sameRuntime(previous, installed)) return 'restored';
+    if (installed || !sameRuntime(previous, saved)) {
+      throw new Error('runtime generation could not be safely restored');
+    }
+    await io.rename(backup, destination);
+    return 'restored';
+  } catch (restoreError) {
+    error.recoveryPath = previous ? backup : path.dirname(backup);
+    error.message += `; restoration failed: ${restoreError.message}; inspect ${error.recoveryPath}`;
+    return 'retained';
   }
 }
 
@@ -185,13 +214,17 @@ async function prepareStandalonePython({ assetName, pythonRelative }, root = bun
 async function extractPython(archivePath, assetName, pythonDir, {
   verify = verifyChecksum, extract = extractArchive, io = fsp
 } = {}) {
-  await verify(archivePath, assetName);
   const tempDir = await io.mkdtemp(path.join(os.tmpdir(), 'djdesk-python-'));
   let failure;
   try {
-    await extract(archivePath, tempDir);
+    const snapshot = path.join(tempDir, 'archive.tar.gz');
+    const unpacked = path.join(tempDir, 'unpacked');
+    const limits = { maxBytes: 256 * 1024 * 1024, signal: AbortSignal.timeout(120000) };
+    await snapshotPythonArchive(archivePath, snapshot, limits);
+    await verify(snapshot, assetName, limits);
+    await extract(snapshot, unpacked);
 
-    const extractedPythonDir = path.join(tempDir, 'python');
+    const extractedPythonDir = path.join(unpacked, 'python');
     if (!fs.existsSync(extractedPythonDir)) {
       throw new Error('python-build-standalone archive missing python directory');
     }
@@ -233,15 +266,13 @@ function ensureTarAvailable() {
   }
 }
 
-async function verifyChecksum(filePath, assetName) {
+async function verifyChecksum(filePath, assetName, limits) {
   const expected = PYTHON_SHA256[assetName];
   if (!expected) {
     throw new Error(`No checksum registered for ${assetName}`);
   }
 
-  if (!await checksum(filePath, expected, {
-    maxBytes: 256 * 1024 * 1024, signal: AbortSignal.timeout(120000)
-  })) {
+  if (!await checksum(filePath, expected, limits)) {
     throw new Error(`Checksum mismatch for ${assetName}`);
   }
 }
@@ -249,10 +280,20 @@ async function verifyChecksum(filePath, assetName) {
 function ensurePythonVersion(pythonExecutable) {
   const result = spawnSync(pythonExecutable, ['--version'], {
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10000,
+    killSignal: 'SIGKILL'
   });
-  const output = `${result.stdout}${result.stderr}`.trim();
-  if (!output.includes(PYTHON_VERSION)) {
+  if (result.error) {
+    throw new Error(`Python version probe failed: ${result.error.message}`, { cause: result.error });
+  }
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
+  if (result.status !== 0) {
+    const exit = result.signal ? `signal ${result.signal}` : `status ${result.status}`;
+    throw new Error(`Python version probe failed (${exit}): ${output}`);
+  }
+  const version = /^Python[ \t]+(\S+)$/.exec(output)?.[1];
+  if (version !== PYTHON_VERSION) {
     throw new Error(`Unexpected Python version (${output}); expected ${PYTHON_VERSION}`);
   }
 }

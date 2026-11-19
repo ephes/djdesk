@@ -190,6 +190,11 @@ Queued workspace tasks atomically claim only `REQUESTED` runs. Duplicate deliver
 returns the persisted command outcome, or `{skipped: true, status: ...}` while a
 run is in progress or has no outcome. It never resets logs or timestamps and
 holds no database transaction open while executing a command.
+The worker publishes the final command receipt with status, completion time and
+progress in one ownership-checked update. Logs can appear earlier during execution.
+Unexpected failures include a bounded diagnostic in the receipt and log. The worker
+records the exception category if its message cannot be formatted, and the original
+exception continues to the task backend.
 Task dispatch carries the saved run's database alias through claim, logs, metadata,
 result ID and terminal writes. Programmatic callers use
 `execute_workspace_task.enqueue(run_id, database="alias")` (or `.call` for immediate

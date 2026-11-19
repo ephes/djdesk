@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Publish task command receipts and terminal status in one ownership-checked update,
+  while retaining batched logs and explicit recovery for unsettled runs.
+- Settle a failed task even when its exception message cannot be formatted. Store
+  the exception category and let the original exception reach the task backend.
+
 - Apply the Inspector response-byte ceiling to notebook export success and error
   replies before JSON parsing. Cancel oversized streams, retain selection and bounded
   diagnostics, and require inspection before any deliberate retry.

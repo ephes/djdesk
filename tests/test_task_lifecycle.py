@@ -10,7 +10,7 @@ from django.db.models.deletion import ProtectedError
 from django.test import TransactionTestCase
 from django.urls import reverse
 
-from djdesk.inspector.command_runner import CommandResult
+from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm
 from djdesk.inspector.models import TaskPreset, Workspace, WorkspaceTaskRun
 from djdesk.inspector.tasks import execute_workspace_task
@@ -174,7 +174,75 @@ class TaskLifecycleTests(TransactionTestCase):
                     WorkspaceTaskRun.objects.filter(pk=run.pk).values().get(), recovered
                 )
 
-    def test_recovery_between_command_metadata_and_terminal_write_wins(self):
+    def test_terminal_update_failure_leaves_status_and_receipt_unsettled(self):
+        for outcome in (CommandResult(0, 0.1, 0, "check"), CommandExecutionError("Stopped")):
+            with self.subTest(outcome=outcome):
+                run = WorkspaceTaskRun.objects.create(
+                    workspace=self.workspace, preset=self.preset, metadata={"notes": "keep"}
+                )
+                runner = (
+                    {"side_effect": outcome}
+                    if isinstance(outcome, Exception)
+                    else {"return_value": outcome}
+                )
+
+                with (
+                    mock.patch("djdesk.inspector.tasks.run_command", **runner) as command,
+                    mock.patch.object(
+                        WorkspaceTaskRun, "mark_finished", side_effect=OSError("write failed")
+                    ),
+                    mock.patch("djdesk.inspector.tasks._record_unexpected_failure"),
+                    self.assertRaisesRegex(OSError, "write failed"),
+                ):
+                    execute_workspace_task.call(run.pk)
+                command.assert_called_once()
+                run.refresh_from_db()
+                self.assertEqual(run.status, WorkspaceTaskRun.Status.RUNNING)
+                self.assertIsNone(run.completed_at)
+                self.assertEqual(run.metadata, {"notes": "keep"})
+
+    def test_terminal_update_publishes_status_and_command_receipt(self):
+        for outcome in (CommandResult(0, 0.1, 0, "check"), CommandExecutionError("Stopped")):
+            with self.subTest(outcome=outcome):
+                run = WorkspaceTaskRun.objects.create(
+                    workspace=self.workspace, preset=self.preset, metadata={"notes": "keep"}
+                )
+                failed = isinstance(outcome, Exception)
+                runner = {"side_effect": outcome} if failed else {"return_value": outcome}
+                with mock.patch("djdesk.inspector.tasks.run_command", **runner):
+                    payload = execute_workspace_task.call(run.pk)
+                run.refresh_from_db()
+                self.assertEqual(run.status, "failed" if failed else "succeeded")
+                self.assertEqual(run.progress, 100)
+                self.assertIsNotNone(run.completed_at)
+                self.assertEqual(run.metadata, {"notes": "keep", "command": payload})
+                if failed:
+                    self.assertEqual(payload["error"], "Stopped")
+                else:
+                    self.assertEqual(payload["exit_code"], 0)
+
+    def test_unprintable_runner_error_settles_run_and_preserves_original_error(self):
+        class BrokenDiagnosticError(Exception):
+            def __str__(self):
+                raise RuntimeError("formatting failed")
+
+        run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
+        error = BrokenDiagnosticError()
+        with (
+            mock.patch("djdesk.inspector.tasks.run_command", side_effect=error),
+            self.assertRaises(BrokenDiagnosticError) as raised,
+        ):
+            execute_workspace_task.call(run.pk)
+        self.assertIs(raised.exception, error)
+        run.refresh_from_db()
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.FAILED)
+        self.assertEqual(run.progress, 100)
+        self.assertIsNotNone(run.completed_at)
+        diagnostic = "Command execution failed unexpectedly: BrokenDiagnosticError"
+        self.assertEqual(run.metadata["command"]["error"], diagnostic)
+        self.assertIn(diagnostic, run.log)
+
+    def test_recovery_before_terminal_publication_wins(self):
         run = WorkspaceTaskRun.objects.create(workspace=self.workspace, preset=self.preset)
         finish = WorkspaceTaskRun.mark_finished
         recovered = {}

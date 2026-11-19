@@ -21,14 +21,6 @@ logger = logging.getLogger(__name__)
 _UNEXPECTED_ERROR_CHARS = 2000
 
 
-def _store_command_metadata(run: WorkspaceTaskRun, payload: dict[str, Any]) -> dict[str, Any]:
-    metadata = run.metadata or {}
-    metadata["command"] = payload
-    run.metadata = metadata
-    run.publish_fields("metadata")
-    return metadata["command"]
-
-
 def _fail_run(
     run: WorkspaceTaskRun,
     message: str,
@@ -45,13 +37,12 @@ def _fail_run(
     }
     if safe_prefix:
         payload["safe_prefix"] = safe_prefix
-    _store_command_metadata(run, payload)
-    run.mark_finished(success=False)
+    run.mark_finished(success=False, command=payload)
     return payload
 
 
 def _success_payload(run: WorkspaceTaskRun, result: CommandResult) -> dict[str, Any]:
-    payload = {
+    return {
         "raw": run.preset.command,
         "workspace_path": run.workspace.project_path,
         "safe_prefix": result.safe_prefix,
@@ -61,7 +52,6 @@ def _success_payload(run: WorkspaceTaskRun, result: CommandResult) -> dict[str, 
         "timed_out": result.timed_out,
         "output_limited": result.output_limited or run.log_truncated,
     }
-    return _store_command_metadata(run, payload)
 
 
 def _fallback_log(run: WorkspaceTaskRun, message: str) -> str:
@@ -94,10 +84,16 @@ def _record_unexpected_failure(run: WorkspaceTaskRun, error: BaseException | Non
     The run's own logging path may be what failed, so the outcome is written with one direct
     update instead of ``append_log``/``save``. The caller's original error keeps propagating.
     """
-    # Error text can be arbitrarily long (a database error may quote the statement it failed on).
-    detail = f"{type(error).__name__}: {error}"[:_UNEXPECTED_ERROR_CHARS]
-    message = f"Command execution failed unexpectedly: {detail}"
     try:
+        category = type(error).__name__[:_UNEXPECTED_ERROR_CHARS]
+        try:
+            detail = str(error)[: max(0, _UNEXPECTED_ERROR_CHARS - len(category) - 2)]
+        except BaseException:
+            # Even a broken exception formatter must leave a record of the original category.
+            detail = ""
+        diagnostic = f"{category}: {detail}" if detail else category
+        diagnostic = diagnostic.replace("\x00", "\ufffd").encode("utf-8", "replace").decode("utf-8")
+        message = f"Command execution failed unexpectedly: {diagnostic}"
         log = _fallback_log(run, message)
         command = {
             "raw": run.preset.command,
@@ -195,7 +191,8 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
     # A run whose output or retained log was cut short never counts as successful.
     payload = _success_payload(run, result)
     run.mark_finished(
-        success=(result.exit_code == 0 and not result.timed_out and not payload["output_limited"])
+        success=(result.exit_code == 0 and not result.timed_out and not payload["output_limited"]),
+        command=payload,
     )
 
     return payload

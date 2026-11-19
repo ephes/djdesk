@@ -4,7 +4,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const { downloadPython, checksum } = require('./python-download');
+const { downloadPython, checksum, snapshotPythonArchive } = require('./python-download');
 const toml = require('toml');
 const { spawn, spawnSync, execSync } = require('child_process');
 
@@ -214,13 +214,17 @@ async function prepareStandalonePython({ assetName, pythonRelative }, root = bun
 async function extractPython(archivePath, assetName, pythonDir, {
   verify = verifyChecksum, extract = extractArchive, io = fsp
 } = {}) {
-  await verify(archivePath, assetName);
   const tempDir = await io.mkdtemp(path.join(os.tmpdir(), 'djdesk-python-'));
   let failure;
   try {
-    await extract(archivePath, tempDir);
+    const snapshot = path.join(tempDir, 'archive.tar.gz');
+    const unpacked = path.join(tempDir, 'unpacked');
+    const limits = { maxBytes: 256 * 1024 * 1024, signal: AbortSignal.timeout(120000) };
+    await snapshotPythonArchive(archivePath, snapshot, limits);
+    await verify(snapshot, assetName, limits);
+    await extract(snapshot, unpacked);
 
-    const extractedPythonDir = path.join(tempDir, 'python');
+    const extractedPythonDir = path.join(unpacked, 'python');
     if (!fs.existsSync(extractedPythonDir)) {
       throw new Error('python-build-standalone archive missing python directory');
     }
@@ -262,15 +266,13 @@ function ensureTarAvailable() {
   }
 }
 
-async function verifyChecksum(filePath, assetName) {
+async function verifyChecksum(filePath, assetName, limits) {
   const expected = PYTHON_SHA256[assetName];
   if (!expected) {
     throw new Error(`No checksum registered for ${assetName}`);
   }
 
-  if (!await checksum(filePath, expected, {
-    maxBytes: 256 * 1024 * 1024, signal: AbortSignal.timeout(120000)
-  })) {
+  if (!await checksum(filePath, expected, limits)) {
     throw new Error(`Checksum mismatch for ${assetName}`);
   }
 }
@@ -278,10 +280,20 @@ async function verifyChecksum(filePath, assetName) {
 function ensurePythonVersion(pythonExecutable) {
   const result = spawnSync(pythonExecutable, ['--version'], {
     encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe']
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 10000,
+    killSignal: 'SIGKILL'
   });
-  const output = `${result.stdout}${result.stderr}`.trim();
-  if (!output.includes(PYTHON_VERSION)) {
+  if (result.error) {
+    throw new Error(`Python version probe failed: ${result.error.message}`, { cause: result.error });
+  }
+  const output = `${result.stdout ?? ''}\n${result.stderr ?? ''}`.trim();
+  if (result.status !== 0) {
+    const exit = result.signal ? `signal ${result.signal}` : `status ${result.status}`;
+    throw new Error(`Python version probe failed (${exit}): ${output}`);
+  }
+  const version = /^Python[ \t]+(\S+)$/.exec(output)?.[1];
+  if (version !== PYTHON_VERSION) {
     throw new Error(`Unexpected Python version (${output}); expected ${PYTHON_VERSION}`);
   }
 }

@@ -38,7 +38,10 @@ cd electron && npm run bundle
 `build-django.js` performs the following steps:
 
 1. Exclusively reserves the runtime destination and creates a unique sibling staging directory.
-2. Downloads the appropriate **python-build-standalone Python 3.14.0+20251031 interpreter** for your platform and unpacks it into `django-bundle/python/` (verifying SHA256 checksums before extraction).
+2. Downloads the appropriate **python-build-standalone Python 3.14.0+20251031 interpreter** for your platform and unpacks a SHA256-verified private archive snapshot into `django-bundle/python/`.
+   Before installing dependencies, the interpreter must report the exact pinned version
+   with a successful `--version` exit within ten seconds. Startup and timeout errors
+   are reported as packaging failures.
 3. Installs Django dependencies into that interpreter via `pip install` using the dependencies declared in `pyproject.toml`.
 4. Copies `manage.py` into `django-bundle/` and `src/djdesk` into `django-bundle/src/`.
 5. Runs `collectstatic --clear` with `DJANGO_STATIC_ROOT` pointed at `django-bundle/staticfiles`.
@@ -68,8 +71,11 @@ Cache validation and download share a two-minute deadline and a 256 MiB ceiling.
 Only ordinary, non-symlink cache files are accepted; opened-file identity and metadata
 are checked around bounded descriptor hashing. A special, oversized or changing cache
 is refused without changing its target. Remove or repair that entry with builders stopped.
-Valid registered checksums reuse the cache without HTTP. Extraction scratch is allocated
-only after checksum verification and cleaned on extraction/copy failure; a cleanup failure
+Valid registered checksums reuse the cache without HTTP. Before extraction, the builder
+copies the opened cache generation into private scratch space and verifies the copy
+against the registered checksum. Copying and verification share a two-minute deadline
+and a 256 MiB ceiling. Tar reads only the verified snapshot, so later cache refreshes
+cannot change its input. Scratch is cleaned after success or failure. A cleanup failure
 reports its path while preserving the primary error.
 
 > Only the packages listed under `[project].dependencies` in `pyproject.toml` are installed. Optional extras/dev dependencies are ignored.

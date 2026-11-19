@@ -11,6 +11,10 @@ Fixed
   error after the move, restoring it by identity or retaining the recovery location.
 - Recognize the installed Electron runtime by identity after a reported promotion
   error, and retain the backup if an unrelated runtime occupies the destination.
+- Extract the bundled interpreter from a bounded, checksum-verified private snapshot
+  so a concurrent cache refresh cannot replace tar's input.
+- Require the bundled interpreter's version probe to exit successfully within ten
+  seconds and report the exact pinned version before installing dependencies.
 
 - Verify that the offline docs index is readable as a regular file before
   advertising the bundle. Use the online docs when the index fails admission.

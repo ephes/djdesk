@@ -91,25 +91,22 @@ async function publishRuntime(destination, operations, io) {
   try {
     await io.mkdir(staging);
     await buildRuntime(staging, operations);
-    let hadPrevious = false;
-    try {
-      await io.rename(destination, backup);
-      hadPrevious = true;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
+    const candidate = await io.lstat(staging, { bigint: true });
+    const previous = await runtimeIdentity(destination, io);
+    if (previous) {
+      try {
+        await io.rename(destination, backup);
+      } catch (error) {
+        retained = await reconcileRuntime({ previous, destination, backup, error, io }) === 'retained';
+        throw error;
+      }
     }
     try {
       await io.rename(staging, destination);
     } catch (error) {
-      if (hadPrevious) {
-        try {
-          await io.rename(backup, destination);
-        } catch (restoreError) {
-          retained = true;
-          error.recoveryPath = backup;
-          error.message += `; restoration failed: ${restoreError.message}; recover from ${backup}`;
-        }
-      }
+      const outcome = await reconcileRuntime({ previous, destination, backup, error, io, candidate });
+      if (outcome === 'installed') return;
+      retained = outcome === 'retained';
       throw error;
     }
   } catch (error) {
@@ -124,6 +121,38 @@ async function publishRuntime(destination, operations, io) {
         failure.message += `; staging cleanup failed: ${error.message}`;
       }
     }
+  }
+}
+
+async function runtimeIdentity(file, io) {
+  try {
+    return await io.lstat(file, { bigint: true });
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function sameRuntime(expected, actual) {
+  return actual && expected.dev === actual.dev && expected.ino === actual.ino;
+}
+
+async function reconcileRuntime({ previous, destination, backup, error, io, candidate }) {
+  try {
+    const installed = await runtimeIdentity(destination, io);
+    if (candidate && sameRuntime(candidate, installed)) return 'installed';
+    if (!previous) return 'failed';
+    const saved = await runtimeIdentity(backup, io);
+    if (!saved && sameRuntime(previous, installed)) return 'restored';
+    if (installed || !sameRuntime(previous, saved)) {
+      throw new Error('runtime generation could not be safely restored');
+    }
+    await io.rename(backup, destination);
+    return 'restored';
+  } catch (restoreError) {
+    error.recoveryPath = previous ? backup : path.dirname(backup);
+    error.message += `; restoration failed: ${restoreError.message}; inspect ${error.recoveryPath}`;
+    return 'retained';
   }
 }
 

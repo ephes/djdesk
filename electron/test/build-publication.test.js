@@ -42,6 +42,59 @@ test('publishes a complete verified generation and retires previous runtime', as
   assert.deepEqual(await fs.readdir(path.dirname(bundle)), ['django-bundle']);
 });
 
+for (const code of ['EIO', 'ENOENT']) {
+  test(`backup rename that reports ${code} after moving restores the previous runtime`, async (t) => {
+    const { bundle, build } = buildFixture(t);
+    await fs.writeFile(path.join(bundle, 'previous'), 'last good');
+    const failure = Object.assign(new Error('synthetic backup failure'), { code });
+    const io = { ...fs, async rename(source, target) {
+      await fs.rename(source, target);
+      if (source === bundle) throw failure;
+    } };
+    await assert.rejects(build.main({ steps: stepsFor(bundle), io }), (error) => error === failure);
+    assert.deepEqual(await fs.readdir(bundle), ['previous']);
+    assert.equal(await fs.readFile(path.join(bundle, 'previous'), 'utf8'), 'last good');
+    assert.deepEqual(await fs.readdir(path.dirname(bundle)), ['django-bundle']);
+  });
+}
+
+for (const hasPrevious of [true, false]) {
+  test(`installed candidate wins after a promotion error (previous: ${hasPrevious})`, async (t) => {
+    const { bundle, build } = buildFixture(t);
+    if (hasPrevious) {
+      await fs.writeFile(path.join(bundle, 'previous'), 'last good');
+    } else {
+      await fs.rmdir(bundle);
+    }
+    const unrelated = path.join(path.dirname(bundle), 'unrelated');
+    await fs.writeFile(unrelated, 'keep');
+    const io = { ...fs, async rename(source, target) {
+      await fs.rename(source, target);
+      if (path.basename(source) === 'staging') throw new Error('synthetic completed promotion');
+    } };
+    await build.main({ steps: stepsFor(bundle), io });
+    assert.deepEqual((await fs.readdir(bundle)).sort(), [...names].sort());
+    assert.deepEqual((await fs.readdir(path.dirname(bundle))).sort(), ['django-bundle', 'unrelated']);
+    assert.equal(await fs.readFile(unrelated, 'utf8'), 'keep');
+  });
+}
+
+test('uncertain promotion preserves an unrelated destination and the old backup', async (t) => {
+  const { bundle, build } = buildFixture(t);
+  await fs.writeFile(path.join(bundle, 'previous'), 'last good');
+  const replacement = new Error('synthetic unrelated promotion');
+  const io = { ...fs, async rename(source, target) {
+    if (path.basename(source) === 'staging') {
+      await fs.mkdir(target);
+      throw replacement;
+    }
+    return fs.rename(source, target);
+  } };
+  await assert.rejects(build.main({ steps: stepsFor(bundle), io }), (error) => error === replacement);
+  assert.deepEqual(await fs.readdir(bundle), []);
+  assert.equal(await fs.readFile(path.join(replacement.recoveryPath, 'previous'), 'utf8'), 'last good');
+});
+
 for (const restoreFails of [false, true]) {
   test(`promotion failure ${restoreFails ? 'retains recovery copy' : 'restores previous runtime'}`, async (t) => {
     const { bundle, build } = buildFixture(t);

@@ -47,9 +47,13 @@ cd electron && npm run bundle
 
 All build paths above point into staging until verification succeeds. An ordinary build
 failure leaves the previous `django-bundle/` intact. Promotion moves that bundle into
-`.django-bundle-publish-*/backup` and restores it if installation fails. If restoration
-also fails, the error names the retained backup for manual recovery. Stop builders before
-moving it back. This swap is recoverable, but not crash-atomic: an interrupted publisher
+`.django-bundle-publish-*/backup`. If the install rename reports a failure after
+placing the verified staging directory at the destination, the builder recognizes
+that directory by identity and completes publication. Otherwise, after a rename
+error the builder checks the old generation's identity before restoring it to a vacant destination.
+If restoration is unsafe or fails, the original error names the retained backup
+location for manual inspection. Stop builders before moving it back.
+This swap is recoverable, but not crash-atomic: an interrupted publisher
 may leave the destination absent. Cleanup errors after publication mean the new runtime
 is installed; leftover backups may be incomplete.
 

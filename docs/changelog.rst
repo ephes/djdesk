@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Preserve the previous Electron runtime when moving it to backup reports an
+  error after the move, restoring it by identity or retaining the recovery location.
+- Recognize the installed Electron runtime by identity after a reported promotion
+  error, and retain the backup if an unrelated runtime occupies the destination.
+
 - Verify that the offline docs index is readable as a regular file before
   advertising the bundle. Use the online docs when the index fails admission.
 - Preserve external navigation for docs links whose resolved destination stays

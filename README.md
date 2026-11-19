@@ -242,6 +242,12 @@ The immediate backend executes after commit and can return a finished outcome;
 the database backend queues the committed ID for workers. An enqueue error marks
 only an unclaimed request failed, preserving a worker's running or completed outcome.
 Poll task status for the final outcome, including deferred enqueue failures.
+HTTP 201 includes a `task_run` receipt with the saved ID and current state. If the
+optional workspace snapshot or its serialization fails, the response contains
+only the receipt, and the drawer retains its existing panels until the next poll.
+If the backend accepts the enqueue but saving its result ID fails, the server logs
+a warning with the run ID. The receipt still reports the saved run's state and
+dispatch is attempted only once.
 
 After a worker crash, stop all workers owning the selected runs and terminate/check
 their command process trees before recovery. Age alone does not establish abandonment.

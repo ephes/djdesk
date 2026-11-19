@@ -5,7 +5,8 @@ from unittest import mock
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import connections, transaction
+from django.db import DatabaseError, connections, transaction
+from django.db.models import QuerySet
 from django.db.models.deletion import ProtectedError
 from django.test import TransactionTestCase
 from django.urls import reverse
@@ -345,6 +346,84 @@ class TaskLifecycleTests(TransactionTestCase):
         )
         other.refresh_from_db()
         self.assertEqual(other.status, "running")
+
+    def test_create_returns_receipt_when_optional_status_refresh_fails(self):
+        for failure in (
+            {"side_effect": RuntimeError("snapshot failed")},
+            {
+                "return_value": {
+                    "unserializable": object(),
+                }
+            },
+        ):
+            with (
+                self.subTest(failure=failure),
+                mock.patch("djdesk.inspector.forms.execute_workspace_task") as task,
+                mock.patch("djdesk.inspector.views.workspace_status_payload", **failure),
+                self.assertLogs("djdesk.inspector.views", level="ERROR"),
+            ):
+                task.enqueue.return_value.id = "queued-result"
+                response = self.client.post(
+                    reverse("inspector:task-run-create"),
+                    {
+                        "workspace": self.workspace.slug,
+                        "preset": self.preset.key,
+                        "confirm_safe": "on",
+                    },
+                )
+                self.assertEqual(response.status_code, 201)
+                receipt = response.json()["task_run"]
+                run = WorkspaceTaskRun.objects.get(pk=receipt["id"])
+                task.enqueue.assert_called_once_with(run.pk, database="default")
+                self.assertEqual(run.result_id, "queued-result")
+                self.assertEqual(receipt["status"], WorkspaceTaskRun.Status.REQUESTED)
+                self.assertEqual(set(response.json()), {"task_run"})
+
+    def test_create_keeps_accepted_run_when_result_id_write_fails(self):
+        update = QuerySet.update
+
+        def fail_result_id(queryset, **fields):
+            if "result_id" in fields:
+                raise DatabaseError("synthetic backend detail " * 200)
+            return update(queryset, **fields)
+
+        for immediate in (False, True):
+
+            def enqueue(pk, *, database):
+                if immediate:
+                    execute_workspace_task.call(pk, database=database)
+                return mock.Mock(id="accepted-result")
+
+            with (
+                self.subTest(immediate=immediate),
+                mock.patch("djdesk.inspector.forms.execute_workspace_task") as task,
+                mock.patch(
+                    "djdesk.inspector.tasks.run_command",
+                    return_value=CommandResult(0, 0.1, 0, "check"),
+                ),
+                mock.patch.object(QuerySet, "update", autospec=True, side_effect=fail_result_id),
+                self.assertLogs("djdesk.inspector.forms", level="WARNING") as logs,
+            ):
+                task.enqueue.side_effect = enqueue
+                response = self.client.post(
+                    reverse("inspector:task-run-create"),
+                    {
+                        "workspace": self.workspace.slug,
+                        "preset": self.preset.key,
+                        "confirm_safe": "on",
+                    },
+                )
+                self.assertEqual(response.status_code, 201)
+                receipt = response.json()["task_run"]
+                run = WorkspaceTaskRun.objects.get(pk=receipt["id"])
+                task.enqueue.assert_called_once_with(run.pk, database="default")
+                expected = "succeeded" if immediate else "requested"
+                self.assertEqual((receipt["status"], run.status), (expected, expected))
+                self.assertEqual(run.result_id, "")
+                self.assertIn(f"Task run {run.pk}", logs.output[0])
+                self.assertNotIn("synthetic backend detail", logs.output[0])
+                if immediate:
+                    self.assertEqual(run.metadata["command"]["exit_code"], 0)
 
     def test_view_reports_immediate_enqueue_failure(self):
         with mock.patch(

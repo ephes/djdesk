@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from django import forms
@@ -10,6 +11,8 @@ from django.utils import timezone
 from . import services
 from .models import TaskPreset, Workspace, WorkspaceTaskRun
 from .tasks import execute_workspace_task
+
+logger = logging.getLogger(__name__)
 
 PROTECTED_PATHS: list[Path] = [
     Path("/etc"),
@@ -178,9 +181,14 @@ class TaskRunForm(forms.Form):
                     ),
                 )
             else:
-                WorkspaceTaskRun.objects.using(run._state.db).filter(pk=run.pk).update(
-                    result_id=result.id
-                )
+                try:
+                    WorkspaceTaskRun.objects.using(run._state.db).filter(pk=run.pk).update(
+                        result_id=result.id
+                    )
+                except Exception:
+                    logger.warning(
+                        "Task run %s enqueued; could not record backend result ID", run.pk
+                    )
 
         transaction.on_commit(dispatch, using=run._state.db)
         # Autocommit/immediate backends may already have completed. Within an outer

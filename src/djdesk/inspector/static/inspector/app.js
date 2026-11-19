@@ -233,7 +233,9 @@ class InspectorUI {
           return response.json();
         })
         .then((payload) => {
-          this.updateFromPayload(payload);
+          if (typeof payload.workspace === 'string') {
+            this.updateFromPayload(payload);
+          }
           form.reset();
         })
         .catch((error) => {

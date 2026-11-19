@@ -203,14 +203,19 @@ class TaskRunCreateView(View):
             errors = exc.message_dict or {"__all__": exc.messages}
             return JsonResponse({"errors": errors}, status=400)
 
-        payload = workspace_status_payload(run.workspace)
-        payload["task_run"] = {
+        receipt = {
             "id": run.pk,
             "status": run.status,
             "progress": run.progress,
             "log": run.log,
         }
-        return JsonResponse(payload, status=201)
+        try:
+            payload = workspace_status_payload(run.workspace)
+            payload["task_run"] = receipt
+            return JsonResponse(payload, status=201)
+        except Exception:
+            logger.exception("Task run %s created; status refresh failed", run.pk)
+            return JsonResponse({"task_run": receipt}, status=201)
 
 
 @require_GET

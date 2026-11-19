@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Return HTTP 201 with the saved task receipt if the optional workspace refresh
+  fails, and keep the inspector panels intact until polling refreshes them.
+- Keep the task creation receipt when the backend accepts dispatch but its result
+  ID cannot be saved. Log the run ID and preserve the worker's state.
+
 - Publish task command receipts and terminal status in one ownership-checked update,
   while retaining batched logs and explicit recovery for unsettled runs.
 - Settle a failed task even when its exception message cannot be formatted. Store

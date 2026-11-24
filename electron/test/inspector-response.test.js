@@ -101,6 +101,8 @@ function taskForm(nextResponse, context = {}) {
   const { InspectorUI } = load({
     fetch: nextResponse,
     FormData: class {},
+    AbortController,
+    window: { setTimeout() { return 1; }, clearTimeout() {} },
     ...context,
   });
   const ui = Object.create(InspectorUI.prototype);

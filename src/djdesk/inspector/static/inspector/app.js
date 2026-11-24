@@ -1,6 +1,7 @@
 const WIZARD_STORAGE_KEY = 'djdesk.wizard.projectPath';
 const INSPECTOR_RESPONSE_BYTES = 8 * 1024 * 1024;
 const NOTEBOOK_EXPORT_TIMEOUT_MS = 30000;
+const TASK_SUBMIT_TIMEOUT_MS = 30000;
 
 // The server derives the ceiling from its task-log budget; fall back to the default.
 function inspectorResponseBytes(value) {
@@ -233,18 +234,36 @@ class InspectorUI {
   async submitTaskForm(form, receipt) {
     receipt?.replaceChildren();
     const formData = new FormData(form);
+    const controller = new AbortController();
+    let timeout;
     let payload;
     let taskId;
     try {
-      const response = await fetch(this.taskEndpoint, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'X-CSRFToken': this.getCsrfToken(),
-        },
+      const expired = new Promise((_, reject) => {
+        timeout = window.setTimeout(() => {
+          reject(new Error('Task response timed out'));
+          controller.abort();
+        }, TASK_SUBMIT_TIMEOUT_MS);
       });
-      payload = await readInspectorJSON(response, this.responseBytes, { allowHttpError: true });
+      const request = (async () => {
+        const reply = await fetch(this.taskEndpoint, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRFToken': this.getCsrfToken(),
+          },
+        });
+        if (controller.signal.aborted) {
+          await reply.body?.cancel().catch(() => {});
+          throw new Error('Task response timed out');
+        }
+        return [reply, await readInspectorJSON(reply, this.responseBytes, { allowHttpError: true })];
+      })();
+      // Race the whole read so a stalled transport still releases the form.
+      const [response, data] = await Promise.race([request, expired]);
+      payload = data;
       if (!response.ok) {
         if (response.status >= 400 && response.status < 500 && payload?.errors) {
           const message = this.formatErrors(payload.errors);
@@ -260,6 +279,8 @@ class InspectorUI {
     } catch {
       this.showToast('Unable to confirm task submission. Check task history before retrying.', 'danger');
       return;
+    } finally {
+      window.clearTimeout(timeout);
     }
     if (receipt) {
       const button = document.createElement('button');

@@ -62,7 +62,8 @@ test('a task receipt acknowledges one submission and opens its log on demand', a
           return { addEventListener(name, handler) { this[name] = handler; } };
         },
       },
-      FormData: class {}, TextDecoder,
+      FormData: class {}, TextDecoder, AbortController,
+      window: { setTimeout() { return 1; }, clearTimeout() {} },
       async fetch(url, options) {
         requests.push([url, options.method ?? 'GET']);
         return options.method === 'POST'
@@ -118,9 +119,11 @@ test('a task receipt acknowledges one submission and opens its log on demand', a
   }
 });
 
-test('each task submission clears the previous receipt and ignores resubmits while pending', async () => {
+test('each task submission clears the previous receipt, ignores resubmits while pending and times out', async () => {
   const replies = [];
   const posts = [];
+  const signals = [];
+  const timers = new Map();
   const TaskUI = vm.runInNewContext(source + '\nInspectorUI;', {
     document: {
       addEventListener() {},
@@ -128,9 +131,14 @@ test('each task submission clears the previous receipt and ignores resubmits whi
         return { addEventListener(name, handler) { this[name] = handler; } };
       },
     },
-    FormData: class {}, TextDecoder,
+    FormData: class {}, TextDecoder, AbortController,
+    window: {
+      setTimeout(callback, delay) { const id = {}; timers.set(id, { callback, delay }); return id; },
+      clearTimeout(id) { timers.delete(id); },
+    },
     fetch(url, options) {
       posts.push([url, options.method]);
+      signals.push(options.signal);
       return new Promise((resolve) => replies.push(resolve));
     },
   });
@@ -174,6 +182,23 @@ test('each task submission clears the previous receipt and ignores resubmits whi
   assert.deepEqual(receiptChildren, []);
   assert.equal(submitButton.disabled, false);
   assert.match(toasts.at(-1), /check task history before retrying/i);
+  assert.equal(timers.size, 0);
+
+  // A POST that never answers releases the form after one deadline.
+  submit({ preventDefault() {} });
+  assert.equal(submitButton.disabled, true);
+  assert.equal(timers.size, 1);
+  const [timer] = timers.values();
+  assert.equal(timer.delay, 30000);
+  timer.callback();
+  await settle();
+  assert.equal(signals.at(-1).aborted, true);
+  assert.equal(submitButton.disabled, false);
+  assert.deepEqual(receiptChildren, []);
+  assert.equal(toasts.length, 2);
+  assert.match(toasts.at(-1), /check task history before retrying/i);
+  submit({ preventDefault() {} });
+  assert.equal(posts.length, 4);
 });
 
 test('metadata cannot create renderer elements or attributes', () => {

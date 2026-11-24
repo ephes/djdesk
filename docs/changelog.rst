@@ -14,8 +14,9 @@ Fixed
 - Keep notebook inventory and viewer requests read-only. Only exports provision
   missing notebook directories.
 - Sync the export root before acknowledging notebook publication so the workspace
-  directory entry is covered. If the sync fails, report uncertain durability and
-  retain the published notebook.
+  directory entry is covered. When the export creates a missing export root, also
+  sync the parent of each directory it created. If a sync fails, report uncertain
+  durability and retain the published notebook.
 
 - Preserve the previous Electron runtime when moving it to backup reports an
   error after the move, restoring it by identity or retaining the recovery location.

@@ -146,11 +146,28 @@ def workspace_data_lab_dir(workspace: Workspace) -> Path:
     return path
 
 
+def _create_export_root(root: Path) -> list[Path]:
+    """Create a missing export root; return the parents of the entries found missing."""
+    missing = []
+    candidate = root
+    while not os.path.lexists(candidate) and candidate.parent != candidate:
+        missing.append(candidate)
+        candidate = candidate.parent
+    root.mkdir(parents=True, exist_ok=True)
+    return [path.parent for path in missing]
+
+
+def _sync_directory(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        _sync(fd)
+    finally:
+        os.close(fd)
+
+
 @contextmanager
 def _open_workspace_directory(workspace_dir: Path, *, create: bool = False):
     """Keep directory-relative operations on the admitted workspace inode."""
-    if create:
-        Path(settings.INSPECTOR_DATA_LAB_ROOT).mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         root_fd = os.open(workspace_dir.parent, flags)
@@ -271,6 +288,7 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
         raise ValueError("Safe notebook export is unavailable on this platform.")
     content = json.dumps(notebook, indent=2)
     workspace_dir = workspace_data_lab_dir(workspace)
+    created_entry_parents = _create_export_root(workspace_dir.parent)
     with _open_workspace_directory(workspace_dir, create=True) as (root_fd, directory_fd):
         staging = f".notebook-{uuid.uuid4().hex}.tmp"
         fd = os.open(
@@ -310,6 +328,9 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
                     # An existing workspace directory may have been created by an
                     # exporter that has not yet synced its entry in the root.
                     _sync(root_fd)
+                    # Entries of an export root (and ancestors) created here.
+                    for parent in created_entry_parents:
+                        _sync_directory(parent)
                 except OSError as exc:
                     raise NotebookDurabilityError(published_path) from exc
                 return published_path

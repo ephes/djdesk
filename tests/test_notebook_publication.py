@@ -175,6 +175,61 @@ class NotebookPublicationTests(TestCase):
         expected = ["file-sync", "link", "workspace-sync", "root-sync", "success"]
         self.assertEqual(events, expected * 2)
 
+    def test_first_export_syncs_entries_of_created_export_root(self):
+        base = self.root.stat()
+        outer = self.root / "outer"
+        root = outer / "exports"
+        sync = os.fsync
+        events = []
+
+        def synced(fd):
+            info = os.fstat(fd)
+            if os.path.samestat(base, info):
+                events.append("base-sync")
+            elif outer.exists() and os.path.samestat(outer.stat(), info):
+                events.append("outer-sync")
+            elif root.exists() and os.path.samestat(root.stat(), info):
+                events.append("root-sync")
+            elif stat.S_ISDIR(info.st_mode):
+                events.append("workspace-sync")
+            else:
+                events.append("file-sync")
+            sync(fd)
+
+        with (
+            override_settings(INSPECTOR_DATA_LAB_ROOT=root),
+            mock.patch.object(os, "fsync", side_effect=synced),
+        ):
+            first = data_lab.export_notebook(self.workspace, "schema-audit")
+            self.assertEqual(
+                events, ["file-sync", "workspace-sync", "root-sync", "outer-sync", "base-sync"]
+            )
+            events.clear()
+            second = data_lab.export_notebook(self.workspace, "schema-audit")
+            self.assertEqual(events, ["file-sync", "workspace-sync", "root-sync"])
+        self.assertTrue(first.is_file())
+        self.assertTrue(second.is_file())
+
+    def test_created_export_root_entry_sync_failure_reports_visible_notebook(self):
+        base = self.root.stat()
+        root = self.root / "exports"
+        sync = os.fsync
+
+        def fail_base_sync(fd):
+            if os.path.samestat(base, os.fstat(fd)):
+                raise OSError("injected base sync failure")
+            sync(fd)
+
+        with (
+            override_settings(INSPECTOR_DATA_LAB_ROOT=root),
+            mock.patch.object(os, "fsync", side_effect=fail_base_sync),
+            self.assertRaises(data_lab.NotebookDurabilityError) as raised,
+        ):
+            data_lab.export_notebook(self.workspace, "schema-audit")
+        published = raised.exception.published_path
+        self.assertEqual(published, root.resolve() / self.workspace.slug / "schema-audit.ipynb")
+        self.assertTrue(published.is_file())
+
     def test_publication_requests_full_device_flush_where_supported(self):
         calls = []
 

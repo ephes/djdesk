@@ -78,9 +78,10 @@ response has status 201 and contains the status payload plus
 file, even when that file is outside the inventory window. Existing files are preserved.
 The export POST creates missing directories. Success follows file fsync, hard-link
 publication, fsync of the opened workspace directory and fsync of the opened export
-root to persist the workspace directory entry. On macOS these syncs also issue
-``F_FULLFSYNC`` to flush the drive cache where supported. If either directory sync
-fails, HTTP 500 names the published complete file and reports uncertain durability.
+root to persist the workspace directory entry. If the export created a missing export
+root or ancestors, the parent of each directory it found missing is fsynced too. On
+macOS these syncs also issue ``F_FULLFSYNC`` to flush the drive cache where supported.
+If any directory sync fails, HTTP 500 names the published complete file and reports uncertain durability.
 The export remains visible. Inspect the export directory before exporting again.
 Retries create additional files.
 

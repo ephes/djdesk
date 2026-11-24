@@ -105,15 +105,16 @@ def workspace_snapshot(workspace: Workspace, *, include_logs: bool = False):
     using = workspace._state.db or "default"
     with _read_snapshot(using):
         current = Workspace.objects.using(using).get(pk=workspace.pk)
-        scans = current.scans.using(using).order_by("-created_at", "-pk")[:4]
+        scans = current.scans.using(using).defer("details").order_by("-created_at", "-pk")[:4]
         tasks = (
             current.task_runs.using(using)
             .select_related("preset")
+            .defer("metadata")
             .order_by("-created_at", "-pk")[:5]
         )
         if not include_logs:
-            scans = scans.defer("details", "log_excerpt")
-            tasks = tasks.defer("log", "metadata")
+            scans = scans.defer("log_excerpt")
+            tasks = tasks.defer("log")
         return current, list(scans), list(tasks)
 
 
@@ -134,6 +135,7 @@ def workspace_status_payload(workspace: Workspace) -> dict[str, Any]:
     ]
     return {
         "workspace": workspace.slug,
+        "metadata_needs_repair": workspace.metadata_needs_repair,
         "insights": workspace.insights,
         "apps": workspace.app_overview,
         "activity": workspace.recent_activity,

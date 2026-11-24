@@ -95,6 +95,9 @@
                 </div>
             </aside>
             <section class="inspector-canvas">
+                <p class="empty-note" role="status" data-metadata-needs-repair {% if not workspace.metadata_needs_repair %}hidden{% endif %}>
+                    Workspace metadata needs repair. Review it in Django admin.
+                </p>
                 <div class="insight-grid">
                     {% for insight in workspace.insights %}
                     <article class="insight-card insight-card--{{ insight.severity|default:'info' }}">

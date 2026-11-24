@@ -70,10 +70,8 @@ class DashboardView(TemplateView):
         scans, tasks = [], []
         if workspace:
             workspace, scans, tasks = workspace_snapshot(workspace)
-        status_meta: dict[str, Any] = {}
         status_url = ""
         if workspace and workspace.slug:
-            status_meta = workspace.metadata.get("status", {})
             status_url = reverse("inspector:workspace-status", kwargs={"slug": workspace.slug})
 
         docs_source = self._docs_source()
@@ -94,7 +92,7 @@ class DashboardView(TemplateView):
                 "doc_links": docs_source["links"],
                 "docs_source": docs_source,
                 "task_presets": TaskPreset.objects.all(),
-                "status_meta": status_meta,
+                "status_meta": workspace.status_metadata if workspace and workspace.slug else {},
                 "workspace_status_url": status_url,
                 "inspector_response_bytes": settings.INSPECTOR_RESPONSE_BYTES,
                 "task_form": TaskRunForm(

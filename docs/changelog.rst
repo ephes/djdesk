@@ -9,6 +9,8 @@ Fixed
 
 - Generate valid URL configurations for the bundled sample projects so the polls
   tutorial passes Django's system checks.
+- Ship the polls tutorial's initial migration so ``manage.py migrate`` creates
+  the question and choice tables and their foreign key.
 - Keep the Inspector usable when saved workspace metadata has an invalid shape.
   Show empty sections and a repair notice, preserve the stored JSON, and require a
   JSON object when validating workspace edits.

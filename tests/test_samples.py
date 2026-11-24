@@ -1,7 +1,9 @@
 import errno
 import os
+import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -42,6 +44,22 @@ class BundledSampleTests(SimpleTestCase):
 
     def test_polls_manage_check(self):
         self.run_polls_command("check")
+
+    def test_polls_migrate_creates_tables_and_foreign_key(self):
+        database = self.projects["django-polls"] / "db.sqlite3"
+        self.assertFalse(database.exists())
+        self.run_polls_command("migrate", "--noinput")
+
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
+            tables = connection.execute(
+                "SELECT name FROM sqlite_schema WHERE type = 'table' AND name GLOB 'polls_*'"
+            ).fetchall()
+            foreign_keys = connection.execute(
+                """SELECT "table", "from", "to" FROM pragma_foreign_key_list('polls_choice')"""
+            ).fetchall()
+
+        self.assertCountEqual(tables, [("polls_question",), ("polls_choice",)])
+        self.assertEqual(foreign_keys, [("polls_question", "question_id", "id")])
 
 
 class SampleRefreshTests(SimpleTestCase):

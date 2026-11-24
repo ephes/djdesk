@@ -10,6 +10,12 @@ After fetching the samples, run
 ``uv run python sample_projects/django-polls/manage.py check`` from the repository
 root to check the polls project's settings and URL configuration.
 
+The polls sample ships an initial migration. From the repository root, run
+``uv run python sample_projects/django-polls/manage.py migrate`` to create the
+question and choice tables in the sample's SQLite database. For an older copy,
+fetch into a new ``--root`` or back up your edits and database before replacing
+the sample with ``--force``.
+
 Publishers wait at most ten seconds for each stable ``.slug.lock`` and hold it through
 preflight, swap, rollback and cleanup. Never delete the lock while publishers may be
 running. Native locks are required; unsupported locking refuses publication rather

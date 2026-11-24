@@ -134,6 +134,7 @@ def workspace_status_payload(workspace: Workspace) -> dict[str, Any]:
     ]
     return {
         "workspace": workspace.slug,
+        "metadata_needs_repair": workspace.metadata_needs_repair,
         "insights": workspace.insights,
         "apps": workspace.app_overview,
         "activity": workspace.recent_activity,

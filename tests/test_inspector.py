@@ -11,6 +11,7 @@ from unittest import mock
 from django.core.exceptions import ValidationError
 from django.db import close_old_connections, connections
 from django.db.models.signals import post_init
+from django.forms import modelform_factory
 from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
@@ -25,6 +26,19 @@ from djdesk.inspector.views import DashboardView
 
 
 class WorkspaceModelTests(TestCase):
+    def test_workspace_edits_require_a_json_object(self) -> None:
+        workspace_form = modelform_factory(Workspace, fields=("name", "project_path", "metadata"))
+        data = {"name": "Synthetic", "project_path": "/synthetic/metadata-edit"}
+        for metadata in ("[]", '[{"legacy": true}]', "null", "0", "false", '"text"'):
+            with self.subTest(metadata=metadata):
+                form = workspace_form(data={**data, "metadata": metadata})
+                self.assertFalse(form.is_valid())
+                self.assertIn("Enter a JSON object", form.errors["metadata"][0])
+
+        form = workspace_form(data={**data, "metadata": "{}"})
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.save().metadata, {})
+
     def test_retries_slug_generation_on_collision(self) -> None:
         Workspace.objects.create(
             name="Atlas",
@@ -376,6 +390,55 @@ class DashboardViewTests(TestCase):
         request = self.factory.get("/")
         view.setup(request)
         return view
+
+    def test_legacy_metadata_falls_back_without_rewriting_the_workspace(self) -> None:
+        workspace = Workspace.objects.create(name="Synthetic", project_path="/synthetic/metadata")
+        dashboard_url = reverse("inspector:dashboard")
+        status_url = reverse("inspector:workspace-status", args=[workspace.slug])
+        good_apps = [{"label": "synthetic.catalog", "pending_migrations": 2}]
+        cases = [
+            (["stored evidence"], []),
+            (False, []),
+            (
+                {
+                    "insights": None,
+                    "recent_activity": 1,
+                    "log_excerpt": [None],
+                    "schema": [],
+                    "status": None,
+                    "apps": good_apps,
+                },
+                good_apps,
+            ),
+            ({"schema": {"nodes": None}, "apps": good_apps}, good_apps),
+        ]
+        for metadata, apps in cases:
+            with self.subTest(metadata=metadata):
+                Workspace.objects.filter(pk=workspace.pk).update(metadata=metadata)
+                dashboard = self.client.get(dashboard_url, {"workspace": workspace.slug})
+                self.assertContains(dashboard, "Workspace metadata needs repair")
+                self.assertContains(dashboard, "Run a scan to populate insights.")
+                self.assertContains(dashboard, "Schema map will appear after the first scan.")
+                self.assertNotContains(dashboard, "stored evidence")
+                if apps:
+                    self.assertContains(dashboard, "synthetic.catalog")
+
+                status = self.client.get(status_url)
+                self.assertEqual(status.status_code, 200)
+                payload = status.json()
+                self.assertTrue(payload["metadata_needs_repair"])
+                self.assertEqual(payload["insights"], [])
+                self.assertEqual(payload["apps"], apps)
+                self.assertEqual(payload["activity"], [])
+                self.assertEqual(payload["log_excerpt"], [])
+                self.assertEqual(payload["schema"], {})
+                workspace.refresh_from_db()
+                self.assertEqual(workspace.metadata, metadata)
+
+        Workspace.objects.filter(pk=workspace.pk).update(metadata={})
+        dashboard = self.client.get(dashboard_url, {"workspace": workspace.slug})
+        self.assertContains(dashboard, "data-metadata-needs-repair hidden")
+        self.assertFalse(self.client.get(status_url).json()["metadata_needs_repair"])
 
     def test_dashboard_hydrates_only_visible_selected_history(self) -> None:
         Workspace.objects.all().delete()

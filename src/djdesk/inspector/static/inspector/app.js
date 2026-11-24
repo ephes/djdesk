@@ -54,6 +54,7 @@ class InspectorUI {
     this.dataLabExportUrl = root?.dataset.dataLabExport || '';
     this.scanBoard = root?.querySelector('#scan-board');
     this.insightGrid = root?.querySelector('.insight-grid');
+    this.metadataRepairNotice = root?.querySelector('[data-metadata-needs-repair]');
     this.activityFeed = root?.querySelector('[data-activity-feed]');
     this.logStream = root?.querySelector('[data-log-stream]');
     this.taskHistory = root?.querySelector('[data-task-history]');
@@ -492,6 +493,9 @@ class InspectorUI {
   updateFromPayload(payload) {
     if (!payload) return;
     this.toggleConnection(true);
+    if (this.metadataRepairNotice && 'metadata_needs_repair' in payload) {
+      this.metadataRepairNotice.hidden = !payload.metadata_needs_repair;
+    }
     this.updateScans(payload.scans || []);
     this.updateInsights(payload.insights || []);
     this.updateActivity(payload.activity || []);

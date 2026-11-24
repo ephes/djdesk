@@ -45,7 +45,7 @@ class WorkspaceSnapshotTests(TestCase):
             name="Synthetic",
             slug="synthetic-snapshot",
             project_path="/synthetic/snapshot",
-            metadata={"insights": ["old"]},
+            metadata={"insights": [{"title": "old"}]},
         )
         self.scan = ScanJob.objects.using("snapshot_read").create(
             workspace=self.workspace, kind="schema", summary="old"
@@ -63,7 +63,7 @@ class WorkspaceSnapshotTests(TestCase):
     def commit_new_generation(self):
         with transaction.atomic(using="snapshot_write"):
             Workspace.objects.using("snapshot_write").filter(pk=self.workspace.pk).update(
-                metadata={"insights": ["new"]}
+                metadata={"insights": [{"title": "new"}]}
             )
             ScanJob.objects.using("snapshot_write").filter(pk=self.scan.pk).update(summary="new")
 
@@ -86,9 +86,9 @@ class WorkspaceSnapshotTests(TestCase):
         payload = self.read_with_interleaved_commit(
             lambda: workspace_status_payload(self.workspace)
         )
-        self.assertEqual(payload["insights"], [payload["scans"][0]["summary"]])
-        self.assertEqual(payload["insights"], ["old"])
-        self.assertEqual(workspace_status_payload(self.workspace)["insights"], ["new"])
+        self.assertEqual(payload["insights"], [{"title": payload["scans"][0]["summary"]}])
+        self.assertEqual(payload["insights"], [{"title": "old"}])
+        self.assertEqual(workspace_status_payload(self.workspace)["insights"], [{"title": "new"}])
 
     def test_dashboard_materializes_history_before_rendering(self):
         view = DashboardView()
@@ -102,7 +102,9 @@ class WorkspaceSnapshotTests(TestCase):
             return context
 
         context = self.read_with_interleaved_commit(read_context)
-        self.assertEqual(context["workspace"].insights, [list(context["recent_scans"])[0].summary])
+        self.assertEqual(
+            context["workspace"].insights, [{"title": context["recent_scans"][0].summary}]
+        )
         self.assertIsInstance(context["recent_scans"], list)
         self.assertIsInstance(context["recent_task_runs"], list)
 

@@ -50,6 +50,18 @@ print(json.dumps(nodes))
 
 const hostile = '\"><img src=x onerror="sentinel"><span data-injected="';
 
+test('workspace status shows and clears the metadata repair notice', () => {
+  const ui = uiFixture();
+  const notice = { hidden: true };
+  ui.metadataRepairNotice = notice;
+  ui.updateFromPayload({ metadata_needs_repair: true });
+  assert.equal(notice.hidden, false);
+  ui.updateFromPayload({});
+  assert.equal(notice.hidden, false);
+  ui.updateFromPayload({ metadata_needs_repair: false });
+  assert.equal(notice.hidden, true);
+});
+
 test('a task receipt acknowledges one submission and opens its log on demand', async () => {
   const receipt = { task_run: { id: 42, status: 'requested', progress: 0, log: '' } };
   const snapshot = { ...receipt, workspace: 'synthetic' };

@@ -19,6 +19,19 @@ from .command_runner import (
     validate_safe_command,
 )
 
+_WORKSPACE_METADATA_SECTIONS = (
+    "insights",
+    "apps",
+    "recent_activity",
+    "schema",
+    "log_excerpt",
+    "status",
+)
+
+
+def _is_object_list(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(entry, dict) for entry in value)
+
 
 class Workspace(models.Model):
     """Represents a local Django project inspected inside DJDesk."""
@@ -78,6 +91,8 @@ class Workspace(models.Model):
 
     def clean(self) -> None:
         super().clean()
+        if not isinstance(self.metadata, dict):
+            raise ValidationError({"metadata": "Enter a JSON object (use {} for empty metadata)."})
         normalized = (self.project_path or "").strip()
         if not normalized:
             raise ValidationError({"project_path": "Project path cannot be empty."})
@@ -117,25 +132,57 @@ class Workspace(models.Model):
             and getattr(diagnostic, "constraint_name", None) == f"{self._meta.db_table}_slug_key"
         )
 
+    def _metadata_section(self, key: str) -> Any:
+        if not isinstance(self.metadata, dict):
+            return None
+        value = self.metadata.get(key)
+        if key == "status":
+            return value if isinstance(value, dict) else None
+        if key == "schema":
+            if not isinstance(value, dict):
+                return None
+            nodes = value.get("nodes", [])
+            if not _is_object_list(nodes) or not _is_object_list(value.get("connections", [])):
+                return None
+            if any(
+                not isinstance(node.get(field, []), list)
+                for node in nodes
+                for field in ("fields", "relations")
+            ):
+                return None
+            return value
+        return value if _is_object_list(value) else None
+
+    @property
+    def metadata_needs_repair(self) -> bool:
+        return not isinstance(self.metadata, dict) or any(
+            key in self.metadata and self._metadata_section(key) is None
+            for key in _WORKSPACE_METADATA_SECTIONS
+        )
+
+    @property
+    def status_metadata(self) -> dict[str, Any]:
+        return self._metadata_section("status") or {}
+
     @property
     def insights(self) -> list[dict[str, Any]]:
-        return list(self.metadata.get("insights", []))
+        return list(self._metadata_section("insights") or [])
 
     @property
     def app_overview(self) -> list[dict[str, Any]]:
-        return list(self.metadata.get("apps", []))
+        return list(self._metadata_section("apps") or [])
 
     @property
     def recent_activity(self) -> list[dict[str, Any]]:
-        return list(self.metadata.get("recent_activity", []))
+        return list(self._metadata_section("recent_activity") or [])
 
     @property
     def schema_graph(self) -> dict[str, Any]:
-        return self.metadata.get("schema", {})
+        return self._metadata_section("schema") or {}
 
     @property
     def log_excerpt(self) -> list[dict[str, Any]]:
-        return list(self.metadata.get("log_excerpt", []))
+        return list(self._metadata_section("log_excerpt") or [])
 
 
 class ScanJob(models.Model):

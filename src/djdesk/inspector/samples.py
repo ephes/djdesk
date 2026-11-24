@@ -139,7 +139,7 @@ def _render_urls(url_includes: Iterable[tuple[str, str]]) -> str:
         blocks.append(f"    path('{route}', include('{module}')),")
     patterns = "\n".join(blocks)
     return textwrap.dedent(
-        f"""\
+        """\
         from django.contrib import admin
         from django.urls import path{include_import}
 
@@ -148,7 +148,7 @@ def _render_urls(url_includes: Iterable[tuple[str, str]]) -> str:
         {patterns}
         ]
         """
-    )
+    ).format(include_import=include_import, patterns=patterns)
 
 
 def _render_asgi(project_name: str) -> str:

@@ -6,6 +6,10 @@ sample, including local edits and databases, run
 ``uv run python scripts/fetch_samples.py --force``. Use ``--root PATH`` for an isolated
 sample root. Stop sample applications before replacing their files.
 
+After fetching the samples, run
+``uv run python sample_projects/django-polls/manage.py check`` from the repository
+root to check the polls project's settings and URL configuration.
+
 Publishers wait at most ten seconds for each stable ``.slug.lock`` and hold it through
 preflight, swap, rollback and cleanup. Never delete the lock while publishers may be
 running. Native locks are required; unsupported locking refuses publication rather

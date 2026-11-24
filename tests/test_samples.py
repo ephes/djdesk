@@ -1,5 +1,7 @@
 import errno
 import os
+import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -7,6 +9,39 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from djdesk.inspector import samples
+
+
+class BundledSampleTests(SimpleTestCase):
+    def setUp(self):
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.projects = {
+            slug: path for slug, path, _ in samples.ensure_sample_projects(Path(temporary.name))
+        }
+
+    def run_polls_command(self, *args):
+        env = os.environ.copy()
+        env.pop("DJANGO_SETTINGS_MODULE", None)
+        result = subprocess.run(
+            [sys.executable, "-B", "manage.py", *args],
+            cwd=self.projects["django-polls"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_bundled_urlconfs_compile(self):
+        for project in samples.SAMPLE_PROJECTS:
+            for relative in project.files:
+                if Path(relative).name == "urls.py":
+                    with self.subTest(sample=project.slug, module=relative):
+                        path = self.projects[project.slug] / relative
+                        compile(path.read_bytes(), str(path), "exec")
+
+    def test_polls_manage_check(self):
+        self.run_polls_command("check")
 
 
 class SampleRefreshTests(SimpleTestCase):

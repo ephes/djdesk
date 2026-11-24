@@ -79,6 +79,8 @@ Renderer data flow
   the form asks the operator to check task history before retrying.
   A valid receipt displays the saved task ID and offers to open its log. When the
   snapshot is missing, existing dashboard panels stay visible until the next poll.
+  Each submission clears the previous receipt, and the submit button stays disabled
+  while the POST is pending so a double click cannot queue a second run.
 
   Schema polling compares canonical rendered element data (independent of object
   keys and model/connection ordering). Identical responses keep the live graph,

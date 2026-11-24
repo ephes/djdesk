@@ -251,7 +251,8 @@ HTTP 201 includes a `task_run` receipt with the saved ID and current state. If t
 optional workspace snapshot or its serialization fails, the response contains
 only the receipt. The task form confirms the saved ID and offers **View task log**
 for that run even when the snapshot is missing. The dashboard keeps its existing
-panels until polling refreshes them.
+panels until polling refreshes them. Each new submission clears the previous
+receipt, and the submit button stays disabled until the reply has been handled.
 If the backend accepts the enqueue but saving its result ID fails, the server logs
 a warning with the run ID. The receipt still reports the saved run's state and
 dispatch is attempted only once.

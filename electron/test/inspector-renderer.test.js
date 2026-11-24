@@ -104,8 +104,9 @@ test('a task receipt acknowledges one submission and opens its log on demand', a
     assert.deepEqual(updates.map((data) => data.workspace), payload === snapshot ? ['synthetic'] : []);
     assert.deepEqual(requests, [['/api/task-runs/', 'POST']]);
     assert.equal(drawerClasses.has('is-visible'), false);
-    assert.equal(acknowledgments.length, 1);
-    const [message, button] = acknowledgments[0];
+    assert.equal(acknowledgments.length, 2);
+    assert.deepEqual(acknowledgments[0], []);
+    const [message, button] = acknowledgments[1];
     assert.match(message, /Task #42 submitted/);
     assert.equal(button.type, 'button');
     assert.equal(button.textContent, 'View task log');
@@ -115,6 +116,64 @@ test('a task receipt acknowledges one submission and opens its log on demand', a
     assert.equal(drawerClasses.has('is-visible'), true);
     assert.equal(ui.taskDrawerLog.textContent, 'Synthetic task log');
   }
+});
+
+test('each task submission clears the previous receipt and ignores resubmits while pending', async () => {
+  const replies = [];
+  const posts = [];
+  const TaskUI = vm.runInNewContext(source + '\nInspectorUI;', {
+    document: {
+      addEventListener() {},
+      createElement() {
+        return { addEventListener(name, handler) { this[name] = handler; } };
+      },
+    },
+    FormData: class {}, TextDecoder,
+    fetch(url, options) {
+      posts.push([url, options.method]);
+      return new Promise((resolve) => replies.push(resolve));
+    },
+  });
+  const ui = Object.create(TaskUI.prototype);
+  let submit;
+  const submitButton = { disabled: false };
+  const form = {
+    addEventListener(event, handler) { submit = handler; },
+    querySelector(selector) { return selector === '[type="submit"]' ? submitButton : null; },
+    reset() {},
+  };
+  let receiptChildren = [];
+  const receiptRegion = { replaceChildren(...children) { receiptChildren = children; } };
+  ui.root = {
+    querySelector(selector) {
+      return { '[data-task-form]': form, '[data-task-receipt]': receiptRegion }[selector];
+    },
+  };
+  ui.taskEndpoint = '/api/task-runs/';
+  const toasts = [];
+  ui.getCsrfToken = () => '';
+  ui.updateFromPayload = () => {};
+  ui.showToast = (message) => toasts.push(message);
+  ui.bindTaskForm();
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  submit({ preventDefault() {} });
+  submit({ preventDefault() {} });
+  assert.equal(posts.length, 1);
+  assert.equal(submitButton.disabled, true);
+  replies.shift()(new Response('{"task_run":{"id":41}}', { status: 201 }));
+  await settle();
+  assert.equal(submitButton.disabled, false);
+  assert.match(receiptChildren[0], /Task #41 submitted/);
+
+  submit({ preventDefault() {} });
+  assert.deepEqual(receiptChildren, []);
+  replies.shift()(new Response('{"broken":', { status: 201 }));
+  await settle();
+  assert.equal(posts.length, 2);
+  assert.deepEqual(receiptChildren, []);
+  assert.equal(submitButton.disabled, false);
+  assert.match(toasts.at(-1), /check task history before retrying/i);
 });
 
 test('metadata cannot create renderer elements or attributes', () => {

@@ -8,7 +8,8 @@ Fixed
 ~~~~~
 
 - Confirm submitted task IDs and offer their logs even when the optional
-  workspace refresh fails.
+  workspace refresh fails. Clear the previous receipt on each submission and
+  ignore resubmits while a task POST is pending.
 - Bound task submission success and error replies before JSON parsing.
   Preserve form values and direct operators to task history if the acknowledgement
   is unreadable.

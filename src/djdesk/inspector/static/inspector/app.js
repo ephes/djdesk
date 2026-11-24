@@ -213,51 +213,66 @@ class InspectorUI {
     const form = this.root.querySelector('[data-task-form]');
     if (!form || !this.taskEndpoint) return;
     const receipt = this.root.querySelector('[data-task-receipt]');
+    let pending = false;
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
-      const formData = new FormData(form);
-      let payload;
-      let taskId;
+      if (pending) return;
+      pending = true;
+      const submitButton = form.querySelector?.('[type="submit"]');
+      if (submitButton) submitButton.disabled = true;
       try {
-        const response = await fetch(this.taskEndpoint, {
-          method: 'POST',
-          body: formData,
-          headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-CSRFToken': this.getCsrfToken(),
-          },
-        });
-        payload = await readInspectorJSON(response, this.responseBytes, { allowHttpError: true });
-        if (!response.ok) {
-          if (response.status >= 400 && response.status < 500 && payload?.errors) {
-            const message = this.formatErrors(payload.errors);
-            if (message) {
-              this.showToast(message, 'danger');
-              return;
-            }
-          }
-          throw new Error('Task response unavailable');
-        }
-        taskId = payload?.task_run?.id;
-        if (!Number.isSafeInteger(taskId) || taskId < 1) throw new Error('Task receipt unavailable');
-      } catch {
-        this.showToast('Unable to confirm task submission. Check task history before retrying.', 'danger');
-        return;
-      }
-      if (receipt) {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'toolbar-btn';
-        button.textContent = 'View task log';
-        button.addEventListener('click', () => this.openTaskDrawer(taskId));
-        receipt.replaceChildren(`Task #${taskId} submitted. `, button);
-      }
-      form.reset();
-      if (typeof payload.workspace === 'string') {
-        this.updateFromPayload(payload);
+        await this.submitTaskForm(form, receipt);
+      } finally {
+        pending = false;
+        if (submitButton) submitButton.disabled = false;
       }
     });
+  }
+
+  async submitTaskForm(form, receipt) {
+    receipt?.replaceChildren();
+    const formData = new FormData(form);
+    let payload;
+    let taskId;
+    try {
+      const response = await fetch(this.taskEndpoint, {
+        method: 'POST',
+        body: formData,
+        headers: {
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRFToken': this.getCsrfToken(),
+        },
+      });
+      payload = await readInspectorJSON(response, this.responseBytes, { allowHttpError: true });
+      if (!response.ok) {
+        if (response.status >= 400 && response.status < 500 && payload?.errors) {
+          const message = this.formatErrors(payload.errors);
+          if (message) {
+            this.showToast(message, 'danger');
+            return;
+          }
+        }
+        throw new Error('Task response unavailable');
+      }
+      taskId = payload?.task_run?.id;
+      if (!Number.isSafeInteger(taskId) || taskId < 1) throw new Error('Task receipt unavailable');
+    } catch {
+      this.showToast('Unable to confirm task submission. Check task history before retrying.', 'danger');
+      return;
+    }
+    if (receipt) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'toolbar-btn';
+      button.textContent = 'View task log';
+      button.addEventListener('click', () => this.openTaskDrawer(taskId));
+      receipt.replaceChildren(`Task #${taskId} submitted. `, button);
+    }
+    form.reset();
+    if (typeof payload.workspace === 'string') {
+      this.updateFromPayload(payload);
+    }
   }
 
   bindTaskHistory() {

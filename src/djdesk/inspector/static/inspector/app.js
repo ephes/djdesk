@@ -212,11 +212,13 @@ class InspectorUI {
   bindTaskForm() {
     const form = this.root.querySelector('[data-task-form]');
     if (!form || !this.taskEndpoint) return;
+    const receipt = this.root.querySelector('[data-task-receipt]');
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const formData = new FormData(form);
       let payload;
+      let taskId;
       try {
         const response = await fetch(this.taskEndpoint, {
           method: 'POST',
@@ -237,15 +239,24 @@ class InspectorUI {
           }
           throw new Error('Task response unavailable');
         }
-        if (!payload || typeof payload !== 'object') throw new Error('Task response unavailable');
+        taskId = payload?.task_run?.id;
+        if (!Number.isSafeInteger(taskId) || taskId < 1) throw new Error('Task receipt unavailable');
       } catch {
         this.showToast('Unable to confirm task submission. Check task history before retrying.', 'danger');
         return;
       }
+      if (receipt) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'toolbar-btn';
+        button.textContent = 'View task log';
+        button.addEventListener('click', () => this.openTaskDrawer(taskId));
+        receipt.replaceChildren(`Task #${taskId} submitted. `, button);
+      }
+      form.reset();
       if (typeof payload.workspace === 'string') {
         this.updateFromPayload(payload);
       }
-      form.reset();
     });
   }
 

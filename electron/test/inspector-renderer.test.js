@@ -50,26 +50,49 @@ print(json.dumps(nodes))
 
 const hostile = '\"><img src=x onerror="sentinel"><span data-injected="';
 
-test('task creation updates panels only when the receipt includes a workspace snapshot', async () => {
-  const receipt = { task_run: { id: 42, status: 'requested' } };
+test('a task receipt acknowledges one submission and opens its log on demand', async () => {
+  const receipt = { task_run: { id: 42, status: 'requested', progress: 0, log: '' } };
   const snapshot = { ...receipt, workspace: 'synthetic' };
   for (const payload of [receipt, snapshot]) {
+    const requests = [];
     const TaskUI = vm.runInNewContext(source + '\nInspectorUI;', {
-      document: { addEventListener() {} },
+      document: {
+        addEventListener() {},
+        createElement() {
+          return { addEventListener(name, handler) { this[name] = handler; } };
+        },
+      },
       FormData: class {}, TextDecoder,
-      fetch: async () => new Response(JSON.stringify(payload), { status: 201 }),
+      async fetch(url, options) {
+        requests.push([url, options.method ?? 'GET']);
+        return options.method === 'POST'
+          ? new Response(JSON.stringify(payload), { status: 201 })
+          : new Response(JSON.stringify({ status: 'succeeded', log: 'Synthetic task log' }));
+      },
     });
     const ui = Object.create(TaskUI.prototype);
     const updates = [];
     const toasts = [];
+    const acknowledgments = [];
     let submit;
     let resets = 0;
     const form = {
       addEventListener(event, handler) { submit = handler; },
       reset() { resets++; },
     };
-    ui.root = { querySelector: () => form };
+    const receiptRegion = {
+      replaceChildren(...children) { acknowledgments.push(children); },
+    };
+    ui.root = {
+      querySelector(selector) {
+        return { '[data-task-form]': form, '[data-task-receipt]': receiptRegion }[selector];
+      },
+    };
     ui.taskEndpoint = '/api/task-runs/';
+    ui.taskDetailTemplate = '/api/task-runs/0/';
+    const drawerClasses = new Set();
+    ui.taskDrawer = { classList: drawerClasses };
+    ui.taskDrawerLog = { textContent: '' };
     ui.getCsrfToken = () => '';
     ui.updateFromPayload = (data) => updates.push(data);
     ui.showToast = (message) => toasts.push(message);
@@ -79,6 +102,18 @@ test('task creation updates panels only when the receipt includes a workspace sn
     assert.equal(resets, 1);
     assert.deepEqual(toasts, []);
     assert.deepEqual(updates.map((data) => data.workspace), payload === snapshot ? ['synthetic'] : []);
+    assert.deepEqual(requests, [['/api/task-runs/', 'POST']]);
+    assert.equal(drawerClasses.has('is-visible'), false);
+    assert.equal(acknowledgments.length, 1);
+    const [message, button] = acknowledgments[0];
+    assert.match(message, /Task #42 submitted/);
+    assert.equal(button.type, 'button');
+    assert.equal(button.textContent, 'View task log');
+    button.click();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(requests, [['/api/task-runs/', 'POST'], ['/api/task-runs/42/', 'GET']]);
+    assert.equal(drawerClasses.has('is-visible'), true);
+    assert.equal(ui.taskDrawerLog.textContent, 'Synthetic task log');
   }
 });
 

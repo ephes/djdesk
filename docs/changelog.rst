@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Confirm submitted task IDs and offer their logs even when the optional
+  workspace refresh fails.
 - Bound task submission success and error replies before JSON parsing.
   Preserve form values and direct operators to task history if the acknowledgement
   is unreadable.

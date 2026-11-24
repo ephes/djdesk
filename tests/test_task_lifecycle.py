@@ -372,6 +372,10 @@ class TaskLifecycleTests(TransactionTestCase):
         self.assertEqual(other.status, "running")
 
     def test_create_returns_receipt_when_optional_status_refresh_fails(self):
+        dashboard = self.client.get(
+            reverse("inspector:dashboard"), {"workspace": self.workspace.slug}
+        )
+        self.assertContains(dashboard, 'data-task-receipt role="status"')
         for failure in (
             {"side_effect": RuntimeError("snapshot failed")},
             {
@@ -402,6 +406,10 @@ class TaskLifecycleTests(TransactionTestCase):
                 self.assertEqual(run.result_id, "queued-result")
                 self.assertEqual(receipt["status"], WorkspaceTaskRun.Status.REQUESTED)
                 self.assertEqual(set(response.json()), {"task_run"})
+                detail = self.client.get(reverse("inspector:task-run-detail", args=[receipt["id"]]))
+                self.assertEqual(detail.status_code, 200)
+                self.assertEqual(detail.json()["id"], run.pk)
+                self.assertEqual(detail.json()["log"], run.log)
 
     def test_create_keeps_accepted_run_when_result_id_write_fails(self):
         update = QuerySet.update

@@ -65,8 +65,8 @@ Renderer data flow
 * The dashboard is server-rendered; ``DashboardView`` populates ``workspace``, ``doc_links``, ``task_presets``, and other context so the first paint always has meaningful data.
 * ``inspector/static/inspector/app.js`` polls ``/api/workspaces/<slug>/status/`` to keep the scan queue, insights, schema graph, and log stream updated. Submitting the assistant form returns the same payload so the UI can refresh immediately.
 
-  Status, task-detail, task submission and notebook export responses stream at most ``INSPECTOR_RESPONSE_BYTES`` of
-  response bytes before JSON parsing (``DJDESK_INSPECTOR_RESPONSE_BYTES``; default
+  Status, task-detail, task submission and notebook export responses stream at most
+  ``INSPECTOR_RESPONSE_BYTES`` before JSON parsing (``DJDESK_INSPECTOR_RESPONSE_BYTES``; default
   8 MiB plus five task logs at six bytes per retained log byte, the worst-case JSON
   escape of a control character). The dashboard receives the ceiling through its
   ``data-response-bytes`` attribute; without it the reader uses 8 MiB.
@@ -77,6 +77,8 @@ Renderer data flow
   split across chunks. POST error replies use the same ceiling. The task form preserves
   its inputs and displays structured 4xx refusals. When the acknowledgement is unreadable,
   the form asks the operator to check task history before retrying.
+  A valid receipt displays the saved task ID and offers to open its log. When the
+  snapshot is missing, existing dashboard panels stay visible until the next poll.
 
   Schema polling compares canonical rendered element data (independent of object
   keys and model/connection ordering). Identical responses keep the live graph,

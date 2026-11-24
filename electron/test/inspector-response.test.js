@@ -104,7 +104,7 @@ function taskForm(nextResponse, context = {}) {
     ...context,
   });
   const ui = Object.create(InspectorUI.prototype);
-  ui.root = { querySelector: () => form };
+  ui.root = { querySelector: (selector) => selector === '[data-task-form]' ? form : null };
   ui.taskEndpoint = '/tasks';
   ui.getCsrfToken = () => '';
   ui.showToast = (...args) => toasts.push(args);
@@ -147,6 +147,12 @@ test('task submissions distinguish unreadable acknowledgments from structured re
     await form.submit();
     assert.match(form.toasts.at(-1)[0], /check task history before retrying/i);
   }
+  next = new Response('{"task_run":{"id":"not-a-run-id"}}', { status: 201 });
+  await form.submit();
+  assert.equal(form.toasts.length, 3);
+  assert.match(form.toasts.at(-1)[0], /check task history before retrying/i);
+  assert.equal(form.resets(), 0);
+
   next = new Response('{"errors":{"preset":["Choose a safe preset."]}}', { status: 400 });
   await form.submit();
   assert.deepEqual(form.toasts.at(-1), ['preset: Choose a safe preset.', 'danger']);

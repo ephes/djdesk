@@ -249,7 +249,9 @@ only an unclaimed request failed, preserving a worker's running or completed out
 Poll task status for the final outcome, including deferred enqueue failures.
 HTTP 201 includes a `task_run` receipt with the saved ID and current state. If the
 optional workspace snapshot or its serialization fails, the response contains
-only the receipt, and the drawer retains its existing panels until the next poll.
+only the receipt. The task form confirms the saved ID and offers **View task log**
+for that run even when the snapshot is missing. The dashboard keeps its existing
+panels until polling refreshes them.
 If the backend accepts the enqueue but saving its result ID fails, the server logs
 a warning with the run ID. The receipt still reports the saved run's state and
 dispatch is attempted only once.

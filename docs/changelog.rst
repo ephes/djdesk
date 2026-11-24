@@ -10,6 +10,8 @@ Fixed
 - Keep the Inspector usable when saved workspace metadata has an invalid shape.
   Show empty sections and a repair notice, preserve the stored JSON, and require a
   JSON object when validating workspace edits.
+- Defer unused scan details and task-run metadata when polling Inspector status.
+  The response still includes scan log excerpts and task logs.
 - Confirm submitted task IDs and offer their logs even when the optional
   workspace refresh fails. Clear the previous receipt on each submission and
   ignore resubmits while a task POST is pending. Abort a task POST with no

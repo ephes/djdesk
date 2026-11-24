@@ -93,7 +93,9 @@ class HistoryIndexTests(TestCase):
                 _, scans, tasks = workspace_snapshot(workspace, include_logs=include_logs)
             self.assertEqual([row.pk for row in scans], self.expected["ScanJob"][:4])
             self.assertEqual([row.pk for row in tasks], self.expected["WorkspaceTaskRun"][:5])
-            self.assertEqual("details" in scans[0].get_deferred_fields(), not include_logs)
+            self.assertIn("details", scans[0].get_deferred_fields())
+            self.assertIn("metadata", tasks[0].get_deferred_fields())
+            self.assertEqual("log_excerpt" in scans[0].get_deferred_fields(), not include_logs)
             self.assertEqual("log" in tasks[0].get_deferred_fields(), not include_logs)
             self.assertEqual(len(queries), 2)
             for (sql, params), index in zip(

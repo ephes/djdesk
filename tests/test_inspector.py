@@ -13,6 +13,7 @@ from django.db import close_old_connections, connections
 from django.db.models.signals import post_init
 from django.forms import modelform_factory
 from django.test import Client, RequestFactory, TestCase, TransactionTestCase, override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
@@ -350,6 +351,38 @@ class InspectorAPIViewTests(TestCase):
         data = response.json()
         self.assertEqual(data["workspace"], self.workspace.slug)
         self.assertTrue(data["scans"])
+
+    def test_status_omits_unused_history_json_without_extra_queries(self) -> None:
+        unused = {"synthetic": "unused detail " * 16384}
+        scan_log = "Synthetic scan log\n" * 128
+        task_log = "Synthetic task log\n" * 128
+        self.workspace.scans.update(details=unused, log_excerpt=scan_log)
+        WorkspaceTaskRun.objects.create(
+            workspace=self.workspace, preset=self.preset, metadata=unused, log=task_log
+        )
+
+        with CaptureQueriesContext(connections["default"]) as queries:
+            response = self.client.get(
+                reverse("inspector:workspace-status", args=[self.workspace.slug])
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["scans"][0]["log_excerpt"], scan_log)
+        self.assertEqual(payload["tasks"][0]["log"], task_log)
+        self.assertEqual(payload["tasks"][0]["label"], self.preset.label)
+        selects = [query["sql"] for query in queries if query["sql"].startswith("SELECT")]
+        # Workspace lookup and reload, one query per history, and documentation links.
+        self.assertEqual(len(selects), 5, selects)
+        for table, deferred, log in (
+            ("inspector_scanjob", "details", "log_excerpt"),
+            ("inspector_workspacetaskrun", "metadata", "log"),
+        ):
+            with self.subTest(table=table):
+                history = [sql for sql in selects if f'FROM "{table}"' in sql]
+                self.assertEqual(len(history), 1, history)
+                self.assertIn(f'"{table}"."{log}"', history[0])
+                self.assertNotIn(f'"{table}"."{deferred}"', history[0])
 
     def test_status_with_escape_heavy_logs_fits_the_dashboard_ceiling(self) -> None:
         from django.conf import settings

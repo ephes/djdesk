@@ -51,6 +51,10 @@ Returns the data needed to render the dashboard. Example response (trimmed):
 The Electron renderer polls this endpoint every few seconds. You can also hit it from
 ``curl`` while following the tutorial to see the raw data.
 
+Polling retrieves log excerpts for the latest four scans and logs for the latest
+five task runs. The history queries defer scan ``details`` and task-run ``metadata``.
+The individual task-run endpoint still returns its metadata.
+
 Workspace metadata edits require a JSON object. For existing workspaces,
 ``metadata_needs_repair`` is true when the saved metadata or one of its dashboard
 sections has an invalid shape. Affected sections use their usual empty states,

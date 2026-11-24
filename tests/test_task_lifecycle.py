@@ -13,7 +13,7 @@ from django.urls import reverse
 
 from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm
-from djdesk.inspector.models import TaskPreset, Workspace, WorkspaceTaskRun
+from djdesk.inspector.models import TaskPreset, TaskRunRetired, Workspace, WorkspaceTaskRun
 from djdesk.inspector.tasks import execute_workspace_task
 
 
@@ -174,6 +174,30 @@ class TaskLifecycleTests(TransactionTestCase):
                 self.assertEqual(
                     WorkspaceTaskRun.objects.filter(pk=run.pk).values().get(), recovered
                 )
+
+    def test_retired_completion_leaves_the_worker_instance_unchanged(self):
+        run = WorkspaceTaskRun.objects.create(
+            workspace=self.workspace, preset=self.preset, progress=40, metadata={"notes": "keep"}
+        )
+        self.assertTrue(run.mark_running())
+        call_command(
+            "recover_task_runs",
+            run_id=[run.pk],
+            confirm_workers_stopped=True,
+            reason="Synthetic stopped worker",
+            stdout=StringIO(),
+        )
+        persisted = WorkspaceTaskRun.objects.filter(pk=run.pk).values()
+        recovered = persisted.get()
+
+        with self.assertRaises(TaskRunRetired):
+            run.mark_finished(success=True, command={"exit_code": 0})
+
+        self.assertEqual(run.status, WorkspaceTaskRun.Status.RUNNING)
+        self.assertEqual(run.progress, 40)
+        self.assertIsNone(run.completed_at)
+        self.assertEqual(run.metadata, {"notes": "keep"})
+        self.assertEqual(persisted.get(), recovered)
 
     def test_terminal_update_failure_leaves_status_and_receipt_unsettled(self):
         for outcome in (CommandResult(0, 0.1, 0, "check"), CommandExecutionError("Stopped")):

@@ -100,7 +100,9 @@ Renderer data flow
   against their database (``--database alias``). Recovery accepts requested or
   running runs, preserves the log and retires the worker claim; a requested run
   whose message was lost is marked failed as never started, so a late delivery
-  cannot claim it. Retrying requires a new confirmed request.
+  cannot claim it. Workers apply terminal fields to their run instance only
+  after the ownership-checked database update succeeds. Retrying requires a new
+  confirmed request.
 
   Workspace and task-preset deletion, including ``delete_selected`` and ORM bulk
   deletion, preserves the entire selected set while any related run is requested

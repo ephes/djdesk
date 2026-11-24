@@ -7,6 +7,19 @@ Unreleased
 Fixed
 ~~~~~
 
+- Preserve explicitly supplied workspace slugs when a duplicate save is rejected.
+  Only automatically generated slugs are retried after a uniqueness collision.
+- Apply task completion fields to the worker's run instance only after the
+  ownership-checked update succeeds.
+- Keep notebook inventory and viewer requests read-only. Only exports provision
+  missing notebook directories.
+- Sync the export root before acknowledging notebook publication so the workspace
+  directory entry is covered. If that sync fails, report uncertain durability and
+  retain the published notebook.
+- Sync the parent entries of a missing export root before the first export publishes.
+  Concurrent exports in the same process wait for that sync, and a failed sync is
+  retried by the next export.
+
 - Preserve the previous Electron runtime when moving it to backup reports an
   error after the move, restoring it by identity or retaining the recovery location.
 - Recognize the installed Electron runtime by identity after a reported promotion

@@ -16,6 +16,7 @@ class NotebookViewLimitTests(TestCase):
         self.enterContext(override_settings(INSPECTOR_DATA_LAB_ROOT=temporary.name))
         self.workspace = Workspace.objects.create(name="Limits", project_path="/synthetic/limits")
         self.path = data_lab.workspace_data_lab_dir(self.workspace) / "edited.ipynb"
+        self.path.parent.mkdir()
         self.url = reverse("inspector:data-lab-notebook", args=[self.workspace.slug, "edited"])
 
     def write_cells(self, cells):

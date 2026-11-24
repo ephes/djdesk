@@ -21,6 +21,7 @@ class NotebookInventoryTests(TestCase):
         self.addCleanup(self.override.disable)
         self.workspace = Workspace.objects.create(name="Synthetic", project_path="/tmp/inventory")
         self.directory = data_lab.workspace_data_lab_dir(self.workspace)
+        self.directory.mkdir()
         data_lab._export_name_cache.clear()
         self.addCleanup(data_lab._export_name_cache.clear)
 

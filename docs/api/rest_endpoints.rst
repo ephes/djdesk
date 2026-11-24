@@ -65,6 +65,9 @@ Notebook modification times must be finite and representable as UTC dates in yea
 1–9999. An entry outside this display domain is omitted and sets
 ``data_lab.notebooks_incomplete`` without interrupting status polling or hiding valid
 siblings. No replacement modification time is invented; a valid epoch time stays exact.
+If the workspace export directory is missing, status returns an empty inventory
+with ``data_lab.notebooks_incomplete`` set to false. Status and viewer requests
+leave the export directories untouched.
 
 ``POST /api/workspaces/<slug>/data-lab/export/``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -73,11 +76,16 @@ Required form field: ``template`` (``schema-audit`` or ``log-study``). A success
 response has status 201 and contains the status payload plus
 ``data_lab.selected_notebook`` and ``data_lab.selected_notebook_url`` for the exact new
 file, even when that file is outside the inventory window. Existing files are preserved.
-Success follows file fsync, hard-link publication and fsync of the same opened workspace
-directory. On macOS both syncs also issue ``F_FULLFSYNC`` to flush the drive cache
-(plain fsync where a filesystem does not support it). If the directory sync fails, HTTP 500 names the already published complete file
-and reports uncertain durability. No export is rolled back. Inspect the export directory
-before exporting again; retries create additional files.
+The export POST creates missing directories. A missing export root or ancestor is
+created and the parent of each missing directory is fsynced before publication. Other
+exports in the same server process wait for that sync. If it fails, the export fails
+with nothing published and the next export retries the sync. Success follows file fsync,
+hard-link publication, fsync of the opened workspace directory and fsync of the opened
+export root to persist the workspace directory entry. On macOS these syncs also issue
+``F_FULLFSYNC`` to flush the drive cache where supported.
+If a directory sync after publication fails, HTTP 500 names the published complete file and reports uncertain durability.
+The export remains visible. Inspect the export directory before exporting again.
+Retries create additional files.
 
 The drawer permits one export POST at a time, restores the prior control state after
 every outcome and never automatically replays a POST. Manual notebook selection while

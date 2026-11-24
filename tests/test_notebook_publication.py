@@ -7,6 +7,7 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -49,6 +50,39 @@ class NotebookPublicationTests(TestCase):
             return handle
 
         return mock.patch("io.open", side_effect=opened)
+
+    def test_reads_leave_missing_export_directories_uncreated(self):
+        for root in (self.root / "missing", self.root):
+            with self.subTest(root=root), override_settings(INSPECTOR_DATA_LAB_ROOT=root):
+                root_existed = root.exists()
+                directory = root / self.workspace.slug
+                dashboard = self.client.get(
+                    reverse("inspector:dashboard"), {"workspace": self.workspace.slug}
+                )
+                self.assertEqual(dashboard.status_code, 200)
+                self.assertFalse(directory.exists())
+                self.assertEqual(root.exists(), root_existed)
+                status = self.client.get(
+                    reverse("inspector:workspace-status", args=[self.workspace.slug])
+                )
+                self.assertEqual(status.status_code, 200)
+                self.assertEqual(status.json()["data_lab"]["notebooks"], [])
+                self.assertFalse(status.json()["data_lab"]["notebooks_incomplete"])
+                self.assertFalse(directory.exists())
+                self.assertEqual(root.exists(), root_existed)
+                missing = self.client.get(
+                    reverse("inspector:data-lab-notebook", args=[self.workspace.slug, "missing"])
+                )
+                self.assertEqual(missing.status_code, 404)
+                self.assertFalse(directory.exists())
+                self.assertEqual(root.exists(), root_existed)
+
+                exported = self.client.post(
+                    reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                    {"template": "schema-audit"},
+                )
+                self.assertEqual(exported.status_code, 201)
+                self.assertTrue((directory / "schema-audit.ipynb").is_file())
 
     def test_only_complete_notebooks_are_visible_during_write(self):
         snapshots = []
@@ -107,13 +141,20 @@ class NotebookPublicationTests(TestCase):
                 json.loads(path.read_text()), data_lab.build_notebook(self.workspace, "log-study")
             )
 
-    def test_publication_syncs_file_then_linked_directory_before_success(self):
+    def test_publication_syncs_file_then_workspace_then_root_before_success(self):
         events = []
         sync = os.fsync
         link = os.link
+        root = self.root.stat()
 
         def synced(fd):
-            events.append("directory-sync" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file-sync")
+            info = os.fstat(fd)
+            if os.path.samestat(root, info):
+                events.append("root-sync")
+            elif stat.S_ISDIR(info.st_mode):
+                events.append("workspace-sync")
+            else:
+                events.append("file-sync")
             sync(fd)
 
         def linked(*args, **kwargs):
@@ -128,10 +169,111 @@ class NotebookPublicationTests(TestCase):
                 os, "supports_follow_symlinks", os.supports_follow_symlinks | {patched_link}
             ),
         ):
+            for _ in range(2):
+                path = data_lab.export_notebook(self.workspace, "schema-audit")
+                events.append("success")
+                self.assertTrue(path.is_file())
+        expected = ["file-sync", "link", "workspace-sync", "root-sync", "success"]
+        self.assertEqual(events, expected * 2)
+
+    def classify_syncs(self, events, *named):
+        sync = os.fsync
+
+        def synced(fd):
+            info = os.fstat(fd)
+            for name, path in named:
+                if path.exists() and os.path.samestat(path.stat(), info):
+                    events.append(f"{name}-sync")
+                    break
+            else:
+                events.append("workspace-sync" if stat.S_ISDIR(info.st_mode) else "file-sync")
+            sync(fd)
+
+        return synced
+
+    def test_first_export_syncs_entries_of_created_export_root_before_publication(self):
+        self.addCleanup(data_lab._unsynced_entry_parents.clear)
+        outer = self.root / "outer"
+        root = outer / "exports"
+        events = []
+        synced = self.classify_syncs(events, ("base", self.root), ("outer", outer), ("root", root))
+        with (
+            override_settings(INSPECTOR_DATA_LAB_ROOT=root),
+            mock.patch.object(os, "fsync", side_effect=synced),
+        ):
+            first = data_lab.export_notebook(self.workspace, "schema-audit")
+            self.assertEqual(
+                events, ["outer-sync", "base-sync", "file-sync", "workspace-sync", "root-sync"]
+            )
+            events.clear()
+            second = data_lab.export_notebook(self.workspace, "schema-audit")
+            self.assertEqual(events, ["file-sync", "workspace-sync", "root-sync"])
+        self.assertTrue(first.is_file())
+        self.assertTrue(second.is_file())
+
+    def test_unconfirmed_export_root_entry_is_synced_by_next_export(self):
+        self.addCleanup(data_lab._unsynced_entry_parents.clear)
+        root = self.root / "exports"
+        events = []
+        synced = self.classify_syncs(events, ("base", self.root), ("root", root))
+        fail = [True]
+
+        def failing(fd):
+            if fail[0] and os.path.samestat(self.root.stat(), os.fstat(fd)):
+                fail[0] = False
+                raise OSError("injected base sync failure")
+            synced(fd)
+
+        with (
+            override_settings(INSPECTOR_DATA_LAB_ROOT=root),
+            mock.patch.object(os, "fsync", side_effect=failing),
+        ):
+            with self.assertRaisesRegex(OSError, "injected base sync failure"):
+                data_lab.export_notebook(self.workspace, "schema-audit")
+            self.assertTrue(root.is_dir())
+            self.assertFalse((root / self.workspace.slug).exists())
             path = data_lab.export_notebook(self.workspace, "schema-audit")
-            events.append("success")
-        self.assertEqual(events, ["file-sync", "link", "directory-sync", "success"])
-        self.assertTrue(path.is_file())
+        self.assertEqual(events, ["base-sync", "file-sync", "workspace-sync", "root-sync"])
+        self.assertEqual(path.name, "schema-audit.ipynb")
+        self.assertEqual(data_lab._unsynced_entry_parents, [])
+
+    def test_concurrent_export_waits_for_created_export_root_sync(self):
+        self.addCleanup(data_lab._unsynced_entry_parents.clear)
+        root = self.root / "exports"
+        other = Workspace.objects.create(name="Other", project_path="/other")
+        base = self.root.stat()
+        sync = os.fsync
+        entered = threading.Event()
+        release = threading.Event()
+        order = []
+
+        def blocking(fd):
+            if os.path.samestat(base, os.fstat(fd)):
+                entered.set()
+                self.assertTrue(release.wait(10))
+                order.append("base-sync")
+            sync(fd)
+
+        def export(workspace):
+            path = data_lab.export_notebook(workspace, "schema-audit")
+            order.append(workspace.slug)
+            return path
+
+        with (
+            override_settings(INSPECTOR_DATA_LAB_ROOT=root),
+            mock.patch.object(os, "fsync", side_effect=blocking),
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            first = pool.submit(export, self.workspace)
+            self.assertTrue(entered.wait(10))
+            second = pool.submit(export, other)
+            with self.assertRaises(TimeoutError):
+                second.result(1)
+            release.set()
+            paths = [first.result(10), second.result(10)]
+        self.assertEqual(order[0], "base-sync")
+        self.assertEqual(order.count("base-sync"), 1)
+        self.assertTrue(all(path.is_file() for path in paths))
 
     def test_publication_requests_full_device_flush_where_supported(self):
         calls = []
@@ -143,7 +285,7 @@ class NotebookPublicationTests(TestCase):
         fake_fcntl = mock.Mock(F_FULLFSYNC=51, fcntl=mock.Mock(side_effect=full_fsync))
         with mock.patch.object(data_lab, "fcntl", fake_fcntl):
             path = data_lab.export_notebook(self.workspace, "schema-audit")
-        self.assertEqual(calls, [("file", 51), ("dir", 51)])
+        self.assertEqual(calls, [("file", 51), ("dir", 51), ("dir", 51)])
         self.assertTrue(path.is_file())
 
     def test_unsupported_full_flush_falls_back_to_fsync_and_other_errors_refuse(self):
@@ -188,6 +330,34 @@ class NotebookPublicationTests(TestCase):
             json.loads(new.read_text()), data_lab.build_notebook(self.workspace, "schema-audit")
         )
         self.assertEqual(set(old.parent.iterdir()), {old, new})
+
+    def test_first_export_root_sync_failure_reports_visible_notebook(self):
+        root = self.root.stat()
+        sync = os.fsync
+
+        def fail_root_sync(fd):
+            if os.path.samestat(root, os.fstat(fd)):
+                raise OSError("injected export root sync failure")
+            sync(fd)
+
+        with (
+            mock.patch.object(os, "fsync", side_effect=fail_root_sync),
+            self.assertLogs("djdesk.inspector.views", level="ERROR"),
+        ):
+            response = self.client.post(
+                reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                {"template": "schema-audit"},
+            )
+        self.assertEqual(response.status_code, 500)
+        error = response.json()["errors"]["template"][0]
+        self.assertIn("'schema-audit.ipynb' is already published", error)
+        self.assertIn("durability", error)
+        published = data_lab.workspace_data_lab_dir(self.workspace) / "schema-audit.ipynb"
+        self.assertEqual(
+            json.loads(published.read_text()),
+            data_lab.build_notebook(self.workspace, "schema-audit"),
+        )
+        self.assertEqual(list(published.parent.iterdir()), [published])
 
     def test_killed_writer_leaves_no_listed_partial_notebook(self):
         script = """
@@ -312,6 +482,7 @@ data_lab.export_notebook(Workspace(name="Crash", slug="publication"), "schema-au
 
     def test_swap_before_directory_open_cannot_create_outside_files(self):
         directory = data_lab.workspace_data_lab_dir(self.workspace)
+        directory.mkdir()
         with TemporaryDirectory() as outside:
 
             def swap(workspace):
@@ -334,6 +505,7 @@ data_lab.export_notebook(Workspace(name="Crash", slug="publication"), "schema-au
 
     def test_unaddressable_names_never_break_dashboard_or_status(self):
         directory = data_lab.workspace_data_lab_dir(self.workspace)
+        directory.mkdir()
         names = ["my notes.ipynb", "über.ipynb", "notes.v1.ipynb", ".ipynb"]
         for name in names + ["valid-notes_2.ipynb"]:
             (directory / name).write_bytes(b'{"cells": []}')

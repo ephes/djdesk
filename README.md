@@ -287,9 +287,10 @@ confirming.
 Worker publications are conditional on the running status and immutable claim start
 time. Recovery retires that claim: a late worker cannot replace its logs, progress,
 metadata or failure with success, and returns `{retired: true, status: ...}` when it
-detects retirement. Unexpected worker errors still propagate without changing a
-recovered outcome. This fence does not stop a live command; the shutdown check remains
-required before recovery.
+detects retirement. The worker's run instance only receives terminal fields after its
+ownership-checked update succeeds. Unexpected worker errors still propagate without
+changing a recovered outcome. This fence does not stop a live command; the shutdown
+check remains required before recovery.
 
 Workspace commands are checked by one guard that sees the argv list exactly as it is
 executed. An argv is accepted only when it is `<interpreter> manage.py <command>` from
@@ -338,6 +339,10 @@ read and preserves the last displayed status/log; later polls or a drawer reload
 recover with a smaller response. The drawer DOM test also covers this response boundary.
 An oversized export reply preserves the current notebook and reports an uncertain
 outcome with the same inspection guidance as a timed-out acknowledgement.
+
+The dashboard, status API and notebook viewer leave the export directories untouched.
+A missing workspace directory has an empty inventory, and a missing notebook returns
+HTTP 404. The export POST provisions directories as needed.
 
 Data Lab exports exclusively claim a fresh filename on every export: the template
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
@@ -428,12 +433,18 @@ does not verify DOM rendering.
 Exports write and fsync an owner-only (0600) `.notebook-<random>.tmp` file before
 atomically publishing a hard link under the next free `.ipynb` name. Concurrent exports
 never overwrite one another and polls never see a partly written export. The same opened
-workspace directory is fsynced after the final link and before success is acknowledged.
-Where the platform offers `F_FULLFSYNC` (macOS), both syncs also flush the drive cache;
-filesystems without it fall back to plain fsync.
-If that sync fails, HTTP 500 names the already published, complete notebook and reports
-uncertain durability. It does not remove that export or roll back existing files. Inspect
-the export directory before exporting again; a retry creates another filename. A power
+workspace directory is fsynced after the final link, then the opened export root is
+fsynced to persist the workspace directory entry. Every export syncs the root so a
+concurrently created workspace directory is covered even if its creator is still running.
+Before it publishes, an export that finds the export root or its ancestors missing
+creates them and fsyncs the parent of each missing directory. Other exports in the same
+server process wait until that sync is done. A failed sync fails the export before
+anything is published and is retried by the next export.
+Where the platform offers `F_FULLFSYNC` (macOS), these syncs also flush the drive cache.
+Filesystems without it fall back to plain fsync.
+If a directory sync after publication fails, HTTP 500 names the complete, published notebook and
+reports uncertain durability. The export and existing files remain visible. Inspect
+the export directory before exporting again. A retry creates another filename. A power
 loss before a successful directory sync may lose the new name. Creation,
 publication and cleanup use the same opened workspace directory, even if its pathname
 is replaced. A renamed directory may therefore contain the export while it is unavailable
@@ -446,8 +457,10 @@ portable reader. The export filesystem must support hard links; filesystem failu
 publication (no hard-link support, a directory swapped for a symlink, a failed staging write)
 return an HTTP 500 JSON error and leave no partial export.
 
-Workspace saves retry slug uniqueness collisions at most five times. SQLite admission
-requires its exact single-column unique error; PostgreSQL uses SQLSTATE 23505 and the
+Workspace saves attempt a generated slug up to five times on uniqueness collisions.
+An explicitly supplied slug is preserved and a collision raises `IntegrityError` at
+save time. Django's model validation also reports an already occupied slug. SQLite
+admission requires its exact single-column unique error. PostgreSQL uses SQLSTATE 23505 and the
 workspace table's `inspector_workspace_slug_key` diagnostic. Other integrity errors,
 including duplicate project paths, propagate immediately. PostgreSQL integration checks
 use a disposable `test_<PGDATABASE>` database on an explicitly selected local server:

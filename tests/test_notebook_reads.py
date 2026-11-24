@@ -27,6 +27,7 @@ class NotebookReadTests(TestCase):
         self.enterContext(override_settings(INSPECTOR_DATA_LAB_ROOT=temporary.name))
         self.workspace = Workspace.objects.create(name="Reading", project_path="/reading")
         self.path = data_lab.workspace_data_lab_dir(self.workspace) / "edited.ipynb"
+        self.path.parent.mkdir()
         self.path.write_bytes(self.old)
         self.url = reverse("inspector:data-lab-notebook", args=[self.workspace.slug, "edited"])
 

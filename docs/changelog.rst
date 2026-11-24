@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Preserve explicitly supplied workspace slugs when a duplicate save is rejected.
+  Only automatically generated slugs are retried after a uniqueness collision.
+- Apply task completion fields to the worker's run instance only after the
+  ownership-checked update succeeds.
+
 - Preserve the previous Electron runtime when moving it to backup reports an
   error after the move, restoring it by identity or retaining the recovery location.
 - Recognize the installed Electron runtime by identity after a reported promotion

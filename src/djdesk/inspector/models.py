@@ -53,6 +53,7 @@ class Workspace(models.Model):
 
     def save(self, force_insert=False, force_update=False, using=None, update_fields=None) -> None:
         using = using or router.db_for_write(type(self), instance=self)
+        generated_slug = not self.slug
         attempts = 0
         while True:
             if not self.slug:
@@ -67,7 +68,7 @@ class Workspace(models.Model):
                     )
                 return
             except IntegrityError as exc:
-                if not self._is_slug_integrity_error(exc):
+                if not generated_slug or not self._is_slug_integrity_error(exc):
                     raise
                 attempts += 1
                 if attempts >= 5:
@@ -294,17 +295,22 @@ class WorkspaceTaskRun(models.Model):
 
     def mark_finished(self, *, success: bool, command: dict[str, Any] | None = None) -> None:
         self.flush_log_buffer()
-        self.status = self.Status.SUCCEEDED if success else self.Status.FAILED
-        self.completed_at = timezone.now()
-        self.progress = 100
-        fields = ["status", "completed_at", "progress"]
+        values: dict[str, Any] = {
+            "status": self.Status.SUCCEEDED if success else self.Status.FAILED,
+            "completed_at": timezone.now(),
+            "progress": 100,
+        }
         if command is not None:
-            self.metadata = {**(self.metadata or {}), "command": command}
-            fields.append("metadata")
-        self.publish_fields(*fields)
+            values["metadata"] = {**(self.metadata or {}), "command": command}
+        self._publish_values(**values)
+        for field, value in values.items():
+            setattr(self, field, value)
 
     def publish_fields(self, *fields: str) -> None:
         """Publish only while this instance's claim still owns the row."""
+        self._publish_values(**{field: getattr(self, field) for field in fields})
+
+    def _publish_values(self, **values: Any) -> None:
         changed = (
             type(self)
             .objects.using(self._state.db)
@@ -315,7 +321,7 @@ class WorkspaceTaskRun(models.Model):
                 else self.Status.REQUESTED,
                 started_at=self.started_at,
             )
-            .update(**{field: getattr(self, field) for field in fields})
+            .update(**values)
         )
         if not changed:
             raise TaskRunRetired("Workspace task attempt has been retired.")

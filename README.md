@@ -287,9 +287,10 @@ confirming.
 Worker publications are conditional on the running status and immutable claim start
 time. Recovery retires that claim: a late worker cannot replace its logs, progress,
 metadata or failure with success, and returns `{retired: true, status: ...}` when it
-detects retirement. Unexpected worker errors still propagate without changing a
-recovered outcome. This fence does not stop a live command; the shutdown check remains
-required before recovery.
+detects retirement. The worker's run instance only receives terminal fields after its
+ownership-checked update succeeds. Unexpected worker errors still propagate without
+changing a recovered outcome. This fence does not stop a live command; the shutdown
+check remains required before recovery.
 
 Workspace commands are checked by one guard that sees the argv list exactly as it is
 executed. An argv is accepted only when it is `<interpreter> manage.py <command>` from
@@ -446,8 +447,10 @@ portable reader. The export filesystem must support hard links; filesystem failu
 publication (no hard-link support, a directory swapped for a symlink, a failed staging write)
 return an HTTP 500 JSON error and leave no partial export.
 
-Workspace saves retry slug uniqueness collisions at most five times. SQLite admission
-requires its exact single-column unique error; PostgreSQL uses SQLSTATE 23505 and the
+Workspace saves attempt a generated slug up to five times on uniqueness collisions.
+An explicitly supplied slug is preserved and a collision raises `IntegrityError` at
+save time. Django's model validation also reports an already occupied slug. SQLite
+admission requires its exact single-column unique error. PostgreSQL uses SQLSTATE 23505 and the
 workspace table's `inspector_workspace_slug_key` diagnostic. Other integrity errors,
 including duplicate project paths, propagate immediately. PostgreSQL integration checks
 use a disposable `test_<PGDATABASE>` database on an explicitly selected local server:

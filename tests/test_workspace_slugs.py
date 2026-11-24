@@ -92,6 +92,27 @@ class PostgresSlugCollisionTests(TransactionTestCase):
 
 
 class WorkspaceConstraintTests(TestCase):
+    def test_explicit_slug_collision_preserves_submitted_slug(self):
+        first = Workspace.objects.create(name="First", slug="chosen", project_path="/first")
+        second = Workspace(name="Second", slug="chosen", project_path="/second")
+
+        with self.assertRaises(IntegrityError):
+            second.save()
+
+        self.assertEqual(second.slug, "chosen")
+        self.assertEqual(Workspace.objects.get(slug="chosen"), first)
+        self.assertFalse(Workspace.objects.filter(project_path="/second").exists())
+
+    def test_generated_slug_collision_retries_with_a_new_candidate(self):
+        Workspace.objects.create(name="Existing", slug="occupied", project_path="/existing")
+        with mock.patch(
+            "djdesk.inspector.models.Workspace._generate_unique_slug",
+            side_effect=["occupied", "available"],
+        ):
+            workspace = Workspace.objects.create(name="Second", project_path="/second")
+
+        self.assertEqual(Workspace.objects.get(pk=workspace.pk).slug, "available")
+
     def test_project_path_violation_is_not_retried(self):
         Workspace.objects.create(name="First", project_path="/duplicate")
         with mock.patch.object(

@@ -50,26 +50,50 @@ print(json.dumps(nodes))
 
 const hostile = '\"><img src=x onerror="sentinel"><span data-injected="';
 
-test('task creation updates panels only when the receipt includes a workspace snapshot', async () => {
-  const receipt = { task_run: { id: 42, status: 'requested' } };
+test('a task receipt acknowledges one submission and opens its log on demand', async () => {
+  const receipt = { task_run: { id: 42, status: 'requested', progress: 0, log: '' } };
   const snapshot = { ...receipt, workspace: 'synthetic' };
   for (const payload of [receipt, snapshot]) {
+    const requests = [];
     const TaskUI = vm.runInNewContext(source + '\nInspectorUI;', {
-      document: { addEventListener() {} },
-      FormData: class {},
-      fetch: async () => ({ ok: true, json: async () => payload }),
+      document: {
+        addEventListener() {},
+        createElement() {
+          return { addEventListener(name, handler) { this[name] = handler; } };
+        },
+      },
+      FormData: class {}, TextDecoder, AbortController,
+      window: { setTimeout() { return 1; }, clearTimeout() {} },
+      async fetch(url, options) {
+        requests.push([url, options.method ?? 'GET']);
+        return options.method === 'POST'
+          ? new Response(JSON.stringify(payload), { status: 201 })
+          : new Response(JSON.stringify({ status: 'succeeded', log: 'Synthetic task log' }));
+      },
     });
     const ui = Object.create(TaskUI.prototype);
     const updates = [];
     const toasts = [];
+    const acknowledgments = [];
     let submit;
     let resets = 0;
     const form = {
       addEventListener(event, handler) { submit = handler; },
       reset() { resets++; },
     };
-    ui.root = { querySelector: () => form };
+    const receiptRegion = {
+      replaceChildren(...children) { acknowledgments.push(children); },
+    };
+    ui.root = {
+      querySelector(selector) {
+        return { '[data-task-form]': form, '[data-task-receipt]': receiptRegion }[selector];
+      },
+    };
     ui.taskEndpoint = '/api/task-runs/';
+    ui.taskDetailTemplate = '/api/task-runs/0/';
+    const drawerClasses = new Set();
+    ui.taskDrawer = { classList: drawerClasses };
+    ui.taskDrawerLog = { textContent: '' };
     ui.getCsrfToken = () => '';
     ui.updateFromPayload = (data) => updates.push(data);
     ui.showToast = (message) => toasts.push(message);
@@ -78,8 +102,103 @@ test('task creation updates panels only when the receipt includes a workspace sn
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(resets, 1);
     assert.deepEqual(toasts, []);
-    assert.deepEqual(updates, payload === snapshot ? [snapshot] : []);
+    assert.deepEqual(updates.map((data) => data.workspace), payload === snapshot ? ['synthetic'] : []);
+    assert.deepEqual(requests, [['/api/task-runs/', 'POST']]);
+    assert.equal(drawerClasses.has('is-visible'), false);
+    assert.equal(acknowledgments.length, 2);
+    assert.deepEqual(acknowledgments[0], []);
+    const [message, button] = acknowledgments[1];
+    assert.match(message, /Task #42 submitted/);
+    assert.equal(button.type, 'button');
+    assert.equal(button.textContent, 'View task log');
+    button.click();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(requests, [['/api/task-runs/', 'POST'], ['/api/task-runs/42/', 'GET']]);
+    assert.equal(drawerClasses.has('is-visible'), true);
+    assert.equal(ui.taskDrawerLog.textContent, 'Synthetic task log');
   }
+});
+
+test('each task submission clears the previous receipt, ignores resubmits while pending and times out', async () => {
+  const replies = [];
+  const posts = [];
+  const signals = [];
+  const timers = new Map();
+  const TaskUI = vm.runInNewContext(source + '\nInspectorUI;', {
+    document: {
+      addEventListener() {},
+      createElement() {
+        return { addEventListener(name, handler) { this[name] = handler; } };
+      },
+    },
+    FormData: class {}, TextDecoder, AbortController,
+    window: {
+      setTimeout(callback, delay) { const id = {}; timers.set(id, { callback, delay }); return id; },
+      clearTimeout(id) { timers.delete(id); },
+    },
+    fetch(url, options) {
+      posts.push([url, options.method]);
+      signals.push(options.signal);
+      return new Promise((resolve) => replies.push(resolve));
+    },
+  });
+  const ui = Object.create(TaskUI.prototype);
+  let submit;
+  const submitButton = { disabled: false };
+  const form = {
+    addEventListener(event, handler) { submit = handler; },
+    querySelector(selector) { return selector === '[type="submit"]' ? submitButton : null; },
+    reset() {},
+  };
+  let receiptChildren = [];
+  const receiptRegion = { replaceChildren(...children) { receiptChildren = children; } };
+  ui.root = {
+    querySelector(selector) {
+      return { '[data-task-form]': form, '[data-task-receipt]': receiptRegion }[selector];
+    },
+  };
+  ui.taskEndpoint = '/api/task-runs/';
+  const toasts = [];
+  ui.getCsrfToken = () => '';
+  ui.updateFromPayload = () => {};
+  ui.showToast = (message) => toasts.push(message);
+  ui.bindTaskForm();
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+  submit({ preventDefault() {} });
+  submit({ preventDefault() {} });
+  assert.equal(posts.length, 1);
+  assert.equal(submitButton.disabled, true);
+  replies.shift()(new Response('{"task_run":{"id":41}}', { status: 201 }));
+  await settle();
+  assert.equal(submitButton.disabled, false);
+  assert.match(receiptChildren[0], /Task #41 submitted/);
+
+  submit({ preventDefault() {} });
+  assert.deepEqual(receiptChildren, []);
+  replies.shift()(new Response('{"broken":', { status: 201 }));
+  await settle();
+  assert.equal(posts.length, 2);
+  assert.deepEqual(receiptChildren, []);
+  assert.equal(submitButton.disabled, false);
+  assert.match(toasts.at(-1), /check task history before retrying/i);
+  assert.equal(timers.size, 0);
+
+  // A POST that never answers releases the form after one deadline.
+  submit({ preventDefault() {} });
+  assert.equal(submitButton.disabled, true);
+  assert.equal(timers.size, 1);
+  const [timer] = timers.values();
+  assert.equal(timer.delay, 30000);
+  timer.callback();
+  await settle();
+  assert.equal(signals.at(-1).aborted, true);
+  assert.equal(submitButton.disabled, false);
+  assert.deepEqual(receiptChildren, []);
+  assert.equal(toasts.length, 2);
+  assert.match(toasts.at(-1), /check task history before retrying/i);
+  submit({ preventDefault() {} });
+  assert.equal(posts.length, 4);
 });
 
 test('metadata cannot create renderer elements or attributes', () => {

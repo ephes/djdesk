@@ -14,13 +14,13 @@ function load(context = {}) {
 }
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 
-function response(chunks, length) {
+function response(chunks, length, status = 200) {
   let cancelled = false;
   const body = new ReadableStream({
     start(controller) { for (const chunk of chunks) controller.enqueue(chunk); },
     cancel() { cancelled = true; },
   });
-  return { value: new Response(body, { headers: length === undefined ? {} : { 'Content-Length': length } }),
+  return { value: new Response(body, { status, headers: length === undefined ? {} : { 'Content-Length': length } }),
     cancelled: () => cancelled };
 }
 
@@ -87,4 +87,82 @@ test('the dashboard root sets the server-derived response ceiling', () => {
   for (const invalid of [undefined, '', '0', '-1', '1.5', 'x', '1e9', '9'.repeat(20)]) {
     assert.equal(inspectorResponseBytes(invalid), undefined);
   }
+});
+
+function taskForm(nextResponse, context = {}) {
+  let submit;
+  let resets = 0;
+  const toasts = [];
+  const snapshots = [];
+  const form = {
+    addEventListener(name, callback) { if (name === 'submit') submit = callback; },
+    reset() { resets++; },
+  };
+  const { InspectorUI } = load({
+    fetch: nextResponse,
+    FormData: class {},
+    AbortController,
+    window: { setTimeout() { return 1; }, clearTimeout() {} },
+    ...context,
+  });
+  const ui = Object.create(InspectorUI.prototype);
+  ui.root = { querySelector: (selector) => selector === '[data-task-form]' ? form : null };
+  ui.taskEndpoint = '/tasks';
+  ui.getCsrfToken = () => '';
+  ui.showToast = (...args) => toasts.push(args);
+  ui.updateFromPayload = (payload) => snapshots.push(payload);
+  ui.bindTaskForm();
+  return {
+    ui, toasts, snapshots, resets: () => resets,
+    async submit() {
+      submit({ preventDefault() {} });
+      await settled();
+    },
+  };
+}
+
+test('task submissions cancel oversized success and error replies before parsing', async () => {
+  for (const status of [201, 400]) {
+    const fixture = response([new Uint8Array(16), new Uint8Array(17)], '1', status);
+    let parses = 0;
+    fixture.value.json = async () => {
+      parses++;
+      return { workspace: 'synthetic', errors: { __all__: ['Rejected'] } };
+    };
+    const form = taskForm(async () => fixture.value);
+    form.ui.responseBytes = 32;
+    await form.submit();
+    assert.equal(fixture.cancelled(), true);
+    assert.equal(fixture.value.body.locked, false);
+    assert.equal(parses, 0);
+    assert.deepEqual(form.snapshots, []);
+    assert.equal(form.resets(), 0);
+    assert.match(form.toasts[0][0], /check task history before retrying/i);
+  }
+});
+
+test('task submissions distinguish unreadable acknowledgments from structured refusals', async () => {
+  let next;
+  const form = taskForm(async () => next);
+  for (const status of [201, 400]) {
+    next = new Response('{"broken":', { status });
+    await form.submit();
+    assert.match(form.toasts.at(-1)[0], /check task history before retrying/i);
+  }
+  next = new Response('{"task_run":{"id":"not-a-run-id"}}', { status: 201 });
+  await form.submit();
+  assert.equal(form.toasts.length, 3);
+  assert.match(form.toasts.at(-1)[0], /check task history before retrying/i);
+  assert.equal(form.resets(), 0);
+
+  next = new Response('{"errors":{"preset":["Choose a safe preset."]}}', { status: 400 });
+  await form.submit();
+  assert.deepEqual(form.toasts.at(-1), ['preset: Choose a safe preset.', 'danger']);
+  assert.deepEqual(form.snapshots, []);
+  assert.equal(form.resets(), 0);
+
+  next = new Response('{"workspace":"synthetic","task_run":{"id":42}}', { status: 201 });
+  await form.submit();
+  assert.equal(form.snapshots[0].workspace, 'synthetic');
+  assert.equal(form.resets(), 1);
 });

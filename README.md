@@ -249,7 +249,12 @@ only an unclaimed request failed, preserving a worker's running or completed out
 Poll task status for the final outcome, including deferred enqueue failures.
 HTTP 201 includes a `task_run` receipt with the saved ID and current state. If the
 optional workspace snapshot or its serialization fails, the response contains
-only the receipt, and the drawer retains its existing panels until the next poll.
+only the receipt. The task form confirms the saved ID and offers **View task log**
+for that run even when the snapshot is missing. The dashboard keeps its existing
+panels until polling refreshes them. Each new submission clears the previous
+receipt, and the submit button stays disabled until the reply has been handled.
+A submission with no complete reply within 30 seconds is aborted, re-enables the
+form and asks you to check task history before retrying.
 If the backend accepts the enqueue but saving its result ID fails, the server logs
 a warning with the run ID. The receipt still reports the saved run's state and
 dispatch is attempted only once.
@@ -328,7 +333,7 @@ Commands whose normal output fits the budgets behave as before.
 Line framing scans only newly decoded text and joins each completed/final line once,
 so newline-free output uses linear work within the same byte limit.
 
-Inspector status, task-detail and export responses (including export errors) stream
+Inspector status, task-detail, task submission and export responses (including POST errors) stream
 through a byte ceiling before JSON parsing, regardless of missing or inaccurate
 Content-Length. The ceiling is
 `DJDESK_INSPECTOR_RESPONSE_BYTES` (default 8 MiB plus 30 times the task-log budget, enough
@@ -337,6 +342,9 @@ raises this default), passed to the dashboard as `data-response-bytes`; without 
 attribute the reader falls back to 8 MiB. Overflow cancels the
 read and preserves the last displayed status/log; later polls or a drawer reload can
 recover with a smaller response. The drawer DOM test also covers this response boundary.
+An unreadable task submission reply preserves the dashboard and form values.
+Check task history before retrying because the task may already have been queued.
+A structured 4xx refusal displays the form errors.
 An oversized export reply preserves the current notebook and reports an uncertain
 outcome with the same inspection guidance as a timed-out acknowledgement.
 

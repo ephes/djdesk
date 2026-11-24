@@ -7,6 +7,13 @@ Unreleased
 Fixed
 ~~~~~
 
+- Confirm submitted task IDs and offer their logs even when the optional
+  workspace refresh fails. Clear the previous receipt on each submission and
+  ignore resubmits while a task POST is pending. Abort a task POST with no
+  complete reply after 30 seconds so a stalled transport releases the form.
+- Bound task submission success and error replies before JSON parsing.
+  Preserve form values and direct operators to task history if the acknowledgement
+  is unreadable.
 - Preserve explicitly supplied workspace slugs when a duplicate save is rejected.
   Only automatically generated slugs are retried after a uniqueness collision.
 - Apply task completion fields to the worker's run instance only after the

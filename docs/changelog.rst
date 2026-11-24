@@ -11,6 +11,11 @@ Fixed
   Only automatically generated slugs are retried after a uniqueness collision.
 - Apply task completion fields to the worker's run instance only after the
   ownership-checked update succeeds.
+- Keep notebook inventory and viewer requests read-only. Only exports provision
+  missing notebook directories.
+- Sync the export root before acknowledging notebook publication so the workspace
+  directory entry is covered. If the sync fails, report uncertain durability and
+  retain the published notebook.
 
 - Preserve the previous Electron runtime when moving it to backup reports an
   error after the move, restoring it by identity or retaining the recovery location.

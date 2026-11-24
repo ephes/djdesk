@@ -627,6 +627,7 @@ class DataLabAPITests(TestCase):
 
     def test_notebook_symlinks_and_nonregular_exports_are_unavailable(self):
         directory = data_lab.workspace_data_lab_dir(self.workspace)
+        directory.mkdir()
         outside = Path(self.temp_dir.name) / "outside.json"
         outside.write_text('{"cells": [], "private": "synthetic secret"}')
         internal = directory / "ordinary.ipynb"

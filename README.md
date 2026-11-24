@@ -340,6 +340,10 @@ recover with a smaller response. The drawer DOM test also covers this response b
 An oversized export reply preserves the current notebook and reports an uncertain
 outcome with the same inspection guidance as a timed-out acknowledgement.
 
+The dashboard, status API and notebook viewer leave the export directories untouched.
+A missing workspace directory has an empty inventory, and a missing notebook returns
+HTTP 404. The export POST provisions directories as needed.
+
 Data Lab exports exclusively claim a fresh filename on every export: the template
 name, then `-2`, `-3`, and so on, skipping existing names. Existing notebooks and
 manual edits are preserved. The export API returns `data_lab.selected_notebook`
@@ -429,12 +433,14 @@ does not verify DOM rendering.
 Exports write and fsync an owner-only (0600) `.notebook-<random>.tmp` file before
 atomically publishing a hard link under the next free `.ipynb` name. Concurrent exports
 never overwrite one another and polls never see a partly written export. The same opened
-workspace directory is fsynced after the final link and before success is acknowledged.
-Where the platform offers `F_FULLFSYNC` (macOS), both syncs also flush the drive cache;
-filesystems without it fall back to plain fsync.
-If that sync fails, HTTP 500 names the already published, complete notebook and reports
-uncertain durability. It does not remove that export or roll back existing files. Inspect
-the export directory before exporting again; a retry creates another filename. A power
+workspace directory is fsynced after the final link, then the opened export root is
+fsynced to persist the workspace directory entry. Every export syncs the root so a
+concurrently created workspace directory is covered even if its creator is still running.
+Where the platform offers `F_FULLFSYNC` (macOS), these syncs also flush the drive cache.
+Filesystems without it fall back to plain fsync.
+If either directory sync fails, HTTP 500 names the complete, published notebook and
+reports uncertain durability. The export and existing files remain visible. Inspect
+the export directory before exporting again. A retry creates another filename. A power
 loss before a successful directory sync may lose the new name. Creation,
 publication and cleanup use the same opened workspace directory, even if its pathname
 is replaced. A renamed directory may therefore contain the export while it is unavailable

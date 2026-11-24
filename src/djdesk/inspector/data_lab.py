@@ -134,36 +134,35 @@ def _apply_placeholders(value: str, replacements: dict[str, str]) -> str:
     return rendered
 
 
-def _data_lab_root() -> Path:
-    root = Path(settings.INSPECTOR_DATA_LAB_ROOT)
-    root.mkdir(parents=True, exist_ok=True)
-    return root
-
-
 def workspace_data_lab_dir(workspace: Workspace) -> Path:
     """Return the directory where notebooks for ``workspace`` live."""
     slug = workspace.slug or f"workspace-{workspace.pk}"
     if not re.fullmatch(SlugConverter.regex, slug):
         raise ValueError("Invalid workspace notebook directory name.")
-    root = _data_lab_root().resolve()
+    root = Path(settings.INSPECTOR_DATA_LAB_ROOT).resolve()
     path = root / slug
     if path.parent != root or path.is_symlink():
         raise ValueError("Workspace notebook directory must be directly inside the export root.")
-    path.mkdir(parents=True, exist_ok=True)
     return path
 
 
 @contextmanager
-def _open_workspace_directory(workspace: Workspace):
+def _open_workspace_directory(workspace_dir: Path, *, create: bool = False):
     """Keep directory-relative operations on the admitted workspace inode."""
-    workspace_dir = workspace_data_lab_dir(workspace)
+    if create:
+        Path(settings.INSPECTOR_DATA_LAB_ROOT).mkdir(parents=True, exist_ok=True)
     with ExitStack() as stack:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         root_fd = os.open(workspace_dir.parent, flags)
         stack.callback(os.close, root_fd)
+        if create:
+            try:
+                os.mkdir(workspace_dir.name, dir_fd=root_fd)
+            except FileExistsError:
+                pass
         directory_fd = os.open(workspace_dir.name, flags, dir_fd=root_fd)
         stack.callback(os.close, directory_fd)
-        yield workspace_dir, directory_fd
+        yield root_fd, directory_fd
 
 
 @contextmanager
@@ -176,7 +175,7 @@ def _open_notebook(workspace: Workspace, filename: str):
         with ExitStack() as stack:
             flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
             if os.open in os.supports_dir_fd and hasattr(os, "O_NOFOLLOW"):
-                _, workspace_fd = stack.enter_context(_open_workspace_directory(workspace))
+                _, workspace_fd = stack.enter_context(_open_workspace_directory(workspace_dir))
                 fd = os.open(filename, flags | os.O_NOFOLLOW, dir_fd=workspace_fd)
                 stack.callback(os.close, fd)
             else:
@@ -265,13 +264,14 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
     """Publish a complete notebook without replacing any existing filename."""
     notebook = build_notebook(workspace, template_slug)
     if not (
-        {os.open, os.link, os.unlink, os.stat} <= os.supports_dir_fd
+        {os.open, os.mkdir, os.link, os.unlink, os.stat} <= os.supports_dir_fd
         and hasattr(os, "O_NOFOLLOW")
         and os.link in os.supports_follow_symlinks
     ):
         raise ValueError("Safe notebook export is unavailable on this platform.")
     content = json.dumps(notebook, indent=2)
-    with _open_workspace_directory(workspace) as (workspace_dir, directory_fd):
+    workspace_dir = workspace_data_lab_dir(workspace)
+    with _open_workspace_directory(workspace_dir, create=True) as (root_fd, directory_fd):
         staging = f".notebook-{uuid.uuid4().hex}.tmp"
         fd = os.open(
             staging,
@@ -307,6 +307,9 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
                 published_path = workspace_dir / filename
                 try:
                     _sync(directory_fd)
+                    # An existing workspace directory may have been created by an
+                    # exporter that has not yet synced its entry in the root.
+                    _sync(root_fd)
                 except OSError as exc:
                     raise NotebookDurabilityError(published_path) from exc
                 return published_path
@@ -398,6 +401,8 @@ def workspace_export_inventory(workspace: Workspace) -> tuple[list[dict[str, Any
     try:
         workspace_dir = workspace_data_lab_dir(workspace)
         names, incomplete = _export_names(workspace_dir)
+    except FileNotFoundError:
+        return [], False
     except (OSError, ValueError):
         return [], True
     exports: list[dict[str, Any]] = []

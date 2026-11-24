@@ -7,6 +7,7 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -175,34 +176,34 @@ class NotebookPublicationTests(TestCase):
         expected = ["file-sync", "link", "workspace-sync", "root-sync", "success"]
         self.assertEqual(events, expected * 2)
 
-    def test_first_export_syncs_entries_of_created_export_root(self):
-        base = self.root.stat()
-        outer = self.root / "outer"
-        root = outer / "exports"
+    def classify_syncs(self, events, *named):
         sync = os.fsync
-        events = []
 
         def synced(fd):
             info = os.fstat(fd)
-            if os.path.samestat(base, info):
-                events.append("base-sync")
-            elif outer.exists() and os.path.samestat(outer.stat(), info):
-                events.append("outer-sync")
-            elif root.exists() and os.path.samestat(root.stat(), info):
-                events.append("root-sync")
-            elif stat.S_ISDIR(info.st_mode):
-                events.append("workspace-sync")
+            for name, path in named:
+                if path.exists() and os.path.samestat(path.stat(), info):
+                    events.append(f"{name}-sync")
+                    break
             else:
-                events.append("file-sync")
+                events.append("workspace-sync" if stat.S_ISDIR(info.st_mode) else "file-sync")
             sync(fd)
 
+        return synced
+
+    def test_first_export_syncs_entries_of_created_export_root_before_publication(self):
+        self.addCleanup(data_lab._unsynced_entry_parents.clear)
+        outer = self.root / "outer"
+        root = outer / "exports"
+        events = []
+        synced = self.classify_syncs(events, ("base", self.root), ("outer", outer), ("root", root))
         with (
             override_settings(INSPECTOR_DATA_LAB_ROOT=root),
             mock.patch.object(os, "fsync", side_effect=synced),
         ):
             first = data_lab.export_notebook(self.workspace, "schema-audit")
             self.assertEqual(
-                events, ["file-sync", "workspace-sync", "root-sync", "outer-sync", "base-sync"]
+                events, ["outer-sync", "base-sync", "file-sync", "workspace-sync", "root-sync"]
             )
             events.clear()
             second = data_lab.export_notebook(self.workspace, "schema-audit")
@@ -210,25 +211,69 @@ class NotebookPublicationTests(TestCase):
         self.assertTrue(first.is_file())
         self.assertTrue(second.is_file())
 
-    def test_created_export_root_entry_sync_failure_reports_visible_notebook(self):
-        base = self.root.stat()
+    def test_unconfirmed_export_root_entry_is_synced_by_next_export(self):
+        self.addCleanup(data_lab._unsynced_entry_parents.clear)
         root = self.root / "exports"
-        sync = os.fsync
+        events = []
+        synced = self.classify_syncs(events, ("base", self.root), ("root", root))
+        fail = [True]
 
-        def fail_base_sync(fd):
-            if os.path.samestat(base, os.fstat(fd)):
+        def failing(fd):
+            if fail[0] and os.path.samestat(self.root.stat(), os.fstat(fd)):
+                fail[0] = False
                 raise OSError("injected base sync failure")
-            sync(fd)
+            synced(fd)
 
         with (
             override_settings(INSPECTOR_DATA_LAB_ROOT=root),
-            mock.patch.object(os, "fsync", side_effect=fail_base_sync),
-            self.assertRaises(data_lab.NotebookDurabilityError) as raised,
+            mock.patch.object(os, "fsync", side_effect=failing),
         ):
-            data_lab.export_notebook(self.workspace, "schema-audit")
-        published = raised.exception.published_path
-        self.assertEqual(published, root.resolve() / self.workspace.slug / "schema-audit.ipynb")
-        self.assertTrue(published.is_file())
+            with self.assertRaisesRegex(OSError, "injected base sync failure"):
+                data_lab.export_notebook(self.workspace, "schema-audit")
+            self.assertTrue(root.is_dir())
+            self.assertFalse((root / self.workspace.slug).exists())
+            path = data_lab.export_notebook(self.workspace, "schema-audit")
+        self.assertEqual(events, ["base-sync", "file-sync", "workspace-sync", "root-sync"])
+        self.assertEqual(path.name, "schema-audit.ipynb")
+        self.assertEqual(data_lab._unsynced_entry_parents, [])
+
+    def test_concurrent_export_waits_for_created_export_root_sync(self):
+        self.addCleanup(data_lab._unsynced_entry_parents.clear)
+        root = self.root / "exports"
+        other = Workspace.objects.create(name="Other", project_path="/other")
+        base = self.root.stat()
+        sync = os.fsync
+        entered = threading.Event()
+        release = threading.Event()
+        order = []
+
+        def blocking(fd):
+            if os.path.samestat(base, os.fstat(fd)):
+                entered.set()
+                self.assertTrue(release.wait(10))
+                order.append("base-sync")
+            sync(fd)
+
+        def export(workspace):
+            path = data_lab.export_notebook(workspace, "schema-audit")
+            order.append(workspace.slug)
+            return path
+
+        with (
+            override_settings(INSPECTOR_DATA_LAB_ROOT=root),
+            mock.patch.object(os, "fsync", side_effect=blocking),
+            ThreadPoolExecutor(max_workers=2) as pool,
+        ):
+            first = pool.submit(export, self.workspace)
+            self.assertTrue(entered.wait(10))
+            second = pool.submit(export, other)
+            with self.assertRaises(TimeoutError):
+                second.result(1)
+            release.set()
+            paths = [first.result(10), second.result(10)]
+        self.assertEqual(order[0], "base-sync")
+        self.assertEqual(order.count("base-sync"), 1)
+        self.assertTrue(all(path.is_file() for path in paths))
 
     def test_publication_requests_full_device_flush_where_supported(self):
         calls = []

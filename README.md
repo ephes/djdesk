@@ -436,11 +436,13 @@ never overwrite one another and polls never see a partly written export. The sam
 workspace directory is fsynced after the final link, then the opened export root is
 fsynced to persist the workspace directory entry. Every export syncs the root so a
 concurrently created workspace directory is covered even if its creator is still running.
-When an export creates a missing export root or ancestors, it also fsyncs the parent
-of each directory it found missing.
+Before it publishes, an export that finds the export root or its ancestors missing
+creates them and fsyncs the parent of each missing directory. Other exports in the same
+server process wait until that sync is done. A failed sync fails the export before
+anything is published and is retried by the next export.
 Where the platform offers `F_FULLFSYNC` (macOS), these syncs also flush the drive cache.
 Filesystems without it fall back to plain fsync.
-If any directory sync fails, HTTP 500 names the complete, published notebook and
+If a directory sync after publication fails, HTTP 500 names the complete, published notebook and
 reports uncertain durability. The export and existing files remain visible. Inspect
 the export directory before exporting again. A retry creates another filename. A power
 loss before a successful directory sync may lose the new name. Creation,

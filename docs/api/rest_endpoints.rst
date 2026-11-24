@@ -76,12 +76,14 @@ Required form field: ``template`` (``schema-audit`` or ``log-study``). A success
 response has status 201 and contains the status payload plus
 ``data_lab.selected_notebook`` and ``data_lab.selected_notebook_url`` for the exact new
 file, even when that file is outside the inventory window. Existing files are preserved.
-The export POST creates missing directories. Success follows file fsync, hard-link
-publication, fsync of the opened workspace directory and fsync of the opened export
-root to persist the workspace directory entry. If the export created a missing export
-root or ancestors, the parent of each directory it found missing is fsynced too. On
-macOS these syncs also issue ``F_FULLFSYNC`` to flush the drive cache where supported.
-If any directory sync fails, HTTP 500 names the published complete file and reports uncertain durability.
+The export POST creates missing directories. A missing export root or ancestor is
+created and the parent of each missing directory is fsynced before publication. Other
+exports in the same server process wait for that sync. If it fails, the export fails
+with nothing published and the next export retries the sync. Success follows file fsync,
+hard-link publication, fsync of the opened workspace directory and fsync of the opened
+export root to persist the workspace directory entry. On macOS these syncs also issue
+``F_FULLFSYNC`` to flush the drive cache where supported.
+If a directory sync after publication fails, HTTP 500 names the published complete file and reports uncertain durability.
 The export remains visible. Inspect the export directory before exporting again.
 Retries create additional files.
 

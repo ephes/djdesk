@@ -139,7 +139,7 @@ def _render_urls(url_includes: Iterable[tuple[str, str]]) -> str:
         blocks.append(f"    path('{route}', include('{module}')),")
     patterns = "\n".join(blocks)
     return textwrap.dedent(
-        f"""\
+        """\
         from django.contrib import admin
         from django.urls import path{include_import}
 
@@ -148,7 +148,7 @@ def _render_urls(url_includes: Iterable[tuple[str, str]]) -> str:
         {patterns}
         ]
         """
-    )
+    ).format(include_import=include_import, patterns=patterns)
 
 
 def _render_asgi(project_name: str) -> str:
@@ -216,6 +216,9 @@ def _polls_bundle() -> SampleProject:
 
                 Minimal polls app mirroring the official Django tutorial. Use it to
                 populate schema graphs and safe command demos inside DJDesk.
+
+                Run `python manage.py migrate` from this directory with Django
+                installed to create the polls tables in `db.sqlite3`.
                 """
             ),
             "polls/__init__.py": "",
@@ -332,6 +335,44 @@ def _polls_bundle() -> SampleProject:
                 """
             ),
             "polls/migrations/__init__.py": "",
+            "polls/migrations/0001_initial.py": textwrap.dedent(
+                """\
+                from django.db import migrations, models
+
+
+                class Migration(migrations.Migration):
+                    initial = True
+                    dependencies = []
+                    operations = [
+                        migrations.CreateModel(
+                            name="Question",
+                            fields=[
+                                ("id", models.BigAutoField(
+                                    auto_created=True, primary_key=True,
+                                    serialize=False, verbose_name="ID",
+                                )),
+                                ("question_text", models.CharField(max_length=200)),
+                                ("pub_date", models.DateTimeField(verbose_name="date published")),
+                            ],
+                        ),
+                        migrations.CreateModel(
+                            name="Choice",
+                            fields=[
+                                ("id", models.BigAutoField(
+                                    auto_created=True, primary_key=True,
+                                    serialize=False, verbose_name="ID",
+                                )),
+                                ("choice_text", models.CharField(max_length=200)),
+                                ("votes", models.IntegerField(default=0)),
+                                ("question", models.ForeignKey(
+                                    on_delete=models.CASCADE, related_name="choices",
+                                    to="polls.question",
+                                )),
+                            ],
+                        ),
+                    ]
+                """
+            ),
         }
     )
     return SampleProject(

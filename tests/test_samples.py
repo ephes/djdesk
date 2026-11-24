@@ -1,5 +1,9 @@
 import errno
 import os
+import sqlite3
+import subprocess
+import sys
+from contextlib import closing
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import mock
@@ -7,6 +11,55 @@ from unittest import mock
 from django.test import SimpleTestCase
 
 from djdesk.inspector import samples
+
+
+class BundledSampleTests(SimpleTestCase):
+    def setUp(self):
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.projects = {
+            slug: path for slug, path, _ in samples.ensure_sample_projects(Path(temporary.name))
+        }
+
+    def run_polls_command(self, *args):
+        env = os.environ.copy()
+        env.pop("DJANGO_SETTINGS_MODULE", None)
+        result = subprocess.run(
+            [sys.executable, "-B", "manage.py", *args],
+            cwd=self.projects["django-polls"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_bundled_urlconfs_compile(self):
+        for project in samples.SAMPLE_PROJECTS:
+            for relative in project.files:
+                if Path(relative).name == "urls.py":
+                    with self.subTest(sample=project.slug, module=relative):
+                        path = self.projects[project.slug] / relative
+                        compile(path.read_bytes(), str(path), "exec")
+
+    def test_polls_manage_check(self):
+        self.run_polls_command("check")
+
+    def test_polls_migrate_creates_tables_and_foreign_key(self):
+        database = self.projects["django-polls"] / "db.sqlite3"
+        self.assertFalse(database.exists())
+        self.run_polls_command("migrate", "--noinput")
+
+        with closing(sqlite3.connect(database.as_uri() + "?mode=ro", uri=True)) as connection:
+            tables = connection.execute(
+                "SELECT name FROM sqlite_schema WHERE type = 'table' AND name GLOB 'polls_*'"
+            ).fetchall()
+            foreign_keys = connection.execute(
+                """SELECT "table", "from", "to" FROM pragma_foreign_key_list('polls_choice')"""
+            ).fetchall()
+
+        self.assertCountEqual(tables, [("polls_question",), ("polls_choice",)])
+        self.assertEqual(foreign_keys, [("polls_question", "question_id", "id")])
 
 
 class SampleRefreshTests(SimpleTestCase):

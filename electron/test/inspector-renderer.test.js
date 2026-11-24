@@ -56,8 +56,8 @@ test('task creation updates panels only when the receipt includes a workspace sn
   for (const payload of [receipt, snapshot]) {
     const TaskUI = vm.runInNewContext(source + '\nInspectorUI;', {
       document: { addEventListener() {} },
-      FormData: class {},
-      fetch: async () => ({ ok: true, json: async () => payload }),
+      FormData: class {}, TextDecoder,
+      fetch: async () => new Response(JSON.stringify(payload), { status: 201 }),
     });
     const ui = Object.create(TaskUI.prototype);
     const updates = [];
@@ -78,7 +78,7 @@ test('task creation updates panels only when the receipt includes a workspace sn
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(resets, 1);
     assert.deepEqual(toasts, []);
-    assert.deepEqual(updates, payload === snapshot ? [snapshot] : []);
+    assert.deepEqual(updates.map((data) => data.workspace), payload === snapshot ? ['synthetic'] : []);
   }
 });
 

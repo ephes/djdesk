@@ -213,34 +213,39 @@ class InspectorUI {
     const form = this.root.querySelector('[data-task-form]');
     if (!form || !this.taskEndpoint) return;
 
-    form.addEventListener('submit', (event) => {
+    form.addEventListener('submit', async (event) => {
       event.preventDefault();
       const formData = new FormData(form);
-      fetch(this.taskEndpoint, {
-        method: 'POST',
-        body: formData,
-        headers: {
-          'X-Requested-With': 'XMLHttpRequest',
-          'X-CSRFToken': this.getCsrfToken(),
-        },
-      })
-        .then((response) => {
-          if (!response.ok) {
-            return response.json().then((data) => {
-              throw new Error(this.formatErrors(data.errors));
-            });
-          }
-          return response.json();
-        })
-        .then((payload) => {
-          if (typeof payload.workspace === 'string') {
-            this.updateFromPayload(payload);
-          }
-          form.reset();
-        })
-        .catch((error) => {
-          this.showToast(error.message || 'Unable to run task.', 'danger');
+      let payload;
+      try {
+        const response = await fetch(this.taskEndpoint, {
+          method: 'POST',
+          body: formData,
+          headers: {
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRFToken': this.getCsrfToken(),
+          },
         });
+        payload = await readInspectorJSON(response, this.responseBytes, { allowHttpError: true });
+        if (!response.ok) {
+          if (response.status >= 400 && response.status < 500 && payload?.errors) {
+            const message = this.formatErrors(payload.errors);
+            if (message) {
+              this.showToast(message, 'danger');
+              return;
+            }
+          }
+          throw new Error('Task response unavailable');
+        }
+        if (!payload || typeof payload !== 'object') throw new Error('Task response unavailable');
+      } catch {
+        this.showToast('Unable to confirm task submission. Check task history before retrying.', 'danger');
+        return;
+      }
+      if (typeof payload.workspace === 'string') {
+        this.updateFromPayload(payload);
+      }
+      form.reset();
     });
   }
 

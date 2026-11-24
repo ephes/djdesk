@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Bound task submission success and error replies before JSON parsing.
+  Preserve form values and direct operators to task history if the acknowledgement
+  is unreadable.
 - Preserve explicitly supplied workspace slugs when a duplicate save is rejected.
   Only automatically generated slugs are retried after a uniqueness collision.
 - Apply task completion fields to the worker's run instance only after the

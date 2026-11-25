@@ -308,7 +308,7 @@ class NotebookPublicationTests(TestCase):
         return synced
 
     def test_first_export_syncs_entries_of_created_export_root_before_publication(self):
-        self.addCleanup(data_lab._unsynced_entry_parents.clear)
+        self.addCleanup(data_lab._unsynced_root_entries.clear)
         outer = self.root / "outer"
         root = outer / "exports"
         events = []
@@ -328,7 +328,7 @@ class NotebookPublicationTests(TestCase):
         self.assertTrue(second.is_file())
 
     def test_unconfirmed_export_root_entry_is_synced_by_next_export(self):
-        self.addCleanup(data_lab._unsynced_entry_parents.clear)
+        self.addCleanup(data_lab._unsynced_root_entries.clear)
         root = self.root / "exports"
         events = []
         synced = self.classify_syncs(events, ("base", self.root), ("root", root))
@@ -351,10 +351,76 @@ class NotebookPublicationTests(TestCase):
             path = data_lab.export_notebook(self.workspace, "schema-audit")
         self.assertEqual(events, ["base-sync", "file-sync", "workspace-sync", "root-sync"])
         self.assertEqual(path.name, "schema-audit.ipynb")
-        self.assertEqual(data_lab._unsynced_entry_parents, [])
+        self.assertFalse(data_lab._unsynced_root_entries)
+
+    def test_export_root_retry_does_not_block_a_different_root(self):
+        self.addCleanup(data_lab._unsynced_root_entries.clear)
+        base = self.root.resolve()
+        retired_parent = base / "retired"
+        retired_parent.mkdir()
+        retired = retired_parent / "exports"
+        active = base / "active"
+        attempts = []
+        blocked = True
+        sync = data_lab._sync_directory
+
+        def sync_directory(path):
+            attempts.append(path)
+            if path == retired_parent and blocked:
+                raise PermissionError("retired directory sync failed")
+            sync(path)
+
+        with mock.patch.object(data_lab, "_sync_directory", side_effect=sync_directory):
+            with override_settings(INSPECTOR_DATA_LAB_ROOT=retired):
+                with self.assertRaisesRegex(PermissionError, "retired directory sync failed"):
+                    data_lab.export_notebook(self.workspace, "schema-audit")
+                self.assertTrue(retired.is_dir())
+                self.assertFalse((retired / self.workspace.slug).exists())
+            with override_settings(INSPECTOR_DATA_LAB_ROOT=active):
+                path = data_lab.export_notebook(self.workspace, "schema-audit")
+                self.assertEqual(path, active / self.workspace.slug / "schema-audit.ipynb")
+                self.assertTrue(path.is_file())
+            with override_settings(INSPECTOR_DATA_LAB_ROOT=retired):
+                blocked = False
+                path = data_lab.export_notebook(self.workspace, "schema-audit")
+                self.assertEqual(path, retired / self.workspace.slug / "schema-audit.ipynb")
+                self.assertTrue(path.is_file())
+        self.assertEqual(attempts, [retired_parent, base, retired_parent])
+
+    def test_export_root_retry_includes_a_shared_ancestor_entry(self):
+        self.addCleanup(data_lab._unsynced_root_entries.clear)
+        base = self.root.resolve()
+        shared = base / "shared"
+        first = shared / "first"
+        second = shared / "second"
+        attempts = []
+        blocked = True
+        sync = data_lab._sync_directory
+
+        def sync_directory(path):
+            attempts.append(path)
+            if path == base and blocked:
+                raise OSError("shared ancestor sync failed")
+            sync(path)
+
+        with mock.patch.object(data_lab, "_sync_directory", side_effect=sync_directory):
+            for root in (first, second):
+                with override_settings(INSPECTOR_DATA_LAB_ROOT=root):
+                    with self.assertRaisesRegex(OSError, "shared ancestor sync failed"):
+                        data_lab.export_notebook(self.workspace, "schema-audit")
+                    self.assertFalse((root / self.workspace.slug).exists())
+            self.assertEqual(attempts, [shared, base, shared, base])
+            blocked = False
+            attempts.clear()
+            for root in (second, first):
+                with override_settings(INSPECTOR_DATA_LAB_ROOT=root):
+                    self.assertTrue(
+                        data_lab.export_notebook(self.workspace, "schema-audit").is_file()
+                    )
+            self.assertEqual(attempts, [base])
 
     def test_concurrent_export_waits_for_created_export_root_sync(self):
-        self.addCleanup(data_lab._unsynced_entry_parents.clear)
+        self.addCleanup(data_lab._unsynced_root_entries.clear)
         root = self.root / "exports"
         other = Workspace.objects.create(name="Other", project_path="/other")
         base = self.root.stat()

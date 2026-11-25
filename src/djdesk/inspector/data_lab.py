@@ -155,31 +155,33 @@ def workspace_data_lab_dir(workspace: Workspace) -> Path:
 
 
 _export_root_lock = threading.Lock()
-# Parents whose new export root entries are not yet confirmed durable.
-_unsynced_entry_parents: list[Path] = []
+# New directory entries awaiting a successful sync, grouped by their parent.
+_unsynced_root_entries: dict[Path, set[Path]] = {}
 
 
 def _provision_export_root(root: Path) -> None:
     """Create a missing export root and sync the entries of every directory created.
 
-    Exports in this process wait until a concurrently created root is synced, and an
-    unconfirmed sync is retried by the next export.
+    A later export retries pending entries on its own root's directory chain.
     """
     with _export_root_lock:
         candidate = root
         while not os.path.lexists(candidate) and candidate.parent != candidate:
-            if candidate.parent not in _unsynced_entry_parents:
-                _unsynced_entry_parents.append(candidate.parent)
+            _unsynced_root_entries.setdefault(candidate.parent, set()).add(candidate)
             candidate = candidate.parent
         root.mkdir(parents=True, exist_ok=True)
-        while _unsynced_entry_parents:
+        for entry in (root, *root.parents):
+            parent = entry.parent
+            if entry not in _unsynced_root_entries.get(parent, ()):
+                continue
             try:
-                _sync_directory(_unsynced_entry_parents[0])
+                _sync_directory(parent)
             except FileNotFoundError:
                 # A removed parent no longer holds the entry; a missing root is
                 # detected again by the next export.
                 pass
-            _unsynced_entry_parents.pop(0)
+            # A successful parent sync covers all its entries, including siblings.
+            del _unsynced_root_entries[parent]
 
 
 def _sync_directory(path: Path) -> None:

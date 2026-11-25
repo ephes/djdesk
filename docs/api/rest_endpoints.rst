@@ -90,9 +90,10 @@ file, even when that file is outside the inventory window. If the optional statu
 refresh or its serialization fails, HTTP 201 contains only these two ``data_lab``
 fields, even if the server cannot log the refresh failure. Existing files are preserved.
 The export POST creates missing directories. A missing export root or ancestor is
-created and the parent of each missing directory is fsynced before publication. Other
-exports in the same server process wait for that sync. If it fails, the export fails
-with nothing published and the next export retries the sync. Success follows file fsync,
+created and the parent of each missing directory is fsynced before publication. Root
+provisioning is serialized within the server process. A failed sync stops publication
+and is retried by the next export that needs the pending root or shared ancestor entry.
+Exports under independent roots can proceed. Success follows file fsync,
 hard-link publication, fsync of the opened workspace directory and fsync of the opened
 export root to persist the workspace directory entry. On macOS these syncs also issue
 ``F_FULLFSYNC`` to flush the drive cache where supported. After both directory

@@ -94,7 +94,8 @@ with nothing published and the next export retries the sync. Success follows fil
 hard-link publication, fsync of the opened workspace directory and fsync of the opened
 export root to persist the workspace directory entry. On macOS these syncs also issue
 ``F_FULLFSYNC`` to flush the drive cache where supported.
-If a directory sync after publication fails, HTTP 500 names the published complete file and reports uncertain durability.
+If a directory sync after publication fails, the HTTP 500 JSON response names the
+complete published file and reports uncertain durability even if server logging fails.
 The export remains visible. Inspect the export directory before exporting again.
 Retries create additional files.
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import io
 import json
+import logging
 import os
 import stat
 import subprocess
@@ -330,6 +331,30 @@ class NotebookPublicationTests(TestCase):
             json.loads(new.read_text()), data_lab.build_notebook(self.workspace, "schema-audit")
         )
         self.assertEqual(set(old.parent.iterdir()), {old, new})
+
+    def test_uncertain_export_response_survives_failure_in_log_handler(self):
+        directory = data_lab.workspace_data_lab_dir(self.workspace)
+        failure = data_lab.NotebookDurabilityError(directory / "schema-audit.ipynb")
+        logger = logging.getLogger("djdesk.inspector.views")
+        handler = logging.Handler()
+        self.addCleanup(handler.close)
+        with (
+            mock.patch.object(data_lab, "export_notebook", side_effect=failure) as export,
+            mock.patch.object(logger, "handlers", [handler]),
+            mock.patch.object(handler, "emit", side_effect=OSError("log sink failed")) as emit,
+        ):
+            response = self.client.post(
+                reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                {"template": "schema-audit"},
+            )
+
+        self.assertEqual(response.status_code, 500)
+        error = response.json()["errors"]["template"][0]
+        self.assertIn("'schema-audit.ipynb' is already published", error)
+        self.assertIn("durability could not be confirmed", error)
+        self.assertIn("Inspect the export directory before exporting again.", error)
+        export.assert_called_once_with(self.workspace, "schema-audit")
+        emit.assert_called_once()
 
     def test_first_export_root_sync_failure_reports_visible_notebook(self):
         root = self.root.stat()

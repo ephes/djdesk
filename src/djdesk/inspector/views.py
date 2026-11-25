@@ -253,7 +253,10 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
     except ValueError as exc:
         return JsonResponse({"errors": {"template": [str(exc)]}}, status=400)
     except data_lab.NotebookDurabilityError as exc:
-        logger.exception("Notebook export durability uncertain for workspace %s", workspace.slug)
+        with suppress(Exception):
+            logger.exception(
+                "Notebook export durability uncertain for workspace %s", workspace.slug
+            )
         return JsonResponse({"errors": {"template": [str(exc)]}}, status=500)
     except OSError:
         # Fail-closed publication errors (directory swapped for a symlink, no hard-link

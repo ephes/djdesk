@@ -452,9 +452,10 @@ anything is published and is retried by the next export.
 Where the platform offers `F_FULLFSYNC` (macOS), these syncs also flush the drive cache.
 Filesystems without it fall back to plain fsync.
 If a directory sync after publication fails, HTTP 500 names the complete, published notebook and
-reports uncertain durability. The export and existing files remain visible. Inspect
-the export directory before exporting again. A retry creates another filename. A power
-loss before a successful directory sync may lose the new name. Creation,
+reports uncertain durability even if the server cannot log the sync failure. The export
+and existing files remain visible. Inspect the export directory before exporting again.
+A retry creates another filename. A power loss before a successful directory sync may
+lose the new name. Creation,
 publication and cleanup use the same opened workspace directory, even if its pathname
 is replaced. A renamed directory may therefore contain the export while it is unavailable
 at its former path. Ordinary failures clean up only this attempt's staging inode.

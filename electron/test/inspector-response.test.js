@@ -14,6 +14,94 @@ function load(context = {}) {
 }
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 
+function statusPolling(fetch) {
+  const intervals = new Map();
+  const deadlines = new Map();
+  let timerId = 0;
+  const { InspectorUI } = load({
+    fetch, AbortController,
+    window: {
+      setInterval(callback, delay) {
+        assert.equal(delay, 6000);
+        intervals.set(++timerId, callback);
+        return timerId;
+      },
+      clearInterval(id) { intervals.delete(id); },
+      setTimeout(callback, delay) {
+        assert.equal(delay, 30000);
+        deadlines.set(++timerId, callback);
+        return timerId;
+      },
+      clearTimeout(id) { deadlines.delete(id); },
+    },
+  });
+  const ui = Object.create(InspectorUI.prototype);
+  ui.statusUrl = '/alpha/status';
+  const updates = [];
+  const connection = [];
+  ui.updateFromPayload = (payload) => updates.push(payload.label);
+  ui.toggleConnection = (online) => connection.push(online);
+  return { ui, intervals, deadlines, updates, connection };
+}
+
+test('status ticks coalesce and a workspace switch retires the old request and timer', async () => {
+  const requests = [];
+  const { ui, intervals, deadlines, updates, connection } = statusPolling((url, { signal }) =>
+    new Promise((resolve) => requests.push({ url, signal, resolve })));
+
+  ui.startPolling();
+  const [alphaTick] = intervals.values();
+  alphaTick();
+  alphaTick();
+  assert.equal(requests.length, 1);
+
+  ui.statusUrl = '/beta/status';
+  ui.startPolling();
+  assert.equal(intervals.size, 1);
+  assert.equal(requests[0].signal.aborted, true);
+  alphaTick();
+  assert.deepEqual(requests.map(({ url }) => url), ['/alpha/status', '/beta/status']);
+  requests[1].resolve(new Response('{"label":"beta"}'));
+  await settled();
+  assert.equal(deadlines.size, 0);
+  requests[0].resolve(new Response('{"label":"alpha"}'));
+  await settled();
+  assert.deepEqual(updates, ['beta']);
+  assert.deepEqual(connection, []);
+});
+
+test('status deadline covers a stalled body and releases the next tick', async () => {
+  let finishBody;
+  const body = new ReadableStream({
+    start(controller) {
+      finishBody = () => {
+        controller.enqueue(new TextEncoder().encode('{"label":"expired"}'));
+        controller.close();
+      };
+    },
+  });
+  const signals = [];
+  const { ui, intervals, deadlines, updates, connection } = statusPolling(async (url, { signal }) => {
+    signals.push(signal);
+    return signals.length === 1 ? new Response(body) : new Response('{"label":"recovered"}');
+  });
+
+  ui.startPolling();
+  await settled();
+  assert.equal(body.locked, true);
+  assert.equal(deadlines.size, 1);
+  for (const expire of deadlines.values()) expire();
+  await settled();
+  assert.equal(signals[0].aborted, true);
+  assert.deepEqual(connection, [false]);
+  for (const tick of intervals.values()) tick();
+  await settled();
+  finishBody();
+  await settled();
+  assert.deepEqual(updates, ['recovered']);
+  assert.equal(deadlines.size, 0);
+});
+
 function response(chunks, length, status = 200) {
   let cancelled = false;
   const body = new ReadableStream({
@@ -46,15 +134,9 @@ test('exact-limit split Unicode JSON succeeds; a later small response remains us
 });
 
 test('status and drawer overflow preserve displayed state and accept the next response', async () => {
-  let poll;
   let next;
   let parses = 0;
-  const { InspectorUI } = load({
-    fetch: async () => next,
-    window: { setInterval(callback) { poll = callback; } },
-  });
-  const ui = Object.create(InspectorUI.prototype);
-  ui.statusUrl = '/status';
+  const { ui, intervals } = statusPolling(async () => next);
   let displayed = 'last good';
   ui.updateFromPayload = (payload) => { displayed = payload.label; };
   ui.renderTaskDrawer = (payload) => { displayed = payload.label; };
@@ -74,7 +156,7 @@ test('status and drawer overflow preserve displayed state and accept the next re
     assert.equal(displayed, 'last good');
   }
   next = new Response('{"label":"next good"}');
-  poll();
+  for (const tick of intervals.values()) tick();
   await settled();
   assert.equal(displayed, 'next good');
 });

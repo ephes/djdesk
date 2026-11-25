@@ -243,7 +243,12 @@ uses a read-only repeatable-read transaction. An existing PostgreSQL outer trans
 must already use repeatable-read or serializable isolation; other database backends
 are unsupported for these snapshots. Notebook inventory and documentation links are
 independent of the scan snapshot. Status polling keeps the same four/five windows
-and includes those task logs. Renderer status, severity and log-level classes use
+and includes those task logs. The Inspector checks every six seconds and skips
+ticks while a status request is pending. Each request has 30 seconds for headers
+and the full body. Leaving the page cancels its poll and timer. Returning via the
+browser's back/forward cache starts a fresh poll. Late results from retired polls
+cannot change the dashboard or its connection indicator.
+Renderer status, severity and log-level classes use
 supported values with neutral defaults; labels remain escaped text.
 
 Dynamic inspector pages and JSON (including error responses) carry Django's private,

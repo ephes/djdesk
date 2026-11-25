@@ -65,6 +65,12 @@ Renderer data flow
 * The dashboard is server-rendered; ``DashboardView`` populates ``workspace``, ``doc_links``, ``task_presets``, and other context so the first paint always has meaningful data.
 * ``inspector/static/inspector/app.js`` polls ``/api/workspaces/<slug>/status/`` to keep the scan queue, insights, schema graph, and log stream updated. Submitting the assistant form returns the same payload so the UI can refresh immediately.
 
+  Six-second ticks share one in-flight status request per workspace generation.
+  The request and body read share a 30-second deadline. Leaving the dashboard
+  clears its timer and aborts its request. Returning from the back/forward cache
+  starts a fresh generation. Only the current generation can change the panels
+  or connection indicator.
+
   Status, task-detail, task submission and notebook export responses stream at most
   ``INSPECTOR_RESPONSE_BYTES`` before JSON parsing (``DJDESK_INSPECTOR_RESPONSE_BYTES``; default
   8 MiB plus five task logs at six bytes per retained log byte, the worst-case JSON

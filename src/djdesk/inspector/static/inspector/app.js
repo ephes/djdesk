@@ -2,6 +2,8 @@ const WIZARD_STORAGE_KEY = 'djdesk.wizard.projectPath';
 const INSPECTOR_RESPONSE_BYTES = 8 * 1024 * 1024;
 const NOTEBOOK_EXPORT_TIMEOUT_MS = 30000;
 const TASK_SUBMIT_TIMEOUT_MS = 30000;
+const WORKSPACE_POLL_INTERVAL_MS = 6000;
+const WORKSPACE_POLL_TIMEOUT_MS = 30000;
 
 // The server derives the ceiling from its task-log budget; fall back to the default.
 function inspectorResponseBytes(value) {
@@ -47,6 +49,7 @@ class InspectorUI {
   constructor(root) {
     this.root = root;
     this.statusUrl = root?.dataset.statusEndpoint;
+    this.workspacePoll = null;
     this.responseBytes = inspectorResponseBytes(root?.dataset.responseBytes);
     this.taskEndpoint = root?.dataset.taskEndpoint;
     this.workspaceSlug = root?.dataset.workspaceSlug || '';
@@ -105,6 +108,10 @@ class InspectorUI {
     this.bindDocsDrawer();
     this.bindDataLab();
     this.observeConnection();
+    window.addEventListener('pagehide', () => this.stopPolling());
+    window.addEventListener('pageshow', (event) => {
+      if (event.persisted) this.startPolling();
+    });
     this.startPolling();
     this.requestNotificationPermission();
     this.loadInitialSchema();
@@ -475,19 +482,52 @@ class InspectorUI {
   }
 
   startPolling() {
+    this.stopPolling();
     if (!this.statusUrl) return;
-    const fetchStatus = () => {
-      fetch(this.statusUrl, {
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
-      })
-        .then((response) => readInspectorJSON(response, this.responseBytes))
-        .then((payload) => this.updateFromPayload(payload))
-        .catch(() => {
-          this.toggleConnection(false);
+    const owner = { url: this.statusUrl, controller: null };
+    this.workspacePoll = owner;
+    owner.interval = window.setInterval(() => this.pollWorkspace(owner), WORKSPACE_POLL_INTERVAL_MS);
+    return this.pollWorkspace(owner);
+  }
+
+  stopPolling() {
+    const owner = this.workspacePoll;
+    if (!owner) return;
+    this.workspacePoll = null;
+    window.clearInterval(owner.interval);
+    owner.controller?.abort();
+  }
+
+  async pollWorkspace(owner) {
+    if (owner !== this.workspacePoll || owner.controller) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    owner.controller = controller;
+    const timeout = window.setTimeout(() => controller.abort(), WORKSPACE_POLL_TIMEOUT_MS);
+    try {
+      const aborted = new Promise((_, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+      const request = (async () => {
+        const response = await fetch(owner.url, {
+          signal,
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
         });
-    };
-    fetchStatus();
-    this.polling = window.setInterval(fetchStatus, 6000);
+        if (signal.aborted) {
+          await response.body?.cancel().catch(() => {});
+          throw signal.reason;
+        }
+        return readInspectorJSON(response, this.responseBytes);
+      })();
+      // Include the body read in the deadline and release the slot on retirement.
+      const payload = await Promise.race([request, aborted]);
+      if (owner === this.workspacePoll) this.updateFromPayload(payload);
+    } catch {
+      if (owner === this.workspacePoll) this.toggleConnection(false);
+    } finally {
+      window.clearTimeout(timeout);
+      owner.controller = null;
+    }
   }
 
   updateFromPayload(payload) {

@@ -406,6 +406,26 @@ class TaskLifecycleTests(TransactionTestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.json()["status"], "succeeded")
 
+    def test_failed_run_refresh_keeps_outer_transaction_usable(self):
+        def failing_read(**kwargs):
+            with connections["default"].cursor() as cursor:
+                cursor.execute(f"SELECT missing_column FROM {WorkspaceTaskRun._meta.db_table}")
+
+        with (
+            mock.patch("djdesk.inspector.forms.execute_workspace_task") as task,
+            mock.patch.object(WorkspaceTaskRun, "refresh_from_db", side_effect=failing_read),
+            self.assertLogs("djdesk.inspector.forms", level="WARNING"),
+        ):
+            task.enqueue.return_value.id = "queued-result"
+            with transaction.atomic():
+                run = self.form().save()
+                self.assertEqual(run.status, WorkspaceTaskRun.Status.REQUESTED)
+                runs = WorkspaceTaskRun.objects.filter(workspace=self.workspace)
+                self.assertEqual(runs.count(), 1)
+                task.enqueue.assert_not_called()
+            task.enqueue.assert_called_once_with(run.pk, database="default")
+        self.assertEqual(WorkspaceTaskRun.objects.get(pk=run.pk).result_id, "queued-result")
+
     def test_create_returns_receipt_when_optional_status_refresh_fails(self):
         dashboard = self.client.get(
             reverse("inspector:dashboard"), {"workspace": self.workspace.slug}

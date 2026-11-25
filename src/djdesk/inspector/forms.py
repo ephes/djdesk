@@ -199,7 +199,9 @@ class TaskRunForm(forms.Form):
         # Autocommit/immediate backends may already have completed. Within an outer
         # transaction the truthful response is still REQUESTED until its commit.
         try:
-            run.refresh_from_db(using=run._state.db)
+            # A savepoint keeps a caller's outer transaction usable after a failed read.
+            with transaction.atomic(using=run._state.db):
+                run.refresh_from_db(using=run._state.db)
         except DatabaseError:
             with suppress(Exception):
                 logger.warning("Task run %s created; could not refresh run state", run.pk)

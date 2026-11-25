@@ -78,10 +78,12 @@ A failure before rename preserves any prior cache. After rename it syncs the des
 directory on supported filesystems. Windows and filesystems without directory sync
 still sync the candidate file. Other directory sync errors report uncertain durability
 and leave the complete new archive visible. On retry, matching bytes are revalidated
-and the directory sync is attempted again without HTTP. After successful publication,
-a staging cleanup failure warns with the staging path and the build continues using
-the verified archive. Inspect leftovers with builders stopped. Before extraction, the builder
-copies the opened cache generation into private scratch space and verifies the copy
+and the directory sync is attempted again without HTTP. A failed directory close after
+a successful sync or file-only fallback warns and the build continues. If sync and close
+both fail, the sync error remains the cause of uncertain durability. After successful
+publication, a staging cleanup failure warns with the staging path and the build continues
+using the verified archive. Inspect leftovers with builders stopped. Before extraction,
+the builder copies the opened cache generation into private scratch space and verifies the copy
 against the registered checksum. Copying and verification share a two-minute deadline
 and a 256 MiB ceiling. Tar reads only the verified snapshot, so later cache refreshes
 cannot change its input. Scratch is cleaned after success or failure. A cleanup failure

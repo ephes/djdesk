@@ -155,6 +155,47 @@ for (const phase of ['candidate', 'directory']) {
   });
 }
 
+for (const outcome of ['successful sync', 'failed sync', 'unsupported sync']) {
+  test(`directory close failure preserves the outcome of ${outcome}`, {
+    skip: process.platform === 'win32',
+  }, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const destination = path.join(directory, 'python.tar.gz');
+    const syncError = Object.assign(new Error('injected directory sync failure'), {
+      code: outcome === 'unsupported sync' ? 'ENOTSUP' : 'EIO',
+    });
+    const close = t.mock.fn(async () => { throw new Error('injected directory close failure'); });
+    const sync = t.mock.fn(async () => {
+      if (outcome !== 'successful sync') throw syncError;
+    });
+    const open = fs.open;
+    t.mock.method(fs, 'open', async (file, ...args) => (
+      file === directory ? { sync, close } : open(file, ...args)
+    ));
+    const warnings = t.mock.method(console, 'warn', () => {});
+
+    const source = fixture([{}]);
+    const download = () => downloadPython('https://fixtures.invalid/python', destination, sha, source);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (outcome === 'failed sync') {
+        await assert.rejects(download(), (error) => error.cause === syncError &&
+          error.message.includes(destination) && /durability is uncertain/.test(error.message));
+      } else {
+        await download();
+        const [message] = warnings.mock.calls[attempt].arguments;
+        assert.match(message, /directory close failed/);
+        assert.ok(message.includes(directory));
+        assert.match(message, /injected directory close failure/);
+      }
+      assert.deepEqual(await fs.readFile(destination), content);
+    }
+    assert.equal(source.calls(), 1);
+    assert.equal(sync.mock.callCount(), 2);
+    assert.equal(close.mock.callCount(), 2);
+  });
+}
+
 for (const code of ['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'ENOTTY']) {
   test(`cache publication supports filesystems without directory sync (${code})`, {
     skip: process.platform === 'win32',

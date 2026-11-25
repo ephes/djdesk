@@ -523,6 +523,9 @@ own staging files. Failures before rename preserve the prior cache. A directory 
 failure after rename leaves the complete archive visible and reports uncertain
 durability. On retry, a matching cache is verified again and the directory sync
 retried without downloading the archive again.
+If closing the directory handle fails after a successful sync or file-only fallback,
+the downloader warns and the build continues. If sync and close both fail, the sync
+error remains the cause of uncertain durability.
 After successful publication, a staging cleanup failure warns with the staging path
 and the build continues using the verified cache. Inspect leftovers with builders stopped.
 Extraction reads a bounded private snapshot after verifying its own registered SHA256,

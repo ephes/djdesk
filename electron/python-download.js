@@ -57,18 +57,28 @@ const UNSUPPORTED_DIRECTORY_SYNC = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', '
 async function syncCacheDirectory(destination) {
   // Windows uses file sync only.
   if (process.platform === 'win32') return;
+  const directory = path.dirname(destination);
+  let closeFailure;
   try {
-    const handle = await fsp.open(path.dirname(destination), 'r');
+    const handle = await fsp.open(directory, 'r');
     try {
       await handle.sync();
     } catch (error) {
       if (!UNSUPPORTED_DIRECTORY_SYNC.has(error.code)) throw error;
     } finally {
-      await handle.close();
+      try {
+        await handle.close();
+      } catch (error) {
+        // Keep any sync failure as the cause of uncertain durability.
+        closeFailure = error;
+      }
     }
   } catch (error) {
     throw new Error(`Verified Python cache is visible at ${destination}, but its durability is uncertain`,
       { cause: error });
+  }
+  if (closeFailure) {
+    console.warn(`Python cache directory close failed (${directory}): ${closeFailure.message}`);
   }
 }
 

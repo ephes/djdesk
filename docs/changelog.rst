@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Preserve the outcome of Python cache directory sync through handle close failures.
+  Warn after success or a file-only fallback, and keep the sync error if both steps fail.
 - Warn with the staging path if cleanup fails after successful Python cache publication
   and continue the build with the verified archive.
 - Reject incomplete Python archive reads during cache hashing and extraction snapshot creation.

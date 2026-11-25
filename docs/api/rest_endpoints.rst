@@ -138,7 +138,10 @@ Example ``curl`` request (assuming ``csrftoken`` is stored in ``TOKEN``):
          https://localhost:8000/api/task-runs/
 
 Response payload mirrors ``GET /api/workspaces/<slug>/status/`` and includes an extra
-``task_run`` object with the ID/status/log of the newly created run.
+``task_run`` object with the ID and last known status, progress, and log of the
+newly created run. If reading the run after dispatch fails, the receipt uses
+the initial ``requested`` state. Read ``GET /api/task-runs/<id>/`` or poll the
+workspace status for the current outcome.
 If the optional status refresh or its serialization fails, HTTP 201 contains only
 ``task_run``. The receipt is returned even if the server cannot log the refresh failure.
 The Inspector uses the receipt to confirm submission and request a fresh status

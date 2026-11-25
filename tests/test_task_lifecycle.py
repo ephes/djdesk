@@ -5,7 +5,7 @@ from unittest import mock
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.db import DatabaseError, connections, transaction
+from django.db import DatabaseError, OperationalError, connections, transaction
 from django.db.models import QuerySet
 from django.db.models.deletion import ProtectedError
 from django.test import TransactionTestCase
@@ -371,6 +371,41 @@ class TaskLifecycleTests(TransactionTestCase):
         other.refresh_from_db()
         self.assertEqual(other.status, "running")
 
+    def test_create_returns_receipt_when_post_dispatch_run_refresh_fails(self):
+        def enqueue(pk, *, database):
+            execute_workspace_task.call(pk, database=database)
+            return mock.Mock(id="accepted-result")
+
+        with (
+            mock.patch("djdesk.inspector.forms.execute_workspace_task") as task,
+            mock.patch(
+                "djdesk.inspector.tasks.run_command",
+                return_value=CommandResult(0, 0.1, 0, "check"),
+            ) as command,
+            mock.patch.object(
+                WorkspaceTaskRun, "refresh_from_db", side_effect=OperationalError("read failed")
+            ),
+            self.assertLogs("djdesk.inspector.forms", level="WARNING"),
+        ):
+            task.enqueue.side_effect = enqueue
+            response = self.client.post(
+                reverse("inspector:task-run-create"),
+                {"workspace": self.workspace.slug, "preset": self.preset.key, "confirm_safe": "on"},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        run = WorkspaceTaskRun.objects.get(workspace=self.workspace)
+        self.assertEqual(run.result_id, "accepted-result")
+        self.assertEqual(
+            response.json()["task_run"],
+            {"id": run.pk, "status": "requested", "progress": 0, "log": ""},
+        )
+        task.enqueue.assert_called_once_with(run.pk, database="default")
+        command.assert_called_once()
+        detail = self.client.get(reverse("inspector:task-run-detail", args=[run.pk]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["status"], "succeeded")
+
     def test_create_returns_receipt_when_optional_status_refresh_fails(self):
         dashboard = self.client.get(
             reverse("inspector:dashboard"), {"workspace": self.workspace.slug}
@@ -484,9 +519,14 @@ class TaskLifecycleTests(TransactionTestCase):
                     self.assertEqual(run.metadata["command"]["exit_code"], 0)
 
     def test_view_reports_immediate_enqueue_failure(self):
-        with mock.patch(
-            "djdesk.inspector.forms.execute_workspace_task",
-            new=mock.Mock(enqueue=mock.Mock(side_effect=RuntimeError)),
+        with (
+            mock.patch(
+                "djdesk.inspector.forms.execute_workspace_task",
+                new=mock.Mock(enqueue=mock.Mock(side_effect=RuntimeError)),
+            ),
+            mock.patch.object(
+                WorkspaceTaskRun, "refresh_from_db", side_effect=OperationalError("read failed")
+            ),
         ):
             response = self.client.post(
                 reverse("inspector:task-run-create"),

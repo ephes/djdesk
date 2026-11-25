@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
+from contextlib import suppress
 from pathlib import Path
 
 from django import forms
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.utils import timezone
 
 from . import services
@@ -159,19 +160,19 @@ class TaskRunForm(forms.Form):
             requested_by=self.initial.get("requested_by", "inspector"),
             metadata={"notes": self.cleaned_data.get("notes", "")},
         )
-        enqueue_failed = False
+        dispatch_failed = False
 
         def dispatch() -> None:
-            nonlocal enqueue_failed
+            nonlocal dispatch_failed
             try:
                 result = execute_workspace_task.enqueue(run.pk, database=run._state.db)
             except Exception:
-                enqueue_failed = True
                 # Immediate backends can raise after claiming/executing the command.
                 # Only settle a run which no worker has claimed.
-                WorkspaceTaskRun.objects.using(run._state.db).filter(
+                unclaimed_run = WorkspaceTaskRun.objects.using(run._state.db).filter(
                     pk=run.pk, status=WorkspaceTaskRun.Status.REQUESTED
-                ).update(
+                )
+                settled = unclaimed_run.update(
                     status=WorkspaceTaskRun.Status.FAILED,
                     completed_at=timezone.now(),
                     progress=100,
@@ -180,6 +181,7 @@ class TaskRunForm(forms.Form):
                         settings.INSPECTOR_TASK_LOG_BYTES,
                     ),
                 )
+                dispatch_failed = bool(settled)
             else:
                 try:
                     WorkspaceTaskRun.objects.using(run._state.db).filter(pk=run.pk).update(
@@ -191,10 +193,14 @@ class TaskRunForm(forms.Form):
                     )
 
         transaction.on_commit(dispatch, using=run._state.db)
+        if dispatch_failed:
+            # Dispatch ran in autocommit and confirmed that no worker claimed the run.
+            raise forms.ValidationError({"__all__": ["Unable to dispatch the requested task."]})
         # Autocommit/immediate backends may already have completed. Within an outer
         # transaction the truthful response is still REQUESTED until its commit.
-        run.refresh_from_db(using=run._state.db)
-        if enqueue_failed and run.status == WorkspaceTaskRun.Status.FAILED:
-            # Dispatch already ran (autocommit); the failed run is committed.
-            raise forms.ValidationError({"__all__": ["Unable to dispatch the requested task."]})
+        try:
+            run.refresh_from_db(using=run._state.db)
+        except DatabaseError:
+            with suppress(Exception):
+                logger.warning("Task run %s created; could not refresh run state", run.pk)
         return run

@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Return the saved task ID and last known state when reading the run after
+  dispatch fails. Confirmed immediate dispatch failures still return HTTP 400.
 - Coalesce Inspector status polls, abort after 30 seconds including body reads,
   and retire old requests and timers when leaving or switching workspaces.
 - Display task submission receipts independently and refresh through the

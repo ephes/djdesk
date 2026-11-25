@@ -261,7 +261,9 @@ The immediate backend executes after commit and can return a finished outcome;
 the database backend queues the committed ID for workers. An enqueue error marks
 only an unclaimed request failed, preserving a worker's running or completed outcome.
 Poll task status for the final outcome, including deferred enqueue failures.
-HTTP 201 includes a `task_run` receipt with the saved ID and current state. If the
+HTTP 201 includes a `task_run` receipt with the saved ID and last known state. If
+reading the run after dispatch fails, the receipt uses its initial `requested`
+state. Open the run by ID or poll status to see whether it has finished. If the
 optional workspace snapshot or its serialization fails, the response contains
 only the receipt, even if reporting the refresh failure to the server log also
 fails. The task form confirms the saved ID and offers **View task log**
@@ -287,7 +289,10 @@ selected requested or running IDs, rejects missing/terminal runs, preserves logs
 marks them failed with interruption metadata. A `REQUESTED` run whose message was lost
 (for example a crash between commit and enqueue) is marked failed with `never_started`
 metadata; a late delivery can no longer claim it. A run claimed or settled while the
-command runs makes the whole call fail without changes. It trusts the operator's shutdown confirmation;
+command runs makes the whole call fail without changes. The success message is printed after
+the selected database commits. For a `call_command` inside an outer transaction on that alias,
+the message waits for the outer commit. A rollback discards the message.
+The command trusts the operator's shutdown confirmation;
 it cannot detect live workers. Restart workers afterward; duplicate deliveries never
 replay these commands. Any desired retry requires a new, explicitly approved request.
 Execution history in the Django admin is read-only, including for superusers: runs

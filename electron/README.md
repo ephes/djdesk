@@ -73,7 +73,9 @@ are checked around bounded descriptor reads. Hashing and snapshot creation requi
 exactly the admitted byte count at EOF. A special, oversized, changing or incompletely
 read cache is refused without changing its target. Remove or repair that entry with
 builders stopped.
-The downloader syncs a verified candidate before renaming it over the cache entry.
+The downloader checks the streamed SHA256, syncs the staged file, and verifies the
+stored bytes against the registered SHA256 before renaming it over the cache entry.
+The staged checksum uses bounded regular-file reads within the download deadline.
 A failure before rename preserves any prior cache. After rename it syncs the destination
 directory on supported filesystems. Windows and filesystems without directory sync
 still sync the candidate file. Other directory sync errors report uncertain durability

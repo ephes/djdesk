@@ -89,12 +89,13 @@ async function downloadPython(url, destination, expected, {
   if (!/^[a-f0-9]{64}$/.test(expected || '')) throw new Error('Missing registered SHA256');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('Python download deadline exceeded')), timeoutMs);
+  const limits = { maxBytes, signal: controller.signal };
   let directory, failure;
   let published = false;
   try {
     let cached = false;
     try {
-      cached = await checksum(destination, expected, { maxBytes, signal: controller.signal });
+      cached = await checksum(destination, expected, limits);
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
@@ -141,6 +142,9 @@ async function downloadPython(url, destination, expected, {
         await handle.sync();
       } finally {
         await handle.close();
+      }
+      if (!(await checksum(candidate, expected, limits))) {
+        throw new Error('Staged Python download checksum mismatch');
       }
       controller.signal.throwIfAborted();
       await fsp.rename(candidate, destination);

@@ -78,6 +78,39 @@ test('relative HTTPS redirects and new cache publication', async (t) => {
   assert.deepEqual(await fs.readFile(destination), content);
 });
 
+test('a corrupted staged download preserves the previous cache and permits retry', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const destination = path.join(directory, 'python.tar.gz');
+  const old = Buffer.from('previous verified archive');
+  await fs.writeFile(destination, old);
+
+  const open = fs.open;
+  let corrupt = true;
+  t.mock.method(fs, 'open', async (file, flags, ...args) => {
+    const handle = await open(file, flags, ...args);
+    if (corrupt && path.basename(file) === 'archive' && flags === 'r+') {
+      const sync = handle.sync.bind(handle);
+      handle.sync = async () => {
+        await handle.writeFile(Buffer.alloc(content.length, 0x78));
+        await sync();
+      };
+    }
+    return handle;
+  });
+
+  const download = () => downloadPython('https://fixtures.invalid/python', destination, sha,
+    fixture([{}]));
+  await assert.rejects(download(), /staged Python download checksum mismatch/i);
+  assert.deepEqual(await fs.readFile(destination), old);
+  assert.deepEqual(await fs.readdir(directory), ['python.tar.gz']);
+
+  corrupt = false;
+  await download();
+  assert.deepEqual(await fs.readFile(destination), content);
+  assert.deepEqual(await fs.readdir(directory), ['python.tar.gz']);
+});
+
 test('staging cleanup failure leaves the published cache usable and reports the staging path', async (t) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
   const rm = fs.rm;

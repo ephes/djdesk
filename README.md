@@ -520,7 +520,9 @@ and snapshot creation require exactly the opened file's admitted size at EOF. Sp
 oversized, changing or incompletely read cache entries are refused without changing their targets.
 Cache validation shares the transfer deadline. Downloads stage beside the cache,
 allow at most five HTTPS redirects and 256 MiB, and have a two minute total deadline.
-The downloader syncs a candidate with a matching registered SHA256 before renaming it.
+The downloader checks the streamed SHA256, syncs the staged file, and verifies the
+stored bytes against the registered SHA256 before renaming it. This second check
+uses the same bounded regular-file reads and shares the download deadline.
 It then syncs the destination directory where supported. Each attempt cleans up its
 own staging files. Failures before rename preserve the prior cache. A directory sync
 failure after rename leaves the complete archive visible and reports uncertain

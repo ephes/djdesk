@@ -112,6 +112,15 @@ def _check_root(root: Path, fd: int) -> None:
         raise OSError(f"Sample root name changed; preserve owned root identity {_fd_identity(fd)}")
 
 
+def sample_directory_exists(destination: Path, *, root_fd: int | None) -> bool:
+    """Admit an existing directory without following links under the sample lock."""
+    if root_fd is None:  # pragma: no cover - Windows can only reuse existing samples
+        return _identity(destination) is not None
+    identity = _identity(destination.name, dir_fd=root_fd)
+    _check_root(destination.parent, root_fd)
+    return identity is not None
+
+
 @contextmanager
 def sample_root_owner(root: Path):
     """Keep one root generation across lock acquisition, recovery and publication."""

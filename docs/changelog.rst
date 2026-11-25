@@ -9,6 +9,8 @@ Fixed
 
 - Stop retiring a sample backup if the installed generation moves or its name is
   replaced during cleanup. Report the retained recovery files.
+- Require a directory at the sample path before reporting an existing installation.
+  Files and symlinks require manual inspection.
 - Release sample locks acquired with ``flock`` at or after their deadline and report
   a timeout before starting recovery or publication.
 - Refuse sample recovery when the swap intent cannot be read completely or

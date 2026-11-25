@@ -22,7 +22,8 @@ exceeds the deadline, the publisher releases the lock and reports a timeout befo
 preflight.
 Never delete the lock while publishers may be running. Native locks are required;
 unsupported locking refuses publication rather than falling back to a marker that
-survives process death. A non-force caller rechecks the destination after taking ownership.
+survives process death. A non-force caller checks for a directory after taking ownership.
+Files and symlinks at the sample path are preserved and require manual inspection.
 
 The replacement is written in ``.slug-<random>/replacement`` beside the destination.
 All staged files and directories are synced before an owner-only ``.slug.swap.json``
@@ -31,13 +32,13 @@ rename parents are synced before the old backup is retired. Newly created sample
 ancestors are synced too. macOS also flushes the
 drive cache with ``F_FULLFSYNC`` where supported. Other filesystems use fsync.
 Directory fsync and no-follow directory opens are required: unsupported filesystems
-and Windows refuse creation/replacement before changing an existing sample. Skipping
-an existing sample without force still works.
+and Windows refuse creation/replacement before changing an existing sample. Windows
+can still reuse an existing sample directory after a no-follow check of the sample path.
 
 Publication and recovery keep verified root and staging directory descriptors open
-through their final mutation. One root owner spans lock acquisition and the gap between
-recovery/existence checks and publication. Each stable ``.<slug>.lock`` file is created and
-locked relative to that held root, and the root name is checked again before and after
+through their final mutation. One root owner spans lock acquisition, recovery, the
+directory check for reuse and publication. Each stable ``.<slug>.lock`` file is created
+and locked relative to that held root, and the root name is checked again before and after
 acquisition, so a root swapped before or between samples cannot be locked or published. Staged writes, journal creation/removal, renames,
 rollback and destructive cleanup use directory-relative public filesystem APIs,
 so renaming a parent or replacing it with a symlink cannot redirect them into another

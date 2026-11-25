@@ -134,6 +134,8 @@ Example ``curl`` request (assuming ``csrftoken`` is stored in ``TOKEN``):
 
 Response payload mirrors ``GET /api/workspaces/<slug>/status/`` and includes an extra
 ``task_run`` object with the ID/status/log of the newly created run.
+If the optional status refresh or its serialization fails, HTTP 201 contains only
+``task_run``. The receipt is returned even if the server cannot log the refresh failure.
 
 ``GET /api/task-runs/<id>/``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

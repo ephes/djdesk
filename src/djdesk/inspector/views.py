@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import posixpath
+from contextlib import suppress
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
@@ -213,7 +214,8 @@ class TaskRunCreateView(View):
             payload["task_run"] = receipt
             return JsonResponse(payload, status=201)
         except Exception:
-            logger.exception("Task run %s created; status refresh failed", run.pk)
+            with suppress(Exception):
+                logger.exception("Task run %s created; status refresh failed", run.pk)
             return JsonResponse({"task_run": receipt}, status=201)
 
 

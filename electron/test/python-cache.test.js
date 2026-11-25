@@ -5,8 +5,9 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { Readable } = require('node:stream');
 const { test } = require('node:test');
-const { downloadPython } = require('../python-download');
+const { checksum, downloadPython, snapshotPythonArchive } = require('../python-download');
 
 const content = Buffer.from('invented cached archive');
 const sha = createHash('sha256').update(content).digest('hex');
@@ -17,6 +18,37 @@ async function fixture(t) {
   t.after(() => fsp.rm(root, { recursive: true, force: true }));
   return { root, file: path.join(root, 'archive') };
 }
+
+for (const operation of ['checksum', 'snapshot']) {
+  test(`${operation} rejects a short archive read despite stable metadata`, async (t) => {
+    const { root, file } = await fixture(t);
+    await fsp.writeFile(file, content);
+    const short = content.subarray(0, -1);
+    const snapshot = path.join(root, 'snapshot');
+    const limits = { maxBytes: content.length, signal: new AbortController().signal };
+    const read = () => operation === 'checksum'
+      ? checksum(file, createHash('sha256').update(short).digest('hex'), limits)
+      : snapshotPythonArchive(file, snapshot, limits);
+
+    const open = fsp.open;
+    t.mock.method(fsp, 'open', async (...args) => {
+      const handle = await open(...args);
+      handle.createReadStream = () => Readable.from([short]);
+      return handle;
+    });
+    await assert.rejects(read(), /Python cache read length mismatch/);
+  });
+}
+
+test('a complete archive can be hashed and copied at the byte ceiling', async (t) => {
+  const { root, file } = await fixture(t);
+  await fsp.writeFile(file, content);
+  const snapshot = path.join(root, 'snapshot');
+  const limits = { maxBytes: content.length, signal: new AbortController().signal };
+  assert.equal(await checksum(file, sha, limits), true);
+  await snapshotPythonArchive(file, snapshot, limits);
+  assert.deepEqual(await fsp.readFile(snapshot), content);
+});
 
 test('oversized cache is refused before hashing or network access', async (t) => {
   const { file } = await fixture(t);

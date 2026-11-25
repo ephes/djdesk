@@ -512,8 +512,9 @@ GHSA-g3hv-75wg-m249 (including dependent packages); no supported builder update 
 that tree yet. No overrides or advisory ignores are used.
 
 Interpreter archives use verified regular, non-symlink cache entries only. Cache hashing
-uses bounded opened-file reads and checks identity/metadata before reuse; special,
-oversized or changing cache entries are refused without changing their targets.
+uses bounded opened-file reads and checks identity and metadata before reuse. Hashing
+and snapshot creation require exactly the opened file's admitted size at EOF. Special,
+oversized, changing or incompletely read cache entries are refused without changing their targets.
 Cache validation shares the transfer deadline. Downloads stage beside the cache,
 allow at most five HTTPS redirects and 256 MiB, and have a two minute total deadline.
 Only a matching registered SHA256 is published. Failed attempts remove their own

@@ -31,6 +31,7 @@ async function* readPythonArchive(file, { maxBytes, signal }) {
     if (!sameFile(await handle.stat()) || !sameFile(await fsp.lstat(file))) {
       throw new Error('Python cache changed during validation');
     }
+    if (bytes !== admitted.size) throw new Error('Python cache read length mismatch');
   } finally {
     await handle.close();
   }

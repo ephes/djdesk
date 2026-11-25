@@ -7,6 +7,7 @@ Unreleased
 Fixed
 ~~~~~
 
+- Reject incomplete Python archive reads during cache hashing and extraction snapshot creation.
 - Stop retiring a sample backup if the installed generation moves or its name is
   replaced during cleanup. Report the retained recovery files.
 - Require a directory at the sample path before reporting an existing installation.

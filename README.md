@@ -113,6 +113,9 @@ The Electron docs drawer prefers a local Sphinx bundle when its index can be ope
 as a verified regular file. Run `just docs-bundle` to copy `docs/_build/html` into
 `var/docs_bundle/`. The drawer falls back to https://djdesk.readthedocs.io/ when
 the index is missing or fails admission.
+The publisher checks that the staged index, search index, and required Furo and
+project assets are nonempty files before replacing the existing bundle. If this
+check fails, rebuild with `just docs-html` and retry with the rebuilt HTML directory.
 Links mapped into the bundle use the local drawer. Links that resolve to an
 external destination retain their external navigation behavior in offline mode.
 

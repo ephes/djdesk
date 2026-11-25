@@ -13,6 +13,15 @@ from pathlib import Path
 
 from filelock import FileLock
 
+_REQUIRED_HTML_FILES = (
+    "index.html",
+    "searchindex.js",
+    "_static/styles/furo.css",
+    "_static/scripts/furo.js",
+    "_static/custom.css",
+    "_static/mermaid-init.js",
+)
+
 
 def _contains_directory(tree: Path, path: Path) -> bool:
     return any(ancestor.exists() and tree.samefile(ancestor) for ancestor in (path, *path.parents))
@@ -32,6 +41,13 @@ def _prepare_destination(source: Path, dest: Path) -> None:
     promoted = False
     try:
         shutil.copytree(source, staging)
+        for relative in _REQUIRED_HTML_FILES:
+            asset = staging / relative
+            if not asset.is_file() or asset.stat().st_size == 0:
+                raise ValueError(
+                    f"Incomplete Sphinx build at {source}: {relative} must be a nonempty file. "
+                    "Run `just docs-html` and retry with the rebuilt HTML directory."
+                )
         manifest = {
             "generated_at": datetime.now(tz=timezone.utc).isoformat(),
             "source": str(source),

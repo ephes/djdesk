@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import posixpath
+from contextlib import suppress
 from typing import Any
 from urllib.parse import urlencode, urlsplit
 
@@ -213,7 +214,8 @@ class TaskRunCreateView(View):
             payload["task_run"] = receipt
             return JsonResponse(payload, status=201)
         except Exception:
-            logger.exception("Task run %s created; status refresh failed", run.pk)
+            with suppress(Exception):
+                logger.exception("Task run %s created; status refresh failed", run.pk)
             return JsonResponse({"task_run": receipt}, status=201)
 
 
@@ -251,12 +253,16 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
     except ValueError as exc:
         return JsonResponse({"errors": {"template": [str(exc)]}}, status=400)
     except data_lab.NotebookDurabilityError as exc:
-        logger.exception("Notebook export durability uncertain for workspace %s", workspace.slug)
+        with suppress(Exception):
+            logger.exception(
+                "Notebook export durability uncertain for workspace %s", workspace.slug
+            )
         return JsonResponse({"errors": {"template": [str(exc)]}}, status=500)
     except OSError:
         # Fail-closed publication errors (directory swapped for a symlink, no hard-link
         # support, staging write failure) leave no partial export; report them as JSON.
-        logger.exception("Notebook export failed for workspace %s", workspace.slug)
+        with suppress(Exception):
+            logger.exception("Notebook export failed for workspace %s", workspace.slug)
         return JsonResponse(
             {
                 "errors": {
@@ -283,9 +289,10 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
     except Exception:
         # Publication and directory sync already committed. Optional refresh/serialization
         # must not turn that outcome into an apparent export failure or encourage replay.
-        logger.exception(
-            "Notebook published; status refresh failed for workspace %s", workspace.slug
-        )
+        with suppress(Exception):
+            logger.exception(
+                "Notebook published; status refresh failed for workspace %s", workspace.slug
+            )
         return JsonResponse({"data_lab": receipt}, status=201)
 
 

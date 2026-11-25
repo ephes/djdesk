@@ -249,7 +249,8 @@ only an unclaimed request failed, preserving a worker's running or completed out
 Poll task status for the final outcome, including deferred enqueue failures.
 HTTP 201 includes a `task_run` receipt with the saved ID and current state. If the
 optional workspace snapshot or its serialization fails, the response contains
-only the receipt. The task form confirms the saved ID and offers **View task log**
+only the receipt, even if reporting the refresh failure to the server log also
+fails. The task form confirms the saved ID and offers **View task log**
 for that run even when the snapshot is missing. The dashboard keeps its existing
 panels until polling refreshes them. Each new submission clears the previous
 receipt, and the submit button stays disabled until the reply has been handled.
@@ -368,8 +369,8 @@ A parsed 4xx reply (for example an invalid template) is a definite refusal and i
 shown without that guidance.
 A successful HTTP 201 is a receipt for an already published and synced notebook. If the
 optional workspace/inventory refresh or its serialization fails, the response still
-returns `data_lab.selected_notebook` and `data_lab.selected_notebook_url`. The drawer
-opens that file, retains its current listing/templates and lets later status polls
+returns `data_lab.selected_notebook` and `data_lab.selected_notebook_url`, even if
+the server cannot log the refresh failure. The drawer opens that file, retains its current listing/templates and lets later status polls
 refresh them. Do not repeat an export merely because its optional refresh is missing.
 The listing and viewer accept only regular files directly inside the workspace export
 directory. Notebook symlinks (including internal links) and symlinked workspace export
@@ -451,9 +452,10 @@ anything is published and is retried by the next export.
 Where the platform offers `F_FULLFSYNC` (macOS), these syncs also flush the drive cache.
 Filesystems without it fall back to plain fsync.
 If a directory sync after publication fails, HTTP 500 names the complete, published notebook and
-reports uncertain durability. The export and existing files remain visible. Inspect
-the export directory before exporting again. A retry creates another filename. A power
-loss before a successful directory sync may lose the new name. Creation,
+reports uncertain durability even if the server cannot log the sync failure. The export
+and existing files remain visible. Inspect the export directory before exporting again.
+A retry creates another filename. A power loss before a successful directory sync may
+lose the new name. Creation,
 publication and cleanup use the same opened workspace directory, even if its pathname
 is replaced. A renamed directory may therefore contain the export while it is unavailable
 at its former path. Ordinary failures clean up only this attempt's staging inode.
@@ -463,7 +465,8 @@ directory-relative, no-follow opens and hard-link publication (including Windows
 exports with HTTP 400 before writing; existing notebooks remain readable through the
 portable reader. The export filesystem must support hard links; filesystem failures during
 publication (no hard-link support, a directory swapped for a symlink, a failed staging write)
-return an HTTP 500 JSON error and leave no partial export.
+return an HTTP 500 JSON error and leave no partial export, even if the server cannot log
+the failure.
 
 Workspace saves attempt a generated slug up to five times on uniqueness collisions.
 An explicitly supplied slug is preserved and a collision raises `IntegrityError` at

@@ -411,6 +411,32 @@ class TaskLifecycleTests(TransactionTestCase):
                 self.assertEqual(detail.json()["id"], run.pk)
                 self.assertEqual(detail.json()["log"], run.log)
 
+    def test_create_returns_receipt_when_status_failure_logging_raises(self):
+        with (
+            mock.patch("djdesk.inspector.forms.execute_workspace_task") as task,
+            mock.patch(
+                "djdesk.inspector.views.workspace_status_payload",
+                side_effect=RuntimeError("snapshot failed"),
+            ),
+            mock.patch(
+                "djdesk.inspector.views.logger.exception", side_effect=OSError("log sink failed")
+            ) as report_failure,
+        ):
+            task.enqueue.return_value.id = "queued-result"
+            response = self.client.post(
+                reverse("inspector:task-run-create"),
+                {"workspace": self.workspace.slug, "preset": self.preset.key, "confirm_safe": "on"},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        run = WorkspaceTaskRun.objects.get(workspace=self.workspace)
+        self.assertEqual(
+            response.json(),
+            {"task_run": {"id": run.pk, "status": "requested", "progress": 0, "log": run.log}},
+        )
+        task.enqueue.assert_called_once_with(run.pk, database="default")
+        report_failure.assert_called_once_with("Task run %s created; status refresh failed", run.pk)
+
     def test_create_keeps_accepted_run_when_result_id_write_fails(self):
         update = QuerySet.update
 

@@ -86,7 +86,9 @@ leave the export directories untouched.
 Required form field: ``template`` (``schema-audit`` or ``log-study``). A successful
 response has status 201 and contains the status payload plus
 ``data_lab.selected_notebook`` and ``data_lab.selected_notebook_url`` for the exact new
-file, even when that file is outside the inventory window. Existing files are preserved.
+file, even when that file is outside the inventory window. If the optional status
+refresh or its serialization fails, HTTP 201 contains only these two ``data_lab``
+fields, even if the server cannot log the refresh failure. Existing files are preserved.
 The export POST creates missing directories. A missing export root or ancestor is
 created and the parent of each missing directory is fsynced before publication. Other
 exports in the same server process wait for that sync. If it fails, the export fails
@@ -94,9 +96,12 @@ with nothing published and the next export retries the sync. Success follows fil
 hard-link publication, fsync of the opened workspace directory and fsync of the opened
 export root to persist the workspace directory entry. On macOS these syncs also issue
 ``F_FULLFSYNC`` to flush the drive cache where supported.
-If a directory sync after publication fails, HTTP 500 names the published complete file and reports uncertain durability.
+If a directory sync after publication fails, the HTTP 500 JSON response names the
+complete published file and reports uncertain durability even if server logging fails.
 The export remains visible. Inspect the export directory before exporting again.
-Retries create additional files.
+Retries create additional files. Fail-closed publication errors (no hard-link support,
+a directory swapped for a symlink, a failed staging write) return an HTTP 500 JSON error
+with nothing published, also when server logging fails.
 
 The drawer permits one export POST at a time, restores the prior control state after
 every outcome and never automatically replays a POST. Manual notebook selection while
@@ -134,6 +139,8 @@ Example ``curl`` request (assuming ``csrftoken`` is stored in ``TOKEN``):
 
 Response payload mirrors ``GET /api/workspaces/<slug>/status/`` and includes an extra
 ``task_run`` object with the ID/status/log of the newly created run.
+If the optional status refresh or its serialization fails, HTTP 201 contains only
+``task_run``. The receipt is returned even if the server cannot log the refresh failure.
 
 ``GET /api/task-runs/<id>/``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

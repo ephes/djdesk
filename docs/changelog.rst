@@ -7,6 +7,12 @@ Unreleased
 Fixed
 ~~~~~
 
+- Return the saved task receipt even if the optional status refresh and its
+  error logging both fail.
+- Preserve the uncertain notebook export response and its readback guidance
+  if logging the directory sync failure also fails.
+- Keep the notebook export receipt after a failed optional refresh and the JSON
+  error for fail-closed publication failures when server logging fails.
 - Generate valid URL configurations for the bundled sample projects so the polls
   tutorial passes Django's system checks.
 - Ship the polls tutorial's initial migration so ``manage.py migrate`` creates

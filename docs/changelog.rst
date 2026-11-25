@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Refuse sample recovery when the swap intent cannot be read completely or
+  changes during the read. Retain the journal and all related paths for inspection.
 - Return the saved task receipt even if the optional status refresh and its
   error logging both fail.
 - Preserve the uncertain notebook export response and its readback guidance

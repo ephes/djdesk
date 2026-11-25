@@ -89,6 +89,9 @@ or accepts the already installed new generation. For a first install with no old
 it completes the staged generation. Interrupted staging trees are retained, including
 user edits to backups, and the warning names their path. Unknown identities or malformed
 intents stop publication for manual inspection without removing any related paths.
+Recovery requires a complete read from a regular intent file whose size and
+timestamps stay stable during the read. An incomplete or changed intent also
+requires manual inspection, with the journal and all related paths retained.
 A recovered sample is kept for this invocation even with `--force`, so recovery does
 not immediately delete saved edits. Inspect it before a separate force replacement.
 Stop all publishers before inspecting `.slug-*/backup`, `replacement`, or the journal;

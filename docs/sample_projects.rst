@@ -72,6 +72,10 @@ the intent is reconciled before the usual existence check:
 * If any directory identity or intent is unexpected, stop for manual inspection and
   preserve all related paths.
 
+Recovery checks the regular intent file's size and modification and change timestamps
+around a bounded read. A short read or a change during the read requires manual
+inspection, with the journal and all related paths retained.
+
 Recovery syncs the rename parents before retiring the intent. A recovered sample is
 kept for this invocation even with ``--force``; inspect it before a separate force
 replacement, so a restart cannot immediately delete the recovered edits. It never automatically

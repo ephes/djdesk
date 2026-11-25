@@ -210,7 +210,17 @@ def _read_intent(destination: Path, root_fd: int):
         info = os.fstat(handle.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_size > 16384:
             raise ValueError("Unsafe swap intent file")
-        intent = json.loads(handle.read(16385), object_pairs_hook=_unique_members)
+        content = handle.read(info.st_size + 1)
+        after = os.fstat(handle.fileno())
+        if (
+            len(content) != info.st_size
+            or after.st_size != info.st_size
+            or after.st_mtime_ns != info.st_mtime_ns
+            or after.st_ctime_ns != info.st_ctime_ns
+            or after.st_nlink != 1
+        ):
+            raise ValueError("Incomplete or changed swap intent file")
+        intent = json.loads(content, object_pairs_hook=_unique_members)
     if not isinstance(intent, dict) or set(intent) != {"version", "root", "stage", "old", "new"}:
         raise ValueError("Invalid swap intent fields")
     if type(intent["version"]) is not int or intent["version"] != 1:

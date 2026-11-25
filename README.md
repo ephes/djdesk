@@ -64,10 +64,12 @@ The tutorial relies on reproducible sample workspaces so screenshots and wizard 
 To replace existing samples, run `uv run python scripts/fetch_samples.py --force`.
 This replaces the entire sample directory, including local edits, tutorial state and databases.
 Publishers wait up to ten seconds for a stable per-sample `.slug.lock` file and
-hold it through preflight, publication, rollback and cleanup. Never delete these lock
-files while publishers may be running. Native locks are required; there is no fallback
-to lock-file existence markers. A waiting non-force publisher rechecks existence
-after taking the lock; force publishers replace complete generations in serial order.
+hold it through preflight, publication, rollback and cleanup. A publisher that
+acquires the lock with `flock` at or after the deadline releases it and reports a timeout.
+Never delete these lock files while publishers may be running. Native locks are required;
+there is no fallback to lock-file existence markers. A waiting non-force publisher
+rechecks existence after taking the lock; force publishers replace complete generations
+in serial order.
 Each replacement is written and synced beside the destination first, along with an
 owner-only `.slug.swap.json` intent recording the root, staging and old/new directory
 identities. One root descriptor covers the lock, recovery check and publication.
@@ -89,6 +91,9 @@ or accepts the already installed new generation. For a first install with no old
 it completes the staged generation. Interrupted staging trees are retained, including
 user edits to backups, and the warning names their path. Unknown identities or malformed
 intents stop publication for manual inspection without removing any related paths.
+Recovery requires a complete read from a regular intent file whose size and
+timestamps stay stable during the read. An incomplete or changed intent also
+requires manual inspection, with the journal and all related paths retained.
 A recovered sample is kept for this invocation even with `--force`, so recovery does
 not immediately delete saved edits. Inspect it before a separate force replacement.
 Stop all publishers before inspecting `.slug-*/backup`, `replacement`, or the journal;

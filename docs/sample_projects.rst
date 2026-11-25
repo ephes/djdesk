@@ -16,10 +16,13 @@ question and choice tables in the sample's SQLite database. For an older copy,
 fetch into a new ``--root`` or back up your edits and database before replacing
 the sample with ``--force``.
 
-Publishers wait at most ten seconds for each stable ``.slug.lock`` and hold it through
-preflight, swap, rollback and cleanup. Never delete the lock while publishers may be
-running. Native locks are required; unsupported locking refuses publication rather
-than falling back to a marker that survives process death. A non-force caller rechecks the destination after taking ownership.
+Publishers wait up to ten seconds to acquire each stable ``.slug.lock`` and hold it through
+preflight, swap, rollback and cleanup. If a native ``flock`` acquisition reaches or
+exceeds the deadline, the publisher releases the lock and reports a timeout before
+preflight.
+Never delete the lock while publishers may be running. Native locks are required;
+unsupported locking refuses publication rather than falling back to a marker that
+survives process death. A non-force caller rechecks the destination after taking ownership.
 
 The replacement is written in ``.slug-<random>/replacement`` beside the destination.
 All staged files and directories are synced before an owner-only ``.slug.swap.json``
@@ -71,6 +74,10 @@ the intent is reconciled before the usual existence check:
 * If the old name was never removed or rollback finished, keep it.
 * If any directory identity or intent is unexpected, stop for manual inspection and
   preserve all related paths.
+
+Recovery checks the regular intent file's size and modification and change timestamps
+around a bounded read. A short read or a change during the read requires manual
+inspection, with the journal and all related paths retained.
 
 Recovery syncs the rename parents before retiring the intent. A recovered sample is
 kept for this invocation even with ``--force``; inspect it before a separate force

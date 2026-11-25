@@ -17,7 +17,7 @@ from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 
-from djdesk.inspector import data_lab
+from djdesk.inspector import assets, data_lab
 from djdesk.inspector import forms as inspector_forms
 from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm, WorkspaceWizardForm
@@ -566,6 +566,20 @@ class DashboardViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(b'data-status-endpoint=""', response.content)
 
+    @staticmethod
+    def _write_docs_bundle(root: Path) -> None:
+        for member in (
+            "index.html",
+            "searchindex.js",
+            "_static/styles/furo.css",
+            "_static/scripts/furo.js",
+            "_static/custom.css",
+            "_static/mermaid-init.js",
+        ):
+            asset = root / member
+            asset.parent.mkdir(parents=True, exist_ok=True)
+            asset.write_text("synthetic docs")
+
     def test_dashboard_prefers_offline_docs_when_available(self) -> None:
         Workspace.objects.all().delete()
         workspace = Workspace.objects.create(
@@ -580,9 +594,30 @@ class DashboardViewTests(TestCase):
         )
         with TemporaryDirectory() as temp_dir:
             bundle_root = Path(temp_dir)
-            (bundle_root / "index.html").write_text("<html>Docs</html>")
+            self._write_docs_bundle(bundle_root)
             with override_settings(INSPECTOR_DOCS_BUNDLE_ROOT=bundle_root):
-                response = self.client.get(reverse("inspector:dashboard"))
+                with mock.patch.object(
+                    assets, "_open_docs_asset", wraps=assets._open_docs_asset
+                ) as opened:
+                    response = self.client.get(reverse("inspector:dashboard"))
+                    self.assertTrue(response.context["docs_source"]["offline"])
+                    self.assertEqual(opened.call_count, 6)
+                    cached = self.client.get(reverse("inspector:dashboard"))
+                    self.assertTrue(cached.context["docs_source"]["offline"])
+                    self.assertEqual(opened.call_count, 6)
+                for member in ("searchindex.js", "_static/styles/furo.css"):
+                    with self.subTest(member=member):
+                        asset = bundle_root / member
+                        for content in (None, ""):
+                            if content is None:
+                                asset.unlink()
+                            else:
+                                asset.write_text(content)
+                            fallback = self.client.get(reverse("inspector:dashboard"))
+                            self.assertFalse(fallback.context["docs_source"]["offline"])
+                        asset.write_text("restored")
+                        restored = self.client.get(reverse("inspector:dashboard"))
+                        self.assertTrue(restored.context["docs_source"]["offline"])
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(b"Offline bundle", response.content)
@@ -600,7 +635,7 @@ class DashboardViewTests(TestCase):
         offline_root = reverse("inspector:docs-offline-root")
         mapped = f"{offline_root}guide.html#details"
         with TemporaryDirectory() as temp_dir:
-            (Path(temp_dir) / "index.html").write_text("<html>Docs</html>")
+            self._write_docs_bundle(Path(temp_dir))
             with override_settings(INSPECTOR_DOCS_BUNDLE_ROOT=temp_dir):
                 response = self.client.get(reverse("inspector:dashboard"))
 

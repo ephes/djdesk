@@ -14,6 +14,9 @@ Fixed
   and retire old requests and timers when leaving or switching workspaces.
 - Display task submission receipts independently and refresh through the
   workspace poller so a delayed submission cannot rewind the dashboard.
+- Recover the previous offline docs bundle on retry after an interrupted replacement.
+- Use online documentation when any required offline bundle member is missing, empty
+  or unreadable.
 - Keep the existing offline docs bundle when the staged Sphinx entry point, search
   index, or essential static assets are missing or empty.
 - Verify the synced Python download on disk before replacing the previous archive

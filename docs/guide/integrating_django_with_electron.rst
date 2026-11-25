@@ -164,9 +164,15 @@ Before replacing the existing bundle, the publisher checks that the staged index
 search index, and required Furo and project assets are nonempty files. If the check
 fails, rebuild with ``just docs-html`` and retry with the rebuilt HTML directory.
 
-``DashboardView`` opens ``var/docs_bundle/index.html`` using the same regular-file
-checks as the offline docs view before choosing ``/docs/offline/`` for the drawer.
-The drawer uses ``INSPECTOR_DOCS_BASE_URL`` when the index is missing or invalid.
+If a publisher is interrupted, the next invocation uses the sibling recovery receipt
+to restore a verified backup or keep the completed replacement before checking the
+new input. Retained paths are reported. Stop publishers before inspecting ambiguous
+copies or an invalid receipt.
+
+``DashboardView`` checks the same required members as the publisher before choosing
+``/docs/offline/`` for the drawer. The drawer uses ``INSPECTOR_DOCS_BASE_URL`` if a
+required file is unavailable, unsafe or empty. An individual missing asset still
+returns HTTP 404.
 With the bundle active, links under the configured docs base can map to local
 pages. Links whose destinations remain external still use the external link policy.
 

@@ -5,6 +5,8 @@ import json
 import multiprocessing
 import os
 import shutil
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -91,6 +93,63 @@ class BundleDocsTests(TestCase):
         self.assertEqual((self.dest / stylesheet).read_text(), "new")
         self.assertEqual(json.loads(manifest.read_text())["source"], str(self.source.resolve()))
         self.assert_no_staging()
+
+    def _interrupt_publication(self, rename_target):
+        script = """
+import os
+import sys
+from pathlib import Path
+from scripts import bundle_docs
+
+replace = os.replace
+
+def crash_after_retirement(source, dest):
+    replace(source, dest)
+    if Path(dest).name == sys.argv[3]:
+        os._exit(23)
+
+bundle_docs.os.replace = crash_after_retirement
+bundle_docs._prepare_destination(*map(Path, sys.argv[1:3]))
+"""
+        interrupted = subprocess.run(
+            [sys.executable, "-c", script, str(self.source), str(self.dest), rename_target],
+            timeout=20,
+            check=False,
+        )
+        self.assertEqual(interrupted.returncode, 23)
+
+    def test_retry_recovers_retired_bundle_before_validating_input(self):
+        self._interrupt_publication("backup")
+        self.assertFalse(self.dest.exists())
+        (self.source / "index.html").unlink()
+
+        with self.assertRaisesRegex(ValueError, "Incomplete Sphinx build"):
+            self._run_main()
+        self.assert_old()
+        self.assertEqual(len(list(self.root.glob(".bundle-publish-*"))), 1)
+        self.assertFalse((self.root / ".bundle.recovery.json").exists())
+
+    def test_retry_keeps_promoted_bundle_and_backup_after_interruption(self):
+        self._interrupt_publication(self.dest.name)
+        (self.source / "index.html").unlink()
+
+        with self.assertRaisesRegex(ValueError, "Incomplete Sphinx build"):
+            self._run_main()
+        self.assertEqual((self.dest / "index.html").read_text(), "new")
+        backup = next(self.root.glob(".bundle-publish-*/backup"))
+        self.assertEqual((backup / "index.html").read_text(), "old")
+        self.assertFalse((self.root / ".bundle.recovery.json").exists())
+
+    def test_retry_preserves_ambiguous_recovery_copies(self):
+        self._interrupt_publication("backup")
+        _write_sphinx_build(self.dest, "unrelated")
+
+        with self.assertRaisesRegex(ValueError, "Unexpected bundle or backup"):
+            self._run_main()
+        self.assertEqual((self.dest / "index.html").read_text(), "unrelated")
+        backup = next(self.root.glob(".bundle-publish-*/backup"))
+        self.assertEqual((backup / "index.html").read_text(), "old")
+        self.assertTrue((self.root / ".bundle.recovery.json").is_file())
 
     def test_copy_failure_preserves_live_and_unowned_paths(self):
         legacy = [self.root / ".bundle.tmp", self.root / ".bundle.old"]

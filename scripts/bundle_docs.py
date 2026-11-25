@@ -7,29 +7,89 @@ import argparse
 import json
 import os
 import shutil
+import stat
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
 from filelock import FileLock
 
-_REQUIRED_HTML_FILES = (
-    "index.html",
-    "searchindex.js",
-    "_static/styles/furo.css",
-    "_static/scripts/furo.js",
-    "_static/custom.css",
-    "_static/mermaid-init.js",
-)
+from djdesk.docs_bundle import REQUIRED_HTML_FILES
 
 
 def _contains_directory(tree: Path, path: Path) -> bool:
     return any(ancestor.exists() and tree.samefile(ancestor) for ancestor in (path, *path.parents))
 
 
+def _missing_html_member(root: Path) -> str | None:
+    for relative in REQUIRED_HTML_FILES:
+        asset = root / relative
+        if not asset.is_file() or asset.stat().st_size == 0:
+            return relative
+    return None
+
+
+def _directory_identity(path: Path) -> list[int] | None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return None
+    if not stat.S_ISDIR(info.st_mode):
+        raise ValueError(f"Expected a real directory at {path}")
+    return [info.st_dev, info.st_ino]
+
+
+def _recover_destination(dest: Path, receipt: Path) -> None:
+    if not os.path.lexists(receipt):
+        return
+    try:
+        if not stat.S_ISREG(receipt.lstat().st_mode):
+            raise ValueError("Recovery receipt must be a regular file")
+        work_name, old, new = json.loads(receipt.read_text(encoding="utf-8"))
+        if (
+            not isinstance(work_name, str)
+            or Path(work_name).name != work_name
+            or not work_name.casefold().startswith(f".{dest.name}-publish-".casefold())
+            or not all(
+                isinstance(identity, list)
+                and len(identity) == 2
+                and all(type(part) is int for part in identity)
+                for identity in (old, new)
+            )
+            or old == new
+        ):
+            raise ValueError("Invalid recovery receipt")
+        work = dest.parent / work_name
+        if _directory_identity(work) is None:
+            raise ValueError(f"Missing publication workspace {work}")
+        backup = work / "backup"
+        live = _directory_identity(dest)
+        saved = _directory_identity(backup)
+        if live is None and saved == old:
+            if missing := _missing_html_member(backup):
+                raise ValueError(f"Recovery copy {backup} is missing a nonempty {missing}")
+            os.replace(backup, dest)
+        elif (live, saved) not in ((old, None), (new, old)):
+            raise ValueError(f"Unexpected bundle or backup in {work}")
+        receipt.unlink()
+    except (OSError, ValueError, TypeError) as error:
+        error.add_note(f"Inspect {receipt} and its publication workspace with publishers stopped.")
+        raise
+    print(
+        f"Recovered offline docs at {dest}. Retained publication workspace {work}",
+        file=sys.stderr,
+    )
+
+
 def _prepare_destination(source: Path, dest: Path) -> None:
-    source = source.resolve(strict=True)
     dest = dest.resolve()
+    lock_path = dest.parent / f".{dest.name}.lock"
+    receipt = dest.parent / f".{dest.name}.recovery.json"
+    if os.path.lexists(receipt):
+        with FileLock(lock_path, timeout=10):
+            _recover_destination(dest, receipt)
+    source = source.resolve(strict=True)
     if not source.is_dir():
         raise NotADirectoryError(f"Docs build is not a directory: {source}")
     if _contains_directory(source, dest) or (dest.exists() and _contains_directory(dest, source)):
@@ -39,42 +99,61 @@ def _prepare_destination(source: Path, dest: Path) -> None:
     staging = work / "staging"
     backup = work / "backup"
     promoted = False
+    recovery_pending = False
     try:
         shutil.copytree(source, staging)
-        for relative in _REQUIRED_HTML_FILES:
-            asset = staging / relative
-            if not asset.is_file() or asset.stat().st_size == 0:
-                raise ValueError(
-                    f"Incomplete Sphinx build at {source}: {relative} must be a nonempty file. "
-                    "Run `just docs-html` and retry with the rebuilt HTML directory."
-                )
+        if missing := _missing_html_member(staging):
+            raise ValueError(
+                f"Incomplete Sphinx build at {source}: {missing} must be a nonempty file. "
+                "Run `just docs-html` and retry with the rebuilt HTML directory."
+            )
         manifest = {
             "generated_at": datetime.now(tz=timezone.utc).isoformat(),
             "source": str(source),
         }
         (staging / "bundle.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
         # Leave this lock file in place: unlinking it can split waiting writers.
-        with FileLock(dest.parent / f".{dest.name}.lock", timeout=10):
-            if dest.exists():
-                os.replace(dest, backup)
+        with FileLock(lock_path, timeout=10):
+            _recover_destination(dest, receipt)
+            old = _directory_identity(dest)
+            if old is not None:
+                intent = work / "recovery.json"
+                intent.write_text(
+                    json.dumps([work.name, old, _directory_identity(staging)]), encoding="utf-8"
+                )
+                try:
+                    os.rename(intent, receipt)
+                    recovery_pending = True
+                except BaseException:
+                    recovery_pending = os.path.lexists(receipt)
+                    raise
             try:
+                if old is not None:
+                    os.replace(dest, backup)
                 os.replace(staging, dest)
             except BaseException as error:
-                if backup.exists():
+                if recovery_pending:
                     try:
-                        os.replace(backup, dest)
+                        if _directory_identity(dest) is None and _directory_identity(backup) == old:
+                            os.replace(backup, dest)
+                        if _directory_identity(dest) == old and not os.path.lexists(backup):
+                            receipt.unlink()
+                            recovery_pending = False
                     except BaseException as restore_error:
                         error.add_note(f"Restoration failed: {restore_error}")
                 raise
             promoted = True
+            if recovery_pending:
+                receipt.unlink()
+                recovery_pending = False
             shutil.rmtree(work)
     except BaseException as error:
         if promoted:
             error.add_note(
                 f"New bundle installed at {dest}; leftover workspace {work} may be incomplete"
             )
-        elif backup.exists():
-            error.add_note(f"Recovery copy retained at {backup}")
+        elif recovery_pending:
+            error.add_note(f"Recovery copy retained at {backup}. See {receipt}")
         else:
             try:
                 shutil.rmtree(work)
@@ -106,10 +185,14 @@ def main() -> None:
     source = args.source or (repo_root / "docs" / "_build" / "html")
     dest = args.dest or (repo_root / "var" / "docs_bundle")
 
-    if not source.exists():
-        raise SystemExit(f"Docs build not found at {source}. Run `just docs-html` first.")
-
-    _prepare_destination(source, dest)
+    try:
+        _prepare_destination(source, dest)
+    except FileNotFoundError:
+        if not source.exists():
+            raise SystemExit(
+                f"Docs build not found at {source}. Run `just docs-html` first."
+            ) from None
+        raise
 
     print(f"Offline docs copied to {dest}")
 

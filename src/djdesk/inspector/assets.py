@@ -3,10 +3,17 @@ from __future__ import annotations
 import os
 import stat
 from contextlib import ExitStack
+from functools import lru_cache
 from pathlib import Path
 from typing import BinaryIO
 
 from django.conf import settings
+
+from djdesk.docs_bundle import REQUIRED_HTML_FILES
+
+_REQUIRED_DIRECTORIES = sorted(
+    {parent for relative in REQUIRED_HTML_FILES for parent in Path(relative).parents}
+)
 
 
 def _repo_root() -> Path:
@@ -47,11 +54,38 @@ def docs_bundle_root() -> Path:
     return Path(raw).expanduser().resolve()
 
 
+def _docs_bundle_generation(root: Path) -> tuple[tuple[int, ...], ...]:
+    generation = []
+    for relative in _REQUIRED_DIRECTORIES:
+        info = (root / relative).lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError("Offline bundle must use real directories.")
+        generation.append((info.st_dev, info.st_ino, info.st_ctime_ns))
+    for relative in REQUIRED_HTML_FILES:
+        info = (root / relative).lstat()
+        if not stat.S_ISREG(info.st_mode) or not info.st_size:
+            raise ValueError("Offline bundle members must be nonempty regular files.")
+        generation.append((info.st_dev, info.st_ino, info.st_ctime_ns, info.st_size))
+    return tuple(generation)
+
+
+@lru_cache(maxsize=16)
+def _verify_docs_bundle(root: Path, generation: tuple[tuple[int, ...], ...]) -> None:
+    admitted_root = root.stat()
+    for relative in REQUIRED_HTML_FILES:
+        _, handle = _open_docs_asset(relative, root, admitted_root)
+        with handle:
+            if not os.fstat(handle.fileno()).st_size:
+                raise ValueError("Offline bundle members must be nonempty.")
+    if _docs_bundle_generation(root) != generation:
+        raise ValueError("Offline bundle changed during admission.")
+
+
 def docs_bundle_available() -> bool:
-    """Return True if an offline docs build can be read safely on this platform."""
+    """Return whether all required offline docs members can be read safely."""
     try:
-        _, handle = open_docs_asset(None)
-        handle.close()
+        root = docs_bundle_root()
+        _verify_docs_bundle(root, _docs_bundle_generation(root))
     except (OSError, ValueError):
         return False
     return True
@@ -84,7 +118,12 @@ def resolve_docs_asset(path_fragment: str | None) -> Path:
 def open_docs_asset(path_fragment: str | None) -> tuple[Path, BinaryIO]:
     """Return an owned regular-file stream from the admitted bundle generation."""
     root = docs_bundle_root()
-    admitted_root = root.stat()
+    return _open_docs_asset(path_fragment, root, root.stat())
+
+
+def _open_docs_asset(
+    path_fragment: str | None, root: Path, admitted_root: os.stat_result
+) -> tuple[Path, BinaryIO]:
     path = resolve_docs_asset(path_fragment)
     parts = path.relative_to(root).parts
     if not parts or not hasattr(os, "O_NONBLOCK"):

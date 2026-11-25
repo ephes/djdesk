@@ -350,9 +350,10 @@ class OfflineDocsView(View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, resource: str = "") -> FileResponse:
-        if resource and not assets.docs_bundle_available():
-            raise Http404("Offline docs bundle not found.")
         try:
+            if resource:
+                _, index = assets.open_docs_asset(None)
+                index.close()
             asset_path, handle = assets.open_docs_asset(resource)
         except (OSError, ValueError) as exc:
             raise Http404("Offline docs asset missing.") from exc

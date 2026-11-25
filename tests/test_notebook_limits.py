@@ -72,6 +72,36 @@ class NotebookViewLimitTests(TestCase):
         with mock.patch.object(data_lab, "NOTEBOOK_VIEW_HTML_BYTES", limit - 1):
             self.assert_refused_before_render([{"cell_type": "code", "source": "&"}])
 
+    def test_markdown_line_endings_render_and_use_the_same_html_budget(self):
+        normalized = "First line\ncontinues\n\nSecond & last"
+        sources = (
+            normalized,
+            normalized.replace("\n", "\r\n"),
+            ["First line\r", "\ncontinues\n", "\r\nSecond & last"],
+            normalized.replace("\n", "\r"),
+        )
+        wrapper = "<section class='nb-cell nb-cell--markdown'></section>"
+        limit = len(wrapper) + len(normalized.replace("&", "&amp;")) + 4 * len("<p></p>")
+        for source in sources:
+            with self.subTest(source=source):
+                cells = [{"cell_type": "markdown", "source": source}]
+                original = self.write_cells(cells)
+                with mock.patch.object(data_lab, "NOTEBOOK_VIEW_HTML_BYTES", limit):
+                    self.assertContains(
+                        self.client.get(self.url),
+                        "<p>First line\ncontinues</p><p>Second &amp; last</p>",
+                    )
+                self.assertEqual(self.path.read_bytes(), original)
+                with mock.patch.object(data_lab, "NOTEBOOK_VIEW_HTML_BYTES", limit - 1):
+                    self.assert_refused_before_render(cells)
+
+    def test_crlf_source_still_counts_toward_text_limit_and_code_is_preserved(self):
+        source = "x\r\n\r\ny"
+        with mock.patch.object(data_lab, "NOTEBOOK_VIEW_TEXT_BYTES", len(source) - 1):
+            self.assert_refused_before_render([{"cell_type": "markdown", "source": source}])
+        self.write_cells([{"cell_type": "code", "source": source}])
+        self.assertContains(self.client.get(self.url), f"<pre><code>{source}</code></pre>")
+
     def test_file_byte_limit_precedes_json_decoding(self):
         content = self.write_cells([])
         with mock.patch.object(data_lab, "NOTEBOOK_FILE_BYTES", len(content)):

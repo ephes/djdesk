@@ -36,6 +36,7 @@ DATA_LAB_TEMPLATES = [
         "tags": ["schema", "inspector"],
         "cells": [
             {
+                "id": "schema-overview",
                 "type": "markdown",
                 "source": [
                     "# Workspace schema audit — {{WORKSPACE_NAME}}\n",
@@ -46,6 +47,7 @@ DATA_LAB_TEMPLATES = [
                 ],
             },
             {
+                "id": "read-schema-snapshot",
                 "type": "code",
                 "source": [
                     "import json\n",
@@ -58,6 +60,7 @@ DATA_LAB_TEMPLATES = [
                 ],
             },
             {
+                "id": "safe-command-reference",
                 "type": "markdown",
                 "source": [
                     "## SAFE command reference\n",
@@ -79,6 +82,7 @@ DATA_LAB_TEMPLATES = [
         "tags": ["logs"],
         "cells": [
             {
+                "id": "log-overview",
                 "type": "markdown",
                 "source": [
                     "# Log excerpts — {{WORKSPACE_NAME}}\n",
@@ -89,6 +93,7 @@ DATA_LAB_TEMPLATES = [
                 ],
             },
             {
+                "id": "read-log-excerpt",
                 "type": "code",
                 "source": [
                     "from pathlib import Path\n",
@@ -262,6 +267,7 @@ def build_notebook(workspace: Workspace, template_slug: str) -> dict[str, Any]:
             source = [source]
         source_lines = [_apply_placeholders(line, replacements) for line in source]
         cell = {
+            "id": raw["id"],
             "cell_type": raw["type"],
             "metadata": raw.get("metadata", {}),
             "source": source_lines,
@@ -538,9 +544,8 @@ def _admit_notebook_view(notebook: dict[str, Any]) -> None:
     text_bytes = 0
     html_bytes = 0
 
-    def charge_text(value: Any) -> int:
+    def charge_text(value: Any) -> None:
         nonlocal text_bytes, html_bytes
-        newlines = 0
         for line in [value] if isinstance(value, str) else value:
             size = len(line.encode("utf-8"))
             text_bytes += size
@@ -549,9 +554,7 @@ def _admit_notebook_view(notebook: dict[str, Any]) -> None:
                 line.count(char) * extra
                 for char, extra in (("&", 4), ("<", 3), (">", 3), ('"', 5), ("'", 5))
             )
-            newlines += line.count("\n")
             check_budget()
-        return newlines
 
     def check_budget() -> None:
         if text_bytes > NOTEBOOK_VIEW_TEXT_BYTES or html_bytes > NOTEBOOK_VIEW_HTML_BYTES:
@@ -560,12 +563,20 @@ def _admit_notebook_view(notebook: dict[str, Any]) -> None:
     for cell in notebook.get("cells", []):
         if not isinstance(cell, dict) or not _is_notebook_text(cell.get("source", [])):
             raise InvalidNotebookError("Notebook cell source must be text or a list of text.")
-        newlines = charge_text(cell.get("source", []))
-        if cell.get("cell_type") == "markdown":
+        source = cell.get("source", [])
+        cell_type = cell.get("cell_type")
+        if cell_type == "markdown":
+            raw = "".join(source)
+            normalized = _normalize_markdown_newlines(raw)
+            # CRLF normalization removes one byte from the HTML for each CRLF pair.
+            text_bytes += len(raw) - len(normalized)
+            charge_text(normalized)
             # Conservatively include stripped/empty paragraphs and every newline.
             html_bytes += len("<section class='nb-cell nb-cell--markdown'></section>")
-            html_bytes += (newlines + 1) * len("<p></p>")
-        if cell.get("cell_type") == "code":
+            html_bytes += (normalized.count("\n") + 1) * len("<p></p>")
+        else:
+            charge_text(source)
+        if cell_type == "code":
             html_bytes += len(
                 "<section class='nb-cell nb-cell--code'><pre><code></code></pre></section>"
             )
@@ -595,8 +606,12 @@ def render_notebook_html(notebook: dict[str, Any]) -> str:
     return mark_safe("".join(parts))
 
 
+def _normalize_markdown_newlines(text: str) -> str:
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
 def _render_markdown_cell(cell: dict[str, Any]) -> str:
-    text = "".join(cell.get("source", []))
+    text = _normalize_markdown_newlines("".join(cell.get("source", [])))
     paragraphs = [para.strip() for para in text.split("\n\n") if para.strip()]
     content = "".join(f"<p>{escape(para)}</p>" for para in paragraphs)
     return f"<section class='nb-cell nb-cell--markdown'>{content}</section>"

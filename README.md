@@ -109,13 +109,14 @@ Creation/replacement requires no-follow directory opens and directory fsync; uns
 filesystems and Windows refuse before replacing existing samples. Existing samples can
 still be skipped without force. See [sample publication and recovery](docs/sample_projects.rst).
 
-The Electron docs drawer prefers a local Sphinx bundle when its index can be opened
-as a verified regular file. Run `just docs-bundle` to copy `docs/_build/html` into
-`var/docs_bundle/`. The drawer falls back to https://djdesk.readthedocs.io/ when
-the index is missing or fails admission.
-The publisher checks that the staged index, search index, and required Furo and
-project assets are nonempty files before replacing the existing bundle. If this
-check fails, rebuild with `just docs-html` and retry with the rebuilt HTML directory.
+Run `just docs-bundle` to copy `docs/_build/html` into `var/docs_bundle/`.
+The publisher and the Electron docs drawer require nonempty files for the index,
+search index, Furo stylesheet and script, project stylesheet and Mermaid script.
+The drawer uses https://djdesk.readthedocs.io/ if any required file cannot be
+opened safely. The backend rechecks availability when the bundle or a required
+member changes. Individual requests for missing assets return HTTP 404.
+If the staged bundle is incomplete, rebuild with `just docs-html` and retry with
+the rebuilt HTML directory.
 Links mapped into the bundle use the local drawer. Links that resolve to an
 external destination retain their external navigation behavior in offline mode.
 
@@ -128,14 +129,19 @@ opens (including Windows) use the online docs instead.
 
 Offline docs publishers copy into unique sibling staging directories and wait up to ten
 seconds for a same-destination writer lock. A failed promotion restores the previous bundle.
-If restoration also fails, the original error reports the retained
-`.docs_bundle-publish-*/backup` recovery path beside the destination. With publishers stopped,
-move that backup back to the destination before retrying. Never remove the sibling lock file
-while publishers may be running. Copying happens outside the lock; successful publications
-are serialized, with the last completed publication winning. This is a recoverable swap,
-not a crash-atomic directory exchange: a killed publisher can leave the destination absent
-and its backup in the reported directory pattern. Cleanup failure after promotion reports an
-error with the new bundle installed; a leftover backup may be incomplete.
+Before retiring the current bundle, the publisher records its directory identity,
+the replacement identity and the workspace in a sibling `.docs_bundle.recovery.json`
+receipt. The next invocation reconciles it under the same lock before checking the
+build input. If the public name is absent, it restores the recorded, complete backup.
+If the replacement is already installed, it keeps that generation. Recovered staging
+and backup copies are retained at the reported path. An invalid receipt, incomplete
+backup or unexpected directory identity stops publication for manual inspection.
+If immediate rollback fails, the error reports the retained backup and receipt.
+Stop publishers before inspecting retained paths and keep the lock file in place.
+Copying happens outside the lock. Successful publications are serialized, with the
+last completed publication winning. Readers can briefly see a missing destination
+between renames. Cleanup failure after promotion reports an error with the new
+bundle installed and any leftover workspace potentially incomplete.
 The publisher uses `filelock>=4.2.1`, included in the normal Python dependencies so
 `uv run python scripts/bundle_docs.py` works without selecting a development extra.
 Custom `--source` and `--dest` paths must resolve to separate directory trees:
@@ -402,6 +408,11 @@ Invalid UTF-8, ambiguous JSON (duplicate members at any nesting level), or inval
 viewer cell/output shapes return a bounded HTTP 422 repair page. Consumed sources and
 output text must contain Unicode scalar values; escaped lone surrogates are refused.
 Ordinary Unicode, including emoji, combining characters and newlines, is preserved.
+Built-in exports use notebook format 4.5 with stable, unique cell IDs within
+each notebook. The viewer also opens older notebooks whose cells lack IDs.
+Markdown preview normalizes LF, CRLF and standalone CR to the same line breaks
+for paragraphs and the HTML budget. The text budget still counts the original
+source bytes, and code and output text preserve their line endings.
 Viewer admission allows at most 8 MiB of notebook JSON, 500 cells, 50 outputs per code
 cell and 1 MiB of aggregate UTF-8 source/output text. Before constructing HTML, it also
 checks a conservative 2 MiB fragment budget including escaped text, cell/output wrappers

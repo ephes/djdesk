@@ -126,25 +126,27 @@ for (const phase of ['candidate', 'directory']) {
   });
 }
 
-test('cache publication supports filesystems without directory sync', {
-  skip: process.platform === 'win32',
-}, async (t) => {
-  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
-  t.after(() => fs.rm(directory, { recursive: true, force: true }));
-  const destination = path.join(directory, 'python.tar.gz');
-  const open = fs.open;
-  let directorySyncs = 0;
-  t.mock.method(fs, 'open', async (file, ...args) => {
-    const handle = await open(file, ...args);
-    if (file === directory) {
-      handle.sync = async () => {
-        directorySyncs++;
-        throw Object.assign(new Error('directory sync unsupported'), { code: 'EINVAL' });
-      };
-    }
-    return handle;
+for (const code of ['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'ENOTTY']) {
+  test(`cache publication supports filesystems without directory sync (${code})`, {
+    skip: process.platform === 'win32',
+  }, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const destination = path.join(directory, 'python.tar.gz');
+    const open = fs.open;
+    let directorySyncs = 0;
+    t.mock.method(fs, 'open', async (file, ...args) => {
+      const handle = await open(file, ...args);
+      if (file === directory) {
+        handle.sync = async () => {
+          directorySyncs++;
+          throw Object.assign(new Error('directory sync unsupported'), { code });
+        };
+      }
+      return handle;
+    });
+    await downloadPython('https://fixtures.invalid/python', destination, sha, fixture([{}]));
+    assert.equal(directorySyncs, 1);
+    assert.deepEqual(await fs.readFile(destination), content);
   });
-  await downloadPython('https://fixtures.invalid/python', destination, sha, fixture([{}]));
-  assert.equal(directorySyncs, 1);
-  assert.deepEqual(await fs.readFile(destination), content);
-});
+}

@@ -51,6 +51,9 @@ async function snapshotPythonArchive(source, snapshot, limits) {
     { signal: limits.signal });
 }
 
+// Matches the unsupported-sync set in src/djdesk/inspector/filesystem.py.
+const UNSUPPORTED_DIRECTORY_SYNC = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'ENOTTY']);
+
 async function syncCacheDirectory(destination) {
   // Windows uses file sync only.
   if (process.platform === 'win32') return;
@@ -59,7 +62,7 @@ async function syncCacheDirectory(destination) {
     try {
       await handle.sync();
     } catch (error) {
-      if (!['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(error.code)) throw error;
+      if (!UNSUPPORTED_DIRECTORY_SYNC.has(error.code)) throw error;
     } finally {
       await handle.close();
     }

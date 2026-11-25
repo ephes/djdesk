@@ -261,7 +261,8 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
     except OSError:
         # Fail-closed publication errors (directory swapped for a symlink, no hard-link
         # support, staging write failure) leave no partial export; report them as JSON.
-        logger.exception("Notebook export failed for workspace %s", workspace.slug)
+        with suppress(Exception):
+            logger.exception("Notebook export failed for workspace %s", workspace.slug)
         return JsonResponse(
             {
                 "errors": {
@@ -288,9 +289,10 @@ def data_lab_export_api(request: HttpRequest, slug: str) -> JsonResponse:
     except Exception:
         # Publication and directory sync already committed. Optional refresh/serialization
         # must not turn that outcome into an apparent export failure or encourage replay.
-        logger.exception(
-            "Notebook published; status refresh failed for workspace %s", workspace.slug
-        )
+        with suppress(Exception):
+            logger.exception(
+                "Notebook published; status refresh failed for workspace %s", workspace.slug
+            )
         return JsonResponse({"data_lab": receipt}, status=201)
 
 

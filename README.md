@@ -369,8 +369,8 @@ A parsed 4xx reply (for example an invalid template) is a definite refusal and i
 shown without that guidance.
 A successful HTTP 201 is a receipt for an already published and synced notebook. If the
 optional workspace/inventory refresh or its serialization fails, the response still
-returns `data_lab.selected_notebook` and `data_lab.selected_notebook_url`. The drawer
-opens that file, retains its current listing/templates and lets later status polls
+returns `data_lab.selected_notebook` and `data_lab.selected_notebook_url`, even if
+the server cannot log the refresh failure. The drawer opens that file, retains its current listing/templates and lets later status polls
 refresh them. Do not repeat an export merely because its optional refresh is missing.
 The listing and viewer accept only regular files directly inside the workspace export
 directory. Notebook symlinks (including internal links) and symlinked workspace export
@@ -465,7 +465,8 @@ directory-relative, no-follow opens and hard-link publication (including Windows
 exports with HTTP 400 before writing; existing notebooks remain readable through the
 portable reader. The export filesystem must support hard links; filesystem failures during
 publication (no hard-link support, a directory swapped for a symlink, a failed staging write)
-return an HTTP 500 JSON error and leave no partial export.
+return an HTTP 500 JSON error and leave no partial export, even if the server cannot log
+the failure.
 
 Workspace saves attempt a generated slug up to five times on uniqueness collisions.
 An explicitly supplied slug is preserved and a collision raises `IntegrityError` at

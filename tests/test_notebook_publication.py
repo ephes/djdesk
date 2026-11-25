@@ -127,6 +127,30 @@ class NotebookPublicationTests(TestCase):
                     json.loads((directory / f"{slug}.ipynb").read_text())["nbformat"], 4
                 )
 
+    def test_committed_export_receipt_survives_failure_in_log_handler(self):
+        logger = logging.getLogger("djdesk.inspector.views")
+        handler = logging.Handler()
+        self.addCleanup(handler.close)
+        with (
+            mock.patch(
+                "djdesk.inspector.views.workspace_status_payload",
+                side_effect=RuntimeError("Synthetic inventory error"),
+            ),
+            mock.patch.object(logger, "handlers", [handler]),
+            mock.patch.object(handler, "emit", side_effect=OSError("log sink failed")) as emit,
+        ):
+            response = self.client.post(
+                reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                {"template": "schema-audit"},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        receipt = response.json()["data_lab"]
+        self.assertEqual(receipt["selected_notebook"], "schema-audit")
+        directory = data_lab.workspace_data_lab_dir(self.workspace)
+        self.assertEqual(list(directory.glob("*.ipynb")), [directory / "schema-audit.ipynb"])
+        emit.assert_called_once()
+
     def test_concurrent_exports_preserve_every_generation(self):
         with ThreadPoolExecutor(max_workers=6) as pool:
             paths = list(
@@ -491,6 +515,24 @@ data_lab.export_notebook(Workspace(name="Crash", slug="publication"), "schema-au
         self.assertIn("could not be published", response.json()["errors"]["template"][0])
         self.assertEqual(list(self.root.rglob("*.ipynb")), [])
         self.assertEqual(list(self.root.rglob(".notebook-*.tmp")), [])
+
+    def test_publication_os_error_returns_json_error_when_log_handler_fails(self):
+        logger = logging.getLogger("djdesk.inspector.views")
+        handler = logging.Handler()
+        self.addCleanup(handler.close)
+        with (
+            mock.patch.object(os, "fsync", side_effect=OSError("staging write failed")),
+            mock.patch.object(logger, "handlers", [handler]),
+            mock.patch.object(handler, "emit", side_effect=OSError("log sink failed")) as emit,
+        ):
+            response = self.client.post(
+                reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                {"template": "schema-audit"},
+            )
+        self.assertEqual(response.status_code, 500)
+        self.assertIn("could not be published", response.json()["errors"]["template"][0])
+        self.assertEqual(list(self.root.rglob("*.ipynb")), [])
+        emit.assert_called_once()
 
     def test_replaced_staging_inode_is_neither_published_nor_deleted(self):
         def replace():

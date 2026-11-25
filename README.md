@@ -408,6 +408,11 @@ Invalid UTF-8, ambiguous JSON (duplicate members at any nesting level), or inval
 viewer cell/output shapes return a bounded HTTP 422 repair page. Consumed sources and
 output text must contain Unicode scalar values; escaped lone surrogates are refused.
 Ordinary Unicode, including emoji, combining characters and newlines, is preserved.
+Built-in exports use notebook format 4.5 with stable, unique cell IDs within
+each notebook. The viewer also opens older notebooks whose cells lack IDs.
+Markdown preview normalizes LF, CRLF and standalone CR to the same line breaks
+for paragraphs and the HTML budget. The text budget still counts the original
+source bytes, and code and output text preserve their line endings.
 Viewer admission allows at most 8 MiB of notebook JSON, 500 cells, 50 outputs per code
 cell and 1 MiB of aggregate UTF-8 source/output text. Before constructing HTML, it also
 checks a conservative 2 MiB fragment budget including escaped text, cell/output wrappers

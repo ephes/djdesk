@@ -98,6 +98,20 @@ class NotebookPublicationTests(TestCase):
         self.assertEqual([p.name for p in path.parent.iterdir()], [path.name])
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
 
+    def test_export_templates_have_unique_stable_nbformat_cell_ids(self):
+        for template in ("schema-audit", "log-study"):
+            with self.subTest(template=template):
+                first = data_lab.export_notebook(self.workspace, template)
+                second = data_lab.export_notebook(self.workspace, template)
+                notebook = json.loads(first.read_bytes())
+                self.assertEqual((notebook["nbformat"], notebook["nbformat_minor"]), (4, 5))
+                ids = [cell["id"] for cell in notebook["cells"]]
+                self.assertTrue(ids)
+                self.assertEqual(len(ids), len(set(ids)))
+                for cell_id in ids:
+                    self.assertRegex(cell_id, r"\A[A-Za-z0-9_-]{1,64}\Z")
+                self.assertEqual(first.read_bytes(), second.read_bytes())
+
     def test_committed_export_receipt_survives_optional_refresh_failure(self):
         for failure in ("inventory", "serialization"):
             with self.subTest(failure=failure):

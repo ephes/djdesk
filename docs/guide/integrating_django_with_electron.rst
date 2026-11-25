@@ -218,6 +218,12 @@ DJDesk treats the Data Lab as an export-first experience:
 3. The export endpoint writes a complete ``.ipynb`` file into ``INSPECTOR_DATA_LAB_ROOT/<slug>`` and surfaces it in the panel. Repeated exports choose ``-2``, ``-3`` and subsequent free suffixes, preserving edits.
 4. Selecting an export opens a static HTML preview rendered by ``inspector/data_lab.py``. Live kernels remain optional—``--with-data-lab`` installs ``jupyter_server`` and enforces the same SAFE command allowlist.
 
+Built-in exports include stable, notebook-local cell IDs for notebook format 4.5.
+The preview still accepts earlier notebooks without IDs. Markdown paragraphs
+and the HTML budget follow the same line breaks for LF, CRLF and standalone CR.
+The text budget counts the original source bytes. Code and output text retain
+their line endings.
+
 Filename stems must contain only ASCII letters, digits, underscores and hyphens, with
 at least one character. Other names remain untouched but are omitted from listings;
 rename them to a supported stem to make them visible in DJDesk.

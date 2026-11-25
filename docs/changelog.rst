@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Export both Data Lab templates with stable, unique notebook format 4.5 cell IDs.
+- Render Data Lab Markdown paragraphs consistently across line endings and use
+  the same normalization for HTML size checks.
 - Return the saved task ID and last known state when reading the run after
   dispatch fails. Confirmed immediate dispatch failures still return HTTP 400.
 - Print the task recovery success message only after the selected database commits.

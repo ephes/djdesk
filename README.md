@@ -289,7 +289,10 @@ selected requested or running IDs, rejects missing/terminal runs, preserves logs
 marks them failed with interruption metadata. A `REQUESTED` run whose message was lost
 (for example a crash between commit and enqueue) is marked failed with `never_started`
 metadata; a late delivery can no longer claim it. A run claimed or settled while the
-command runs makes the whole call fail without changes. It trusts the operator's shutdown confirmation;
+command runs makes the whole call fail without changes. The success message is printed after
+the selected database commits. For a `call_command` inside an outer transaction on that alias,
+the message waits for the outer commit. A rollback discards the message.
+The command trusts the operator's shutdown confirmation;
 it cannot detect live workers. Restart workers afterward; duplicate deliveries never
 replay these commands. Any desired retry requires a new, explicitly approved request.
 Execution history in the Django admin is read-only, including for superusers: runs

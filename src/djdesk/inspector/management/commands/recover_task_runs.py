@@ -1,3 +1,5 @@
+from functools import partial
+
 from django.core.management.base import BaseCommand, CommandError
 from django.db import DEFAULT_DB_ALIAS, connections, transaction
 from django.utils import timezone
@@ -63,4 +65,5 @@ class Command(BaseCommand):
                 )
                 if not changed:
                     raise CommandError("A selected run changed during recovery; nothing changed.")
-        self.stdout.write(f"Recovered {len(runs)} abandoned run(s). No commands replayed.")
+            receipt = f"Recovered {len(runs)} abandoned run(s). No commands replayed."
+            transaction.on_commit(partial(self.stdout.write, receipt), using=database)

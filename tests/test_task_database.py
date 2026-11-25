@@ -139,3 +139,34 @@ class TaskDatabaseTests(TestCase):
         )
         self.assertEqual(WorkspaceTaskRun.objects.using(selected).get(pk=1).status, "failed")
         self.assertEqual(before, list(WorkspaceTaskRun.objects.using(primary).values()))
+
+    def test_recovery_receipt_waits_for_selected_database_commit(self):
+        selected = self.aliases[1]
+        runs = WorkspaceTaskRun.objects.using(selected)
+
+        for rollback in (True, False):
+            with self.subTest(rollback=rollback):
+                stdout = StringIO()
+                with transaction.atomic(using=selected):
+                    call_command(
+                        "recover_task_runs",
+                        database=selected,
+                        run_id=[1],
+                        confirm_workers_stopped=True,
+                        reason="Synthetic stopped worker",
+                        stdout=stdout,
+                    )
+                    self.assertEqual(runs.get(pk=1).status, "failed")
+                    before_commit = stdout.getvalue()
+                    if rollback:
+                        transaction.set_rollback(True, using=selected)
+
+                self.assertEqual(before_commit, "")
+                if rollback:
+                    self.assertEqual(runs.get(pk=1).status, "requested")
+                    self.assertEqual(stdout.getvalue(), "")
+                else:
+                    self.assertEqual(runs.get(pk=1).status, "failed")
+                    self.assertEqual(
+                        stdout.getvalue(), "Recovered 1 abandoned run(s). No commands replayed.\n"
+                    )

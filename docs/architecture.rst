@@ -116,7 +116,9 @@ Renderer data flow
   against their database (``--database alias``). Recovery accepts requested or
   running runs, preserves the log and retires the worker claim; a requested run
   whose message was lost is marked failed as never started, so a late delivery
-  cannot claim it. Workers apply terminal fields to their run instance only
+  cannot claim it. Recovery prints its success message after the selected database
+  commits, including when the caller owns the outer transaction. A rollback
+  discards the message. Workers apply terminal fields to their run instance only
   after the ownership-checked database update succeeds. Retrying requires a new
   confirmed request.
 

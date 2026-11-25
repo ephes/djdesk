@@ -479,9 +479,10 @@ workspace directory is fsynced after the final link, then the opened export root
 fsynced to persist the workspace directory entry. Every export syncs the root so a
 concurrently created workspace directory is covered even if its creator is still running.
 Before it publishes, an export that finds the export root or its ancestors missing
-creates them and fsyncs the parent of each missing directory. Other exports in the same
-server process wait until that sync is done. A failed sync fails the export before
-anything is published and is retried by the next export.
+creates them and fsyncs the parent of each missing directory. Root provisioning is
+serialized within the server process. A failed sync stops publication and stays
+pending for the next export whose configured root needs that directory entry,
+including an entry for a shared ancestor. Exports under independent roots can proceed.
 Where the platform offers `F_FULLFSYNC` (macOS), these syncs also flush the drive cache.
 Filesystems without it fall back to plain fsync.
 If a directory sync after publication fails, HTTP 500 names the complete, published notebook and
@@ -491,9 +492,13 @@ A retry creates another filename. A power loss before a successful directory syn
 lose the new name. Creation,
 publication and cleanup use the same opened workspace directory, even if its pathname
 is replaced. A renamed directory may therefore contain the export while it is unavailable
-at its former path. Ordinary failures clean up only this attempt's staging inode.
-A killed process may leave a hidden `.notebook-*.tmp` file; it is never listed or reused.
-With exporters stopped, inspect and remove those leftovers manually. Platforms without
+at its former path. Cleanup only removes this attempt's staging inode. If staging
+removal or descriptor close fails after both directory syncs, the API still returns
+HTTP 201 with the published notebook. The server logs a warning with the affected
+path. If a write or sync already failed, its outcome is preserved.
+A cleanup failure or a killed process may leave a hidden `.notebook-*.tmp` file.
+The listing ignores these files. With exporters stopped, inspect and remove those
+leftovers manually. Platforms without
 directory-relative, no-follow opens and hard-link publication (including Windows) refuse
 exports with HTTP 400 before writing; existing notebooks remain readable through the
 portable reader. The export filesystem must support hard links; filesystem failures during

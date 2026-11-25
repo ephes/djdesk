@@ -7,6 +7,10 @@ Unreleased
 Fixed
 ~~~~~
 
+- Preserve the Data Lab notebook receipt after staging cleanup or descriptor close
+  fails. Log the affected path and keep any earlier write or sync failure.
+- Retry pending Data Lab directory syncs only for the active export root and its
+  ancestors, so unrelated export roots can proceed.
 - Export both Data Lab templates with stable, unique notebook format 4.5 cell IDs.
 - Render Data Lab Markdown paragraphs consistently across line endings and use
   the same normalization for HTML size checks.

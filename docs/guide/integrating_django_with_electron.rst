@@ -160,6 +160,10 @@ The inspector's Docs drawer now prefers a local Sphinx export so tutorial captur
     just docs-bundle                   # builds docs/_build/html + copies into var/docs_bundle
     ls var/docs_bundle/index.html      # entry point served by OfflineDocsView
 
+Before replacing the existing bundle, the publisher checks that the staged index,
+search index, and required Furo and project assets are nonempty files. If the check
+fails, rebuild with ``just docs-html`` and retry with the rebuilt HTML directory.
+
 ``DashboardView`` opens ``var/docs_bundle/index.html`` using the same regular-file
 checks as the offline docs view before choosing ``/docs/offline/`` for the drawer.
 The drawer uses ``INSPECTOR_DOCS_BASE_URL`` when the index is missing or invalid.

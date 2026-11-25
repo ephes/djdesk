@@ -15,14 +15,30 @@ from filelock import FileLock, Timeout
 from scripts import bundle_docs
 
 
+def _write_sphinx_build(root, content):
+    for name in (
+        "index.html",
+        "searchindex.js",
+        "_static/styles/furo.css",
+        "_static/scripts/furo.js",
+        "_static/custom.css",
+        "_static/mermaid-init.js",
+    ):
+        file = root / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(content, encoding="utf-8")
+
+
 def _publish_worker(source, dest, messages, release):
     copytree = shutil.copytree
+    source_path = Path(source).resolve()
 
-    def paused_copy(source, staging, *args, **kwargs):
-        result = copytree(source, staging, *args, **kwargs)
-        messages.put(("copied", str(staging)))
-        if not release.wait(15):
-            raise TimeoutError("copy barrier timed out")
+    def paused_copy(tree, staging, *args, **kwargs):
+        result = copytree(tree, staging, *args, **kwargs)
+        if tree == source_path:
+            messages.put(("copied", str(staging)))
+            if not release.wait(15):
+                raise TimeoutError("copy barrier timed out")
         return result
 
     try:
@@ -42,14 +58,39 @@ class BundleDocsTests(TestCase):
         self.dest = self.root / "bundle"
         self.source.mkdir()
         self.dest.mkdir()
-        (self.source / "index.html").write_text("new", encoding="utf-8")
-        (self.dest / "index.html").write_text("old", encoding="utf-8")
+        _write_sphinx_build(self.source, "new")
+        _write_sphinx_build(self.dest, "old")
 
     def assert_old(self):
         self.assertEqual((self.dest / "index.html").read_text(encoding="utf-8"), "old")
 
     def assert_no_staging(self):
         self.assertEqual(list(self.root.glob(".bundle-publish-*")), [])
+
+    def test_partial_build_preserves_previous_bundle_until_rebuilt(self):
+        manifest = self.dest / "bundle.json"
+        manifest.write_text('{"generation": "old"}', encoding="utf-8")
+        index = self.source / "index.html"
+        stylesheet = Path("_static/styles/furo.css")
+        for file, content in ((index, None), (self.source / stylesheet, "")):
+            with self.subTest(file=file.name):
+                if content is None:
+                    file.unlink()
+                else:
+                    file.write_text(content, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, r"Incomplete Sphinx build.*just docs-html"):
+                    self._run_main()
+                self.assert_old()
+                self.assertEqual((self.dest / stylesheet).read_text(), "old")
+                self.assertEqual(json.loads(manifest.read_text()), {"generation": "old"})
+                self.assert_no_staging()
+                file.write_text("new", encoding="utf-8")
+
+        self._run_main()
+        self.assertEqual((self.dest / "index.html").read_text(), "new")
+        self.assertEqual((self.dest / stylesheet).read_text(), "new")
+        self.assertEqual(json.loads(manifest.read_text())["source"], str(self.source.resolve()))
+        self.assert_no_staging()
 
     def test_copy_failure_preserves_live_and_unowned_paths(self):
         legacy = [self.root / ".bundle.tmp", self.root / ".bundle.old"]
@@ -147,7 +188,7 @@ class BundleDocsTests(TestCase):
     def test_two_spawned_publishers_own_distinct_generations(self):
         other = self.root / "other-html"
         other.mkdir()
-        (other / "index.html").write_text("other", encoding="utf-8")
+        _write_sphinx_build(other, "other")
         for source in (self.source, other):
             (source / "asset.txt").write_text((source / "index.html").read_text())
         ctx = multiprocessing.get_context("spawn")

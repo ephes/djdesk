@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Warn with the staging path if cleanup fails after successful Python cache publication
+  and continue the build with the verified archive.
 - Reject incomplete Python archive reads during cache hashing and extraction snapshot creation.
 - Sync verified Python downloads before cache replacement and sync the cache directory
   where supported. Report uncertain durability if directory sync fails after replacement.

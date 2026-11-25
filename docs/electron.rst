@@ -98,6 +98,8 @@ Special, oversized or changing entries are refused without changing their target
 Repair them with builders stopped. Checksums are verified before allocating
 extraction scratch; extraction and copy failures retire only owned scratch.
 Cleanup failures retain the original error and report the scratch path.
+After successful cache publication, a staging cleanup failure warns with the staging
+path and the build continues using the verified archive.
 
 Bundle layout
 -------------

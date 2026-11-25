@@ -407,7 +407,10 @@ class TaskLifecycleTests(TransactionTestCase):
         self.assertEqual(detail.json()["status"], "succeeded")
 
     def test_failed_run_refresh_keeps_outer_transaction_usable(self):
+        savepoints = []
+
         def failing_read(**kwargs):
+            savepoints.append(list(connections["default"].savepoint_ids))
             with connections["default"].cursor() as cursor:
                 cursor.execute(f"SELECT missing_column FROM {WorkspaceTaskRun._meta.db_table}")
 
@@ -420,6 +423,10 @@ class TaskLifecycleTests(TransactionTestCase):
             with transaction.atomic():
                 run = self.form().save()
                 self.assertEqual(run.status, WorkspaceTaskRun.Status.REQUESTED)
+                # SQLite stays usable without a savepoint, so assert that the read had one.
+                self.assertEqual(len(savepoints), 1)
+                self.assertEqual(len(savepoints[0]), 1)
+                self.assertIsNotNone(savepoints[0][0])
                 runs = WorkspaceTaskRun.objects.filter(workspace=self.workspace)
                 self.assertEqual(runs.count(), 1)
                 task.enqueue.assert_not_called()

@@ -141,6 +141,8 @@ Response payload mirrors ``GET /api/workspaces/<slug>/status/`` and includes an 
 ``task_run`` object with the ID/status/log of the newly created run.
 If the optional status refresh or its serialization fails, HTTP 201 contains only
 ``task_run``. The receipt is returned even if the server cannot log the refresh failure.
+The Inspector uses the receipt to confirm submission and request a fresh status
+poll. It ignores the optional snapshot in the POST response.
 
 ``GET /api/task-runs/<id>/``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

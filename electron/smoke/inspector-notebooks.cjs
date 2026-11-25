@@ -128,7 +128,7 @@ async function main() {
     // The rendered dashboard carries the server-derived ceiling (default settings).
     const ceiling = await page.evaluate(() => ui.responseBytes);
     assert.equal(ceiling, 8 * 1024 * 1024 + 5 * 6 * 1024 * 1024, 'dashboard response ceiling');
-    await page.evaluate((limit) => {
+    await page.evaluate(async (limit) => {
       window.cancelledResponses = 0;
       window.oversizedJSONParses = 0;
       window.fetch = async () => {
@@ -145,8 +145,8 @@ async function main() {
       ui.updateLogs([{ level: 'info', message: 'Previous valid status' }]);
       ui.taskDrawer.classList.add('is-visible');
       ui.renderTaskDrawer({ label: 'Previous valid task', status: 'succeeded', log: 'Previous valid log' });
-      ui.startPolling();
-      clearInterval(ui.polling);
+      await ui.startPolling();
+      ui.stopPolling();
       ui.loadTaskDetails(123);
     }, ceiling);
     await page.waitForFunction(() => cancelledResponses === 2);

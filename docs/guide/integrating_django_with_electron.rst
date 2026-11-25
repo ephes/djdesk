@@ -186,7 +186,9 @@ Flow summary
 1. ``TaskPreset`` rows define the allowlisted commands (label, key, docs URL, icon, confirmation requirement).
 2. The assistant drawer posts to ``POST /api/task-runs/`` with ``workspace``, ``preset``, optional note, and ``confirm_safe``.
 3. ``execute_workspace_task`` (decorated with ``@django_tasks.task``) simulates work, streams log lines, and updates ``WorkspaceTaskRun`` rows.
-4. ``app.js`` merges the response into local UI state, fires desktop notifications when runs finish, and refreshes the status payload without waiting for the next poll.
+4. ``app.js`` displays the saved task ID and log link from the submission receipt,
+   then requests fresh workspace status through the poller. Poll results update
+   the dashboard and fire desktop notifications when runs finish.
 
 Apply this to your project
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

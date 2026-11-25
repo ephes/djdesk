@@ -243,7 +243,12 @@ uses a read-only repeatable-read transaction. An existing PostgreSQL outer trans
 must already use repeatable-read or serializable isolation; other database backends
 are unsupported for these snapshots. Notebook inventory and documentation links are
 independent of the scan snapshot. Status polling keeps the same four/five windows
-and includes those task logs. Renderer status, severity and log-level classes use
+and includes those task logs. The Inspector checks every six seconds and skips
+ticks while a status request is pending. Each request has 30 seconds for headers
+and the full body. Leaving the page cancels its poll and timer. Returning via the
+browser's back/forward cache starts a fresh poll. Late results from retired polls
+cannot change the dashboard or its connection indicator.
+Renderer status, severity and log-level classes use
 supported values with neutral defaults; labels remain escaped text.
 
 Dynamic inspector pages and JSON (including error responses) carry Django's private,
@@ -260,8 +265,11 @@ HTTP 201 includes a `task_run` receipt with the saved ID and current state. If t
 optional workspace snapshot or its serialization fails, the response contains
 only the receipt, even if reporting the refresh failure to the server log also
 fails. The task form confirms the saved ID and offers **View task log**
-for that run even when the snapshot is missing. The dashboard keeps its existing
-panels until polling refreshes them. Each new submission clears the previous
+for that run even when the snapshot is missing. The Inspector refreshes the
+dashboard through the workspace poller after accepting the receipt. If a poll is
+already running, the refresh starts when it settles. The POST snapshot is
+ignored so a delayed receipt cannot roll back displayed task progress.
+Each new submission clears the previous
 receipt, and the submit button stays disabled until the reply has been handled.
 A submission with no complete reply within 30 seconds is aborted, re-enables the
 form and asks you to check task history before retrying.

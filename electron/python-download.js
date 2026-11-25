@@ -51,6 +51,24 @@ async function snapshotPythonArchive(source, snapshot, limits) {
     { signal: limits.signal });
 }
 
+async function syncCacheDirectory(destination) {
+  // Windows uses file sync only.
+  if (process.platform === 'win32') return;
+  try {
+    const handle = await fsp.open(path.dirname(destination), 'r');
+    try {
+      await handle.sync();
+    } catch (error) {
+      if (!['EINVAL', 'ENOTSUP', 'ENOSYS'].includes(error.code)) throw error;
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    throw new Error(`Verified Python cache is visible at ${destination}, but its durability is uncertain`,
+      { cause: error });
+  }
+}
+
 // Only a fully downloaded, verified candidate may replace the cache entry.
 async function downloadPython(url, destination, expected, {
   get = https.get, maxBytes = 256 * 1024 * 1024, timeoutMs = 120000, maxRedirects = 5,
@@ -58,16 +76,22 @@ async function downloadPython(url, destination, expected, {
   if (!/^[a-f0-9]{64}$/.test(expected || '')) throw new Error('Missing registered SHA256');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('Python download deadline exceeded')), timeoutMs);
-  let directory;
+  let directory, failure;
   try {
+    let cached = false;
     try {
-      if (await checksum(destination, expected, { maxBytes, signal: controller.signal })) return;
+      cached = await checksum(destination, expected, { maxBytes, signal: controller.signal });
     } catch (error) {
       if (error.code !== 'ENOENT') throw error;
     }
     controller.signal.throwIfAborted();
-    await fsp.mkdir(path.dirname(destination), { recursive: true });
-    directory = await fsp.mkdtemp(path.join(path.dirname(destination), '.python-download-'));
+    if (cached) {
+      await syncCacheDirectory(destination);
+      return;
+    }
+    const parent = path.dirname(destination);
+    await fsp.mkdir(parent, { recursive: true });
+    directory = await fsp.mkdtemp(path.join(parent, '.python-download-'));
     const candidate = path.join(directory, 'archive');
     for (let redirects = 0; ; redirects++) {
       if (new URL(url).protocol !== 'https:') throw new Error('Python download requires HTTPS');
@@ -98,12 +122,30 @@ async function downloadPython(url, destination, expected, {
       await pipeline(response, budget, fs.createWriteStream(candidate, { flags: 'wx' }),
         { signal: controller.signal });
       if (hash.digest('hex') !== expected) throw new Error('Python download checksum mismatch');
+      const handle = await fsp.open(candidate, 'r+');
+      try {
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      controller.signal.throwIfAborted();
       await fsp.rename(candidate, destination);
+      await syncCacheDirectory(destination);
       return;
     }
+  } catch (error) {
+    failure = error;
+    throw error;
   } finally {
     clearTimeout(timer);
-    if (directory) await fsp.rm(directory, { recursive: true, force: true });
+    if (directory) {
+      try {
+        await fsp.rm(directory, { recursive: true, force: true });
+      } catch (error) {
+        if (!failure) throw error;
+        failure.message += `; Python download cleanup failed (${directory}): ${error.message}`;
+      }
+    }
   }
 }
 

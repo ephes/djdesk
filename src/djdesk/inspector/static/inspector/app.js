@@ -240,11 +240,11 @@ class InspectorUI {
   }
 
   async submitTaskForm(form, receipt) {
+    const pollOwner = this.workspacePoll;
     receipt?.replaceChildren();
     const formData = new FormData(form);
     const controller = new AbortController();
     let timeout;
-    let payload;
     let taskId;
     try {
       const expired = new Promise((_, reject) => {
@@ -270,8 +270,7 @@ class InspectorUI {
         return [reply, await readInspectorJSON(reply, this.responseBytes, { allowHttpError: true })];
       })();
       // Race the whole read so a stalled transport still releases the form.
-      const [response, data] = await Promise.race([request, expired]);
-      payload = data;
+      const [response, payload] = await Promise.race([request, expired]);
       if (!response.ok) {
         if (response.status >= 400 && response.status < 500 && payload?.errors) {
           const message = this.formatErrors(payload.errors);
@@ -299,9 +298,7 @@ class InspectorUI {
       receipt.replaceChildren(`Task #${taskId} submitted. `, button);
     }
     form.reset();
-    if (typeof payload.workspace === 'string') {
-      this.updateFromPayload(payload);
-    }
+    void this.pollWorkspace(pollOwner, { refresh: true });
   }
 
   bindTaskHistory() {
@@ -484,7 +481,7 @@ class InspectorUI {
   startPolling() {
     this.stopPolling();
     if (!this.statusUrl) return;
-    const owner = { url: this.statusUrl, controller: null };
+    const owner = { url: this.statusUrl, controller: null, refreshPending: false };
     this.workspacePoll = owner;
     owner.interval = window.setInterval(() => this.pollWorkspace(owner), WORKSPACE_POLL_INTERVAL_MS);
     return this.pollWorkspace(owner);
@@ -498,8 +495,13 @@ class InspectorUI {
     owner.controller?.abort();
   }
 
-  async pollWorkspace(owner) {
-    if (owner !== this.workspacePoll || owner.controller) return;
+  async pollWorkspace(owner, { refresh = false } = {}) {
+    if (!owner || owner !== this.workspacePoll) return;
+    if (owner.controller) {
+      if (refresh) owner.refreshPending = true;
+      return;
+    }
+    owner.refreshPending = false;
     const controller = new AbortController();
     const { signal } = controller;
     owner.controller = controller;
@@ -527,6 +529,7 @@ class InspectorUI {
     } finally {
       window.clearTimeout(timeout);
       owner.controller = null;
+      if (owner.refreshPending) void this.pollWorkspace(owner);
     }
   }
 

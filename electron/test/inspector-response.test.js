@@ -14,7 +14,7 @@ function load(context = {}) {
 }
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 
-function statusPolling(fetch) {
+function statusPolling(fetch, context = {}) {
   const intervals = new Map();
   const deadlines = new Map();
   let timerId = 0;
@@ -34,6 +34,7 @@ function statusPolling(fetch) {
       },
       clearTimeout(id) { deadlines.delete(id); },
     },
+    ...context,
   });
   const ui = Object.create(InspectorUI.prototype);
   ui.statusUrl = '/alpha/status';
@@ -203,6 +204,59 @@ function taskForm(nextResponse, context = {}) {
   };
 }
 
+test('a delayed task receipt keeps newer task history and queues a status refresh', async () => {
+  const requests = [];
+  const drawer = [];
+  const button = { addEventListener(name, callback) { this.click = callback; } };
+  const receipt = { replaceChildren(...children) { this.children = children; } };
+  let resets = 0;
+  const form = { reset() { resets++; } };
+  const { ui, intervals } = statusPolling((url, options) =>
+    new Promise((resolve) => requests.push({ url, method: options.method, resolve })), {
+    FormData: class {},
+    document: { addEventListener() {}, createElement: () => button },
+  });
+  ui.taskEndpoint = '/tasks';
+  ui.taskHistory = {};
+  ui.previousTaskStatuses = new Map();
+  ui.escape = String;
+  ui.updateFromPayload = (payload) => ui.updateTasks(payload.tasks);
+  ui.openTaskDrawer = (id) => drawer.push(id);
+  ui.getCsrfToken = () => '';
+
+  const snapshot = (status, progress) => ({
+    workspace: 'alpha', tasks: [{ id: 42, label: 'Synthetic task', status, progress }],
+  });
+  const running = JSON.stringify(snapshot('running', 40));
+  ui.startPolling();
+  const submitted = ui.submitTaskForm(form, receipt);
+  requests[0].resolve(new Response(running));
+  await settled();
+  assert.match(ui.taskHistory.innerHTML, /task-history-item--running/);
+  for (const tick of intervals.values()) tick();
+
+  requests[1].resolve(new Response(JSON.stringify({
+    ...snapshot('requested', 0), task_run: { id: 42, status: 'requested' },
+  }), { status: 201 }));
+  await submitted;
+  assert.match(ui.taskHistory.innerHTML, /task-history-item--running/);
+  assert.equal(resets, 1);
+  assert.equal(receipt.children[0], 'Task #42 submitted. ');
+  assert.equal(receipt.children[1].textContent, 'View task log');
+  receipt.children[1].click();
+  assert.deepEqual(drawer, [42]);
+  assert.equal(requests.length, 3, 'refresh waits for the active poll');
+
+  requests[2].resolve(new Response(running));
+  await settled();
+  assert.deepEqual(requests.map(({ url }) => url),
+    ['/alpha/status', '/tasks', '/alpha/status', '/alpha/status']);
+  assert.deepEqual(requests.filter(({ method }) => method === 'POST').map(({ url }) => url), ['/tasks']);
+  requests[3].resolve(new Response(JSON.stringify(snapshot('running', 75))));
+  await settled();
+  assert.match(ui.taskHistory.innerHTML, /width:75%/);
+});
+
 test('task submissions cancel oversized success and error replies before parsing', async () => {
   for (const status of [201, 400]) {
     const fixture = response([new Uint8Array(16), new Uint8Array(17)], '1', status);
@@ -243,8 +297,8 @@ test('task submissions distinguish unreadable acknowledgments from structured re
   assert.deepEqual(form.snapshots, []);
   assert.equal(form.resets(), 0);
 
-  next = new Response('{"workspace":"synthetic","task_run":{"id":42}}', { status: 201 });
+  next = new Response('{"task_run":{"id":42}}', { status: 201 });
   await form.submit();
-  assert.equal(form.snapshots[0].workspace, 'synthetic');
+  assert.deepEqual(form.snapshots, []);
   assert.equal(form.resets(), 1);
 });

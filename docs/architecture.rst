@@ -63,7 +63,7 @@ Renderer data flow
 ------------------
 
 * The dashboard is server-rendered; ``DashboardView`` populates ``workspace``, ``doc_links``, ``task_presets``, and other context so the first paint always has meaningful data.
-* ``inspector/static/inspector/app.js`` polls ``/api/workspaces/<slug>/status/`` to keep the scan queue, insights, schema graph, and log stream updated. Submitting the assistant form returns the same payload so the UI can refresh immediately.
+* ``inspector/static/inspector/app.js`` polls ``/api/workspaces/<slug>/status/`` to keep the scan queue, insights, schema graph, and log stream updated.
 
   Six-second ticks share one in-flight status request per workspace generation.
   The request and body read share a 30-second deadline. Leaving the dashboard
@@ -83,8 +83,10 @@ Renderer data flow
   split across chunks. POST error replies use the same ceiling. The task form preserves
   its inputs and displays structured 4xx refusals. When the acknowledgement is unreadable,
   the form asks the operator to check task history before retrying.
-  A valid receipt displays the saved task ID and offers to open its log. When the
-  snapshot is missing, existing dashboard panels stay visible until the next poll.
+  A valid receipt displays the saved task ID and offers to open its log. The
+  current workspace poller refreshes status after the receipt, waiting for any
+  in-flight poll to settle first. The renderer ignores the optional POST snapshot
+  so it cannot overwrite newer status data.
   Each submission clears the previous receipt, and the submit button stays disabled
   while the POST is pending so a double click cannot queue a second run. A 30-second
   deadline covers the request and the body read; on expiry the request is aborted, the

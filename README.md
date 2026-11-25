@@ -265,8 +265,11 @@ HTTP 201 includes a `task_run` receipt with the saved ID and current state. If t
 optional workspace snapshot or its serialization fails, the response contains
 only the receipt, even if reporting the refresh failure to the server log also
 fails. The task form confirms the saved ID and offers **View task log**
-for that run even when the snapshot is missing. The dashboard keeps its existing
-panels until polling refreshes them. Each new submission clears the previous
+for that run even when the snapshot is missing. The Inspector refreshes the
+dashboard through the workspace poller after accepting the receipt. If a poll is
+already running, the refresh starts when it settles. The POST snapshot is
+ignored so a delayed receipt cannot roll back displayed task progress.
+Each new submission clears the previous
 receipt, and the submit button stays disabled until the reply has been handled.
 A submission with no complete reply within 30 seconds is aborted, re-enables the
 form and asks you to check task history before retrying.

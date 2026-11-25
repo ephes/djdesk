@@ -9,6 +9,8 @@ Fixed
 
 - Coalesce Inspector status polls, abort after 30 seconds including body reads,
   and retire old requests and timers when leaving or switching workspaces.
+- Display task submission receipts independently and refresh through the
+  workspace poller so a delayed submission cannot rewind the dashboard.
 - Keep the existing offline docs bundle when the staged Sphinx entry point, search
   index, or essential static assets are missing or empty.
 - Verify the synced Python download on disk before replacing the previous archive

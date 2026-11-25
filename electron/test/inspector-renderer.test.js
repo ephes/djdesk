@@ -75,15 +75,16 @@ test('a task receipt acknowledges one submission and opens its log on demand', a
         },
       },
       FormData: class {}, TextDecoder, AbortController,
-      window: { setTimeout() { return 1; }, clearTimeout() {} },
+      window: { setInterval() { return 1; }, setTimeout() { return 2; }, clearTimeout() {} },
       async fetch(url, options) {
         requests.push([url, options.method ?? 'GET']);
-        return options.method === 'POST'
-          ? new Response(JSON.stringify(payload), { status: 201 })
-          : new Response(JSON.stringify({ status: 'succeeded', log: 'Synthetic task log' }));
+        if (options.method === 'POST') return new Response(JSON.stringify(payload), { status: 201 });
+        if (url === '/status') return new Response('{"workspace":"synthetic","tasks":[]}');
+        return new Response('{"status":"succeeded","log":"Synthetic task log"}');
       },
     });
     const ui = Object.create(TaskUI.prototype);
+    ui.statusUrl = '/status';
     const updates = [];
     const toasts = [];
     const acknowledgments = [];
@@ -110,12 +111,13 @@ test('a task receipt acknowledges one submission and opens its log on demand', a
     ui.updateFromPayload = (data) => updates.push(data);
     ui.showToast = (message) => toasts.push(message);
     ui.bindTaskForm();
+    await ui.startPolling();
     submit({ preventDefault() {} });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(resets, 1);
     assert.deepEqual(toasts, []);
-    assert.deepEqual(updates.map((data) => data.workspace), payload === snapshot ? ['synthetic'] : []);
-    assert.deepEqual(requests, [['/api/task-runs/', 'POST']]);
+    assert.deepEqual(updates.map((data) => data.tasks.length), [0, 0]);
+    assert.deepEqual(requests, [['/status', 'GET'], ['/api/task-runs/', 'POST'], ['/status', 'GET']]);
     assert.equal(drawerClasses.has('is-visible'), false);
     assert.equal(acknowledgments.length, 2);
     assert.deepEqual(acknowledgments[0], []);
@@ -125,7 +127,8 @@ test('a task receipt acknowledges one submission and opens its log on demand', a
     assert.equal(button.textContent, 'View task log');
     button.click();
     await new Promise((resolve) => setImmediate(resolve));
-    assert.deepEqual(requests, [['/api/task-runs/', 'POST'], ['/api/task-runs/42/', 'GET']]);
+    assert.deepEqual(requests.at(-1), ['/api/task-runs/42/', 'GET']);
+    assert.equal(requests.length, 4);
     assert.equal(drawerClasses.has('is-visible'), true);
     assert.equal(ui.taskDrawerLog.textContent, 'Synthetic task log');
   }

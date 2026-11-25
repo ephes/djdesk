@@ -12,6 +12,7 @@ from .sample_publication import (
     prepare_sample_root,
     publish_sample,
     recover_sample,
+    sample_directory_exists,
     sample_lock,
     sample_root_owner,
 )
@@ -699,6 +700,7 @@ def ensure_sample_projects(
     Returns a list of tuples ``(slug, path, created)`` where ``created`` is True
     when files were freshly written (False indicates the directory already
     existed and ``force`` was not set, or this call recovered an interrupted swap).
+    A file or symlink at the sample path requires manual inspection.
     """
     target_root = Path(root) if root else sample_root()
     prepare_sample_root(target_root)
@@ -718,7 +720,9 @@ def ensure_sample_projects(
                 lock = sample_lock(target_root, root_fd, project.slug)
             with lock:
                 recovered = recover_sample(project_dir, root_fd=root_fd)
-                if project_dir.exists() and (not force or recovered):
+                if (not force or recovered) and sample_directory_exists(
+                    project_dir, root_fd=root_fd
+                ):
                     results.append((project.slug, project_dir, False))
                     continue
                 publish_sample(project_dir, project.files, root_fd=root_fd)

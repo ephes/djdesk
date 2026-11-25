@@ -112,6 +112,15 @@ def _check_root(root: Path, fd: int) -> None:
         raise OSError(f"Sample root name changed; preserve owned root identity {_fd_identity(fd)}")
 
 
+def sample_directory_exists(destination: Path, *, root_fd: int | None) -> bool:
+    """Admit an existing directory without following links under the sample lock."""
+    if root_fd is None:  # pragma: no cover - Windows can only reuse existing samples
+        return _identity(destination) is not None
+    identity = _identity(destination.name, dir_fd=root_fd)
+    _check_root(destination.parent, root_fd)
+    return identity is not None
+
+
 @contextmanager
 def sample_root_owner(root: Path):
     """Keep one root generation across lock acquisition, recovery and publication."""
@@ -331,15 +340,17 @@ def _remove_tree(name, parent_fd, identity, check_names):
 
 def _cleanup_stage(destination, root_fd, stage_fd, intent, expected):
     _check_state(destination, root_fd, stage_fd, intent, expected)
-    for name, identity in zip(("backup", "replacement"), expected[1:]):
+    installed, backup, replacement = expected
+
+    def check_retirement():
+        _check_names(destination, root_fd, stage_fd, intent)
+        if backup is not None and _identity(destination.name, dir_fd=root_fd) != installed:
+            raise OSError("Installed sample generation changed; preserve all related paths")
+
+    for name, identity in (("backup", backup), ("replacement", replacement)):
         if identity is not None:
-            _remove_tree(
-                name,
-                stage_fd,
-                identity,
-                lambda: _check_names(destination, root_fd, stage_fd, intent),
-            )
-    _check_names(destination, root_fd, stage_fd, intent)
+            _remove_tree(name, stage_fd, identity, check_retirement)
+    check_retirement()
     os.rmdir(intent["stage"]["name"], dir_fd=root_fd)
 
 

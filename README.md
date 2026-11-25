@@ -67,9 +67,9 @@ Publishers wait up to ten seconds for a stable per-sample `.slug.lock` file and
 hold it through preflight, publication, rollback and cleanup. A publisher that
 acquires the lock with `flock` at or after the deadline releases it and reports a timeout.
 Never delete these lock files while publishers may be running. Native locks are required;
-there is no fallback to lock-file existence markers. A waiting non-force publisher
-rechecks existence after taking the lock; force publishers replace complete generations
-in serial order.
+there is no fallback to lock-file existence markers. After taking the lock, a non-force
+publisher skips existing sample directories. Files and symlinks at sample paths require
+manual inspection. Force publishers replace complete generations in serial order.
 Each replacement is written and synced beside the destination first, along with an
 owner-only `.slug.swap.json` intent recording the root, staging and old/new directory
 identities. One root descriptor covers the lock, recovery check and publication.
@@ -101,8 +101,9 @@ copy out valuable files before manual repair. Do not remove a journal until the 
 sample is complete and all retained generations have been accounted for. A crash before
 the intent is written can leave an unreferenced staging tree; inspect it manually too.
 This is a recoverable swap, so readers can briefly see a missing public name between
-renames. Cleanup errors report the installed sample; a leftover backup may be incomplete
-only after the new generation has been synced successfully.
+renames. Backup cleanup rechecks the installed directory identity and stops if the
+public name changes. Cleanup errors report the installation and retained files. A
+leftover backup may be incomplete only after the new generation has been synced successfully.
 
 Creation/replacement requires no-follow directory opens and directory fsync; unsupported
 filesystems and Windows refuse before replacing existing samples. Existing samples can

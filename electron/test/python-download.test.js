@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { PassThrough } = require('node:stream');
 const { test } = require('node:test');
-const { downloadPython } = require('../python-download');
+const { downloadPython, checksum } = require('../python-download');
 
 const content = Buffer.from('synthetic interpreter archive');
 const sha = createHash('sha256').update(content).digest('hex');
@@ -78,6 +78,35 @@ test('relative HTTPS redirects and new cache publication', async (t) => {
   assert.deepEqual(await fs.readFile(destination), content);
 });
 
+test('staging cleanup failure leaves the published cache usable and reports the staging path', async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
+  const rm = fs.rm;
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const destination = path.join(directory, 'python.tar.gz');
+  await fs.writeFile(destination, 'previous cache');
+  const warnings = t.mock.method(console, 'warn', () => {});
+  let staging;
+  t.mock.method(fs, 'rm', async (file, options) => {
+    if (path.dirname(file) === directory && path.basename(file).startsWith('.python-download-')) {
+      staging = file;
+      throw new Error('injected removal failure');
+    }
+    return rm(file, options);
+  });
+
+  await downloadPython('https://fixtures.invalid/python', destination, sha, fixture([{}]));
+  assert.equal(await checksum(destination, sha, {
+    maxBytes: content.length, signal: new AbortController().signal,
+  }), true);
+  assert.ok((await fs.stat(staging)).isDirectory());
+  assert.equal(warnings.mock.callCount(), 1);
+  const [message] = warnings.mock.calls[0].arguments;
+  assert.match(message, /staging cleanup failed/);
+  assert.ok(message.includes(destination));
+  assert.ok(message.includes(staging));
+  assert.match(message, /injected removal failure/);
+});
+
 for (const phase of ['candidate', 'directory']) {
   test(`${phase} sync failure reports the cache publication outcome`, {
     skip: phase === 'directory' && process.platform === 'win32',
@@ -123,6 +152,47 @@ for (const phase of ['candidate', 'directory']) {
     await download(retry);
     assert.equal(retry.calls(), phase === 'candidate' ? 1 : 0);
     assert.deepEqual(await fs.readFile(destination), content);
+  });
+}
+
+for (const outcome of ['successful sync', 'failed sync', 'unsupported sync']) {
+  test(`directory close failure preserves the outcome of ${outcome}`, {
+    skip: process.platform === 'win32',
+  }, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const destination = path.join(directory, 'python.tar.gz');
+    const syncError = Object.assign(new Error('injected directory sync failure'), {
+      code: outcome === 'unsupported sync' ? 'ENOTSUP' : 'EIO',
+    });
+    const close = t.mock.fn(async () => { throw new Error('injected directory close failure'); });
+    const sync = t.mock.fn(async () => {
+      if (outcome !== 'successful sync') throw syncError;
+    });
+    const open = fs.open;
+    t.mock.method(fs, 'open', async (file, ...args) => (
+      file === directory ? { sync, close } : open(file, ...args)
+    ));
+    const warnings = t.mock.method(console, 'warn', () => {});
+
+    const source = fixture([{}]);
+    const download = () => downloadPython('https://fixtures.invalid/python', destination, sha, source);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (outcome === 'failed sync') {
+        await assert.rejects(download(), (error) => error.cause === syncError &&
+          error.message.includes(destination) && /durability is uncertain/.test(error.message));
+      } else {
+        await download();
+        const [message] = warnings.mock.calls[attempt].arguments;
+        assert.match(message, /directory close failed/);
+        assert.ok(message.includes(directory));
+        assert.match(message, /injected directory close failure/);
+      }
+      assert.deepEqual(await fs.readFile(destination), content);
+    }
+    assert.equal(source.calls(), 1);
+    assert.equal(sync.mock.callCount(), 2);
+    assert.equal(close.mock.callCount(), 2);
   });
 }
 

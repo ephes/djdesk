@@ -57,18 +57,28 @@ const UNSUPPORTED_DIRECTORY_SYNC = new Set(['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', '
 async function syncCacheDirectory(destination) {
   // Windows uses file sync only.
   if (process.platform === 'win32') return;
+  const directory = path.dirname(destination);
+  let closeFailure;
   try {
-    const handle = await fsp.open(path.dirname(destination), 'r');
+    const handle = await fsp.open(directory, 'r');
     try {
       await handle.sync();
     } catch (error) {
       if (!UNSUPPORTED_DIRECTORY_SYNC.has(error.code)) throw error;
     } finally {
-      await handle.close();
+      try {
+        await handle.close();
+      } catch (error) {
+        // Keep any sync failure as the cause of uncertain durability.
+        closeFailure = error;
+      }
     }
   } catch (error) {
     throw new Error(`Verified Python cache is visible at ${destination}, but its durability is uncertain`,
       { cause: error });
+  }
+  if (closeFailure) {
+    console.warn(`Python cache directory close failed (${directory}): ${closeFailure.message}`);
   }
 }
 
@@ -80,6 +90,7 @@ async function downloadPython(url, destination, expected, {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new Error('Python download deadline exceeded')), timeoutMs);
   let directory, failure;
+  let published = false;
   try {
     let cached = false;
     try {
@@ -134,6 +145,7 @@ async function downloadPython(url, destination, expected, {
       controller.signal.throwIfAborted();
       await fsp.rename(candidate, destination);
       await syncCacheDirectory(destination);
+      published = true;
       return;
     }
   } catch (error) {
@@ -145,8 +157,12 @@ async function downloadPython(url, destination, expected, {
       try {
         await fsp.rm(directory, { recursive: true, force: true });
       } catch (error) {
-        if (!failure) throw error;
-        failure.message += `; Python download cleanup failed (${directory}): ${error.message}`;
+        const cleanup = `Python download staging cleanup failed (${directory}): ${error.message}`;
+        if (published) {
+          console.warn(`Verified Python cache published at ${destination}; ${cleanup}`);
+        } else {
+          failure.message += `; ${cleanup}`;
+        }
       }
     }
   }

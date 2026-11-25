@@ -512,12 +512,17 @@ GHSA-g3hv-75wg-m249 (including dependent packages); no supported builder update 
 that tree yet. No overrides or advisory ignores are used.
 
 Interpreter archives use verified regular, non-symlink cache entries only. Cache hashing
-uses bounded opened-file reads and checks identity/metadata before reuse; special,
-oversized or changing cache entries are refused without changing their targets.
+uses bounded opened-file reads and checks identity and metadata before reuse. Hashing
+and snapshot creation require exactly the opened file's admitted size at EOF. Special,
+oversized, changing or incompletely read cache entries are refused without changing their targets.
 Cache validation shares the transfer deadline. Downloads stage beside the cache,
 allow at most five HTTPS redirects and 256 MiB, and have a two minute total deadline.
-Only a matching registered SHA256 is published. Failed attempts remove their own
-partials and preserve the prior cache; a stale or interrupted cache is retried automatically.
+The downloader syncs a candidate with a matching registered SHA256 before renaming it.
+It then syncs the destination directory where supported. Each attempt cleans up its
+own staging files. Failures before rename preserve the prior cache. A directory sync
+failure after rename leaves the complete archive visible and reports uncertain
+durability. On retry, a matching cache is verified again and the directory sync
+retried without downloading the archive again.
 Extraction reads a bounded private snapshot after verifying its own registered SHA256,
 so a cache refresh cannot change the archive passed to tar.
 Runtime builds reserve their destination, construct and verify unique sibling staging,

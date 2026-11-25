@@ -77,3 +77,76 @@ test('relative HTTPS redirects and new cache publication', async (t) => {
   assert.equal(source.calls(), 2);
   assert.deepEqual(await fs.readFile(destination), content);
 });
+
+for (const phase of ['candidate', 'directory']) {
+  test(`${phase} sync failure reports the cache publication outcome`, {
+    skip: phase === 'directory' && process.platform === 'win32',
+  }, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const destination = path.join(directory, 'python.tar.gz');
+    const old = Buffer.from('previous cache');
+    await fs.writeFile(destination, old);
+
+    const syncError = Object.assign(new Error('injected sync failure'), { code: 'EIO' });
+    const open = fs.open;
+    let failSync = true;
+    const visible = phase === 'candidate' ? old : content;
+    t.mock.method(fs, 'open', async (file, ...args) => {
+      const handle = await open(file, ...args);
+      const matches = phase === 'candidate' ? path.basename(file) === 'archive' : file === directory;
+      if (matches && failSync) {
+        handle.sync = async () => {
+          assert.deepEqual(await fs.readFile(destination), visible);
+          throw syncError;
+        };
+      }
+      return handle;
+    });
+
+    const download = (source) => downloadPython('https://fixtures.invalid/python', destination, sha, source);
+    if (phase === 'candidate') {
+      await assert.rejects(download(fixture([{}])), (error) => error === syncError);
+    } else {
+      const uncertain = (error) => error.cause === syncError &&
+        error.message.includes(destination) && /durability is uncertain/.test(error.message);
+      await assert.rejects(download(fixture([{}])), uncertain);
+      await assert.rejects(download({
+        get() { throw new Error('valid cache must not be downloaded again'); },
+      }), uncertain);
+    }
+    assert.deepEqual(await fs.readFile(destination), visible);
+    assert.deepEqual(await fs.readdir(directory), ['python.tar.gz']);
+
+    failSync = false;
+    const retry = fixture([{}]);
+    await download(retry);
+    assert.equal(retry.calls(), phase === 'candidate' ? 1 : 0);
+    assert.deepEqual(await fs.readFile(destination), content);
+  });
+}
+
+for (const code of ['EINVAL', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'ENOTTY']) {
+  test(`cache publication supports filesystems without directory sync (${code})`, {
+    skip: process.platform === 'win32',
+  }, async (t) => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'djdesk-download-test-'));
+    t.after(() => fs.rm(directory, { recursive: true, force: true }));
+    const destination = path.join(directory, 'python.tar.gz');
+    const open = fs.open;
+    let directorySyncs = 0;
+    t.mock.method(fs, 'open', async (file, ...args) => {
+      const handle = await open(file, ...args);
+      if (file === directory) {
+        handle.sync = async () => {
+          directorySyncs++;
+          throw Object.assign(new Error('directory sync unsupported'), { code });
+        };
+      }
+      return handle;
+    });
+    await downloadPython('https://fixtures.invalid/python', destination, sha, fixture([{}]));
+    assert.equal(directorySyncs, 1);
+    assert.deepEqual(await fs.readFile(destination), content);
+  });
+}

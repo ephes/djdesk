@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Reject incomplete Python archive reads during cache hashing and extraction snapshot creation.
+- Sync verified Python downloads before cache replacement and sync the cache directory
+  where supported. Report uncertain durability if directory sync fails after replacement.
 - Stop retiring a sample backup if the installed generation moves or its name is
   replaced during cleanup. Report the retained recovery files.
 - Require a directory at the sample path before reporting an existing installation.

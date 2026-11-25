@@ -69,9 +69,16 @@ the reservation while its owner may still be running. Keep packaging steps seria
 
 Cache validation and download share a two-minute deadline and a 256 MiB ceiling.
 Only ordinary, non-symlink cache files are accepted; opened-file identity and metadata
-are checked around bounded descriptor hashing. A special, oversized or changing cache
-is refused without changing its target. Remove or repair that entry with builders stopped.
-Valid registered checksums reuse the cache without HTTP. Before extraction, the builder
+are checked around bounded descriptor reads. Hashing and snapshot creation require
+exactly the admitted byte count at EOF. A special, oversized, changing or incompletely
+read cache is refused without changing its target. Remove or repair that entry with
+builders stopped.
+The downloader syncs a verified candidate before renaming it over the cache entry.
+A failure before rename preserves any prior cache. After rename it syncs the destination
+directory on supported filesystems. Windows and filesystems without directory sync
+still sync the candidate file. Other directory sync errors report uncertain durability
+and leave the complete new archive visible. On retry, matching bytes are revalidated
+and the directory sync is attempted again without HTTP. Before extraction, the builder
 copies the opened cache generation into private scratch space and verifies the copy
 against the registered checksum. Copying and verification share a two-minute deadline
 and a 256 MiB ceiling. Tar reads only the verified snapshot, so later cache refreshes

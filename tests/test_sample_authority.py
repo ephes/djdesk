@@ -254,6 +254,33 @@ class SampleAuthorityTests(SimpleTestCase):
         self.assertEqual((self.foreign / "fixture/value.txt").read_text(), "sentinel")
         self.assertEqual(sorted(p.name for p in self.root.iterdir()), ["fixture"])
 
+    def test_installed_sample_moved_during_backup_traversal_preserves_backup(self):
+        for replace in (False, True):
+            with self.subTest(replace=replace):
+                self.new_namespace(f"cleanup-destination-{replace}")
+                saved = self.root / "fixture-saved"
+                (self.destination / "extra.txt").write_text("old extra")
+                scandir = os.scandir
+
+                def move_before_first_entry(fd):
+                    if replace:
+                        self.replace(self.destination, False)
+                    else:
+                        self.destination.rename(saved)
+                    return scandir(fd)
+
+                with mock.patch.object(os, "scandir", side_effect=move_before_first_entry):
+                    with self.assertRaisesRegex(
+                        OSError, "Installed sample generation changed"
+                    ) as caught:
+                        publication.publish_sample(self.destination, {"value.txt": "new"})
+
+                stage = next(self.root.glob(".fixture-*"))
+                self.assertIn(f"retained files: {stage}", "\n".join(caught.exception.__notes__))
+                self.assertEqual((stage / "backup/value.txt").read_text(), "old")
+                self.assertEqual((stage / "backup/extra.txt").read_text(), "old extra")
+                self.assertEqual((saved / "value.txt").read_text(), "new\n")
+
     def test_replaced_backup_is_never_deleted_during_cleanup(self):
         open_file = os.open
         saved = None

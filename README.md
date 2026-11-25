@@ -101,8 +101,9 @@ copy out valuable files before manual repair. Do not remove a journal until the 
 sample is complete and all retained generations have been accounted for. A crash before
 the intent is written can leave an unreferenced staging tree; inspect it manually too.
 This is a recoverable swap, so readers can briefly see a missing public name between
-renames. Cleanup errors report the installed sample; a leftover backup may be incomplete
-only after the new generation has been synced successfully.
+renames. Backup cleanup rechecks the installed directory identity and stops if the
+public name changes. Cleanup errors report the installation and retained files. A
+leftover backup may be incomplete only after the new generation has been synced successfully.
 
 Creation/replacement requires no-follow directory opens and directory fsync; unsupported
 filesystems and Windows refuse before replacing existing samples. Existing samples can

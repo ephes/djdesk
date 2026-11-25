@@ -331,15 +331,17 @@ def _remove_tree(name, parent_fd, identity, check_names):
 
 def _cleanup_stage(destination, root_fd, stage_fd, intent, expected):
     _check_state(destination, root_fd, stage_fd, intent, expected)
-    for name, identity in zip(("backup", "replacement"), expected[1:]):
+    installed, backup, replacement = expected
+
+    def check_retirement():
+        _check_names(destination, root_fd, stage_fd, intent)
+        if backup is not None and _identity(destination.name, dir_fd=root_fd) != installed:
+            raise OSError("Installed sample generation changed; preserve all related paths")
+
+    for name, identity in (("backup", backup), ("replacement", replacement)):
         if identity is not None:
-            _remove_tree(
-                name,
-                stage_fd,
-                identity,
-                lambda: _check_names(destination, root_fd, stage_fd, intent),
-            )
-    _check_names(destination, root_fd, stage_fd, intent)
+            _remove_tree(name, stage_fd, identity, check_retirement)
+    check_retirement()
     os.rmdir(intent["stage"]["name"], dir_fd=root_fd)
 
 

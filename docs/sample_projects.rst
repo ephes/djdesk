@@ -43,7 +43,9 @@ rollback and destructive cleanup use directory-relative public filesystem APIs,
 so renaming a parent or replacing it with a symlink cannot redirect them into another
 tree. Named root/staging and generation identities are checked again before namespace
 changes and cleanup. Cleanup opens and verifies the admitted backup before deleting
-its contents, without following symlinks inside it. Unsupported platforms refuse
+its contents, without following symlinks inside it. During backup retirement, cleanup
+rechecks that the public name still refers to the installed generation and stops if
+it has moved or been replaced. Unsupported platforms refuse
 publication rather than fall back to absolute-path mutations.
 
 If a root, staging name or generation changes, stop publishers and inspect the retained

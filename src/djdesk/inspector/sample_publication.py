@@ -145,6 +145,8 @@ def sample_lock(root: Path, root_fd: int, slug: str, *, timeout: float = 10):
                     raise TimeoutError(f"Timed out waiting for sample lock {root / name}") from None
                 time.sleep(0.05)
         try:
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for sample lock {root / name}")
             # The lock inode is anchored to root_fd; the root name must still point there.
             _check_root(root, root_fd)
             yield

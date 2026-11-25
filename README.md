@@ -64,10 +64,12 @@ The tutorial relies on reproducible sample workspaces so screenshots and wizard 
 To replace existing samples, run `uv run python scripts/fetch_samples.py --force`.
 This replaces the entire sample directory, including local edits, tutorial state and databases.
 Publishers wait up to ten seconds for a stable per-sample `.slug.lock` file and
-hold it through preflight, publication, rollback and cleanup. Never delete these lock
-files while publishers may be running. Native locks are required; there is no fallback
-to lock-file existence markers. A waiting non-force publisher rechecks existence
-after taking the lock; force publishers replace complete generations in serial order.
+hold it through preflight, publication, rollback and cleanup. A publisher that
+acquires the lock with `flock` at or after the deadline releases it and reports a timeout.
+Never delete these lock files while publishers may be running. Native locks are required;
+there is no fallback to lock-file existence markers. A waiting non-force publisher
+rechecks existence after taking the lock; force publishers replace complete generations
+in serial order.
 Each replacement is written and synced beside the destination first, along with an
 owner-only `.slug.swap.json` intent recording the root, staging and old/new directory
 identities. One root descriptor covers the lock, recovery check and publication.

@@ -359,3 +359,31 @@ class SampleAuthorityTests(SimpleTestCase):
                         self.fail("lock must stay exclusive")
             with publication.sample_lock(self.root, root_fd, "fixture", timeout=0.1):
                 pass
+
+    def test_late_lock_acquisition_is_released_without_running_guarded_body(self):
+        native = publication.fcntl
+        guarded = mock.Mock()
+        clock = mock.Mock()
+        clock.monotonic.return_value = 100.0
+
+        def delay_retry(_seconds):
+            clock.monotonic.return_value = 100.2
+
+        clock.sleep.side_effect = delay_retry
+        with (
+            publication.sample_root_owner(self.root) as root_fd,
+            mock.patch.object(publication, "time", clock),
+            mock.patch.object(native, "flock", side_effect=[BlockingIOError, None, None]) as flock,
+        ):
+            with (
+                self.assertRaisesRegex(TimeoutError, "Timed out waiting for sample lock"),
+                publication.sample_lock(self.root, root_fd, "fixture", timeout=0.1),
+            ):
+                guarded()
+
+        guarded.assert_not_called()
+        lock_fd = flock.call_args_list[0].args[0]
+        acquire = mock.call(lock_fd, native.LOCK_EX | native.LOCK_NB)
+        self.assertEqual(
+            flock.call_args_list, [acquire, acquire, mock.call(lock_fd, native.LOCK_UN)]
+        )

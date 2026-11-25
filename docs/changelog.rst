@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Release sample locks acquired with ``flock`` at or after their deadline and report
+  a timeout before starting recovery or publication.
 - Refuse sample recovery when the swap intent cannot be read completely or
   changes during the read. Retain the journal and all related paths for inspection.
 - Return the saved task receipt even if the optional status refresh and its

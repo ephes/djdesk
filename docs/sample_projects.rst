@@ -16,10 +16,13 @@ question and choice tables in the sample's SQLite database. For an older copy,
 fetch into a new ``--root`` or back up your edits and database before replacing
 the sample with ``--force``.
 
-Publishers wait at most ten seconds for each stable ``.slug.lock`` and hold it through
-preflight, swap, rollback and cleanup. Never delete the lock while publishers may be
-running. Native locks are required; unsupported locking refuses publication rather
-than falling back to a marker that survives process death. A non-force caller rechecks the destination after taking ownership.
+Publishers wait up to ten seconds to acquire each stable ``.slug.lock`` and hold it through
+preflight, swap, rollback and cleanup. If a native ``flock`` acquisition reaches or
+exceeds the deadline, the publisher releases the lock and reports a timeout before
+preflight.
+Never delete the lock while publishers may be running. Native locks are required;
+unsupported locking refuses publication rather than falling back to a marker that
+survives process death. A non-force caller rechecks the destination after taking ownership.
 
 The replacement is written in ``.slug-<random>/replacement`` beside the destination.
 All staged files and directories are synced before an owner-only ``.slug.swap.json``

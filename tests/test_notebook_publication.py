@@ -165,6 +165,83 @@ class NotebookPublicationTests(TestCase):
         self.assertEqual(list(directory.glob("*.ipynb")), [directory / "schema-audit.ipynb"])
         emit.assert_called_once()
 
+    def test_committed_export_receipt_survives_staging_unlink_failure(self):
+        unlink = os.unlink
+        events = []
+        directory = data_lab.workspace_data_lab_dir(self.workspace)
+        synced = self.classify_syncs(events, ("root", self.root))
+
+        def fail_retirement(name, *, dir_fd=None):
+            if dir_fd is not None and name.startswith(".notebook-"):
+                self.assertEqual(events, ["file-sync", "workspace-sync", "root-sync"])
+                raise OSError("staging unlink failed")
+            return unlink(name, dir_fd=dir_fd)
+
+        with (
+            mock.patch.object(os, "fsync", side_effect=synced),
+            mock.patch.object(os, "unlink", side_effect=fail_retirement) as patched_unlink,
+            mock.patch.object(os, "supports_dir_fd", os.supports_dir_fd | {patched_unlink}),
+            self.assertLogs("djdesk.inspector.data_lab", level="WARNING") as logs,
+        ):
+            response = self.client.post(
+                reverse("inspector:data-lab-export", args=[self.workspace.slug]),
+                {"template": "schema-audit"},
+            )
+
+        self.assertEqual(response.status_code, 201)
+        receipt = response.json()["data_lab"]
+        self.assertEqual(receipt["selected_notebook"], "schema-audit")
+        self.assertEqual(self.client.get(receipt["selected_notebook_url"]).status_code, 200)
+        published = directory / "schema-audit.ipynb"
+        self.assertEqual(list(directory.glob("*.ipynb")), [published])
+        self.assertEqual([item["slug"] for item in receipt["notebooks"]], ["schema-audit"])
+        [staging] = directory.glob(".notebook-*.tmp")
+        self.assertTrue(staging.samefile(published))
+        self.assertIn(str(staging), "\n".join(logs.output))
+
+    def test_export_preserves_outcome_when_descriptor_close_fails(self):
+        close = os.close
+        events = []
+        real_sync = os.fsync
+        for failure in ("file", "workspace", None):
+            with self.subTest(failure=failure):
+                closed = []
+                events.clear()
+
+                def sync(fd):
+                    event = ("file", "workspace", "root")[len(events)]
+                    events.append(fd)
+                    if event == failure:
+                        raise OSError(f"{failure} sync failed")
+                    real_sync(fd)
+
+                def fail_close(fd):
+                    close(fd)
+                    if fd in events:
+                        closed.append(fd)
+                        raise OSError("descriptor close failed")
+
+                with (
+                    mock.patch.object(os, "fsync", side_effect=sync),
+                    mock.patch.object(os, "close", side_effect=fail_close),
+                    self.assertLogs("djdesk.inspector.data_lab", level="WARNING") as logs,
+                ):
+                    if failure == "file":
+                        with self.assertRaisesRegex(OSError, "file sync failed"):
+                            data_lab.export_notebook(self.workspace, "schema-audit")
+                        self.assertEqual(list(self.root.rglob("*.ipynb")), [])
+                    elif failure == "workspace":
+                        with self.assertRaises(data_lab.NotebookDurabilityError) as error:
+                            data_lab.export_notebook(self.workspace, "schema-audit")
+                        self.assertEqual(str(error.exception.__cause__), "workspace sync failed")
+                        self.assertTrue(error.exception.published_path.is_file())
+                    else:
+                        path = data_lab.export_notebook(self.workspace, "schema-audit")
+                        self.assertEqual(path.name, "schema-audit-2.ipynb")
+                self.assertCountEqual(closed, events)
+                self.assertEqual(len(logs.records), len(closed))
+                self.assertEqual(list(self.root.rglob(".notebook-*.tmp")), [])
+
     def test_concurrent_exports_preserve_every_generation(self):
         with ThreadPoolExecutor(max_workers=6) as pool:
             paths = list(

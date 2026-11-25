@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import stat
@@ -8,7 +9,7 @@ import threading
 import time
 import uuid
 from collections import OrderedDict
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, suppress
 from datetime import datetime
 from datetime import timezone as datetime_timezone
 from itertools import islice
@@ -27,6 +28,8 @@ from django.utils.safestring import mark_safe
 
 from .filesystem import sync_descriptor
 from .models import Workspace
+
+logger = logging.getLogger(__name__)
 
 DATA_LAB_TEMPLATES = [
     {
@@ -184,7 +187,17 @@ def _sync_directory(path: Path) -> None:
     try:
         _sync(fd)
     finally:
+        _close_descriptor(fd, path)
+
+
+def _close_descriptor(fd: int, path: Path, *, preserve_outcome: bool = True) -> None:
+    try:
         os.close(fd)
+    except OSError:
+        if not preserve_outcome:
+            raise
+        with suppress(Exception):
+            logger.warning("Could not close notebook export descriptor for %s", path, exc_info=True)
 
 
 @contextmanager
@@ -193,14 +206,14 @@ def _open_workspace_directory(workspace_dir: Path, *, create: bool = False):
     with ExitStack() as stack:
         flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         root_fd = os.open(workspace_dir.parent, flags)
-        stack.callback(os.close, root_fd)
+        stack.callback(_close_descriptor, root_fd, workspace_dir.parent, preserve_outcome=create)
         if create:
             try:
                 os.mkdir(workspace_dir.name, dir_fd=root_fd)
             except FileExistsError:
                 pass
         directory_fd = os.open(workspace_dir.name, flags, dir_fd=root_fd)
-        stack.callback(os.close, directory_fd)
+        stack.callback(_close_descriptor, directory_fd, workspace_dir, preserve_outcome=create)
         yield root_fd, directory_fd
 
 
@@ -300,6 +313,18 @@ class NotebookDurabilityError(OSError):
         )
 
 
+def _retire_notebook_stage(staging: Path, directory_fd: int, owned: os.stat_result) -> None:
+    try:
+        current = os.stat(staging.name, dir_fd=directory_fd, follow_symlinks=False)
+        if os.path.samestat(owned, current):
+            os.unlink(staging.name, dir_fd=directory_fd)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        with suppress(Exception):
+            logger.warning("Could not remove notebook staging file %s", staging, exc_info=True)
+
+
 def export_notebook(workspace: Workspace, template_slug: str) -> Path:
     """Publish a complete notebook without replacing any existing filename."""
     notebook = build_notebook(workspace, template_slug)
@@ -312,7 +337,10 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
     content = json.dumps(notebook, indent=2)
     workspace_dir = workspace_data_lab_dir(workspace)
     _provision_export_root(workspace_dir.parent)
-    with _open_workspace_directory(workspace_dir, create=True) as (root_fd, directory_fd):
+    with (
+        _open_workspace_directory(workspace_dir, create=True) as (root_fd, directory_fd),
+        ExitStack() as stage,
+    ):
         staging = f".notebook-{uuid.uuid4().hex}.tmp"
         fd = os.open(
             staging,
@@ -320,51 +348,42 @@ def export_notebook(workspace: Workspace, template_slug: str) -> Path:
             0o600,
             dir_fd=directory_fd,
         )
+        staging_path = workspace_dir / staging
+        stage.callback(_close_descriptor, fd, staging_path)
         owned = os.fstat(fd)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
-                handle.write(content)
-                handle.flush()
-                _sync(fd)
-            suffix = 1
-            while True:
-                filename = template_slug if suffix == 1 else f"{template_slug}-{suffix}"
-                filename += ".ipynb"
-                if not os.path.samestat(
-                    owned, os.stat(staging, dir_fd=directory_fd, follow_symlinks=False)
-                ):
-                    raise ValueError("Notebook staging file changed before publication.")
-                try:
-                    os.link(
-                        staging,
-                        filename,
-                        src_dir_fd=directory_fd,
-                        dst_dir_fd=directory_fd,
-                        follow_symlinks=False,
-                    )
-                except FileExistsError:
-                    suffix += 1
-                    continue
-                published_path = workspace_dir / filename
-                try:
-                    _sync(directory_fd)
-                    # An existing workspace directory may have been created by an
-                    # exporter that has not yet synced its entry in the root.
-                    _sync(root_fd)
-                except OSError as exc:
-                    raise NotebookDurabilityError(published_path) from exc
-                return published_path
-        finally:
+        stage.callback(_retire_notebook_stage, staging_path, directory_fd, owned)
+        with os.fdopen(fd, "w", encoding="utf-8", closefd=False) as handle:
+            handle.write(content)
+            handle.flush()
+            _sync(fd)
+        suffix = 1
+        while True:
+            filename = template_slug if suffix == 1 else f"{template_slug}-{suffix}"
+            filename += ".ipynb"
+            if not os.path.samestat(
+                owned, os.stat(staging, dir_fd=directory_fd, follow_symlinks=False)
+            ):
+                raise ValueError("Notebook staging file changed before publication.")
             try:
-                try:
-                    current = os.stat(staging, dir_fd=directory_fd, follow_symlinks=False)
-                except FileNotFoundError:
-                    pass
-                else:
-                    if os.path.samestat(owned, current):
-                        os.unlink(staging, dir_fd=directory_fd)
-            finally:
-                os.close(fd)
+                os.link(
+                    staging,
+                    filename,
+                    src_dir_fd=directory_fd,
+                    dst_dir_fd=directory_fd,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                suffix += 1
+                continue
+            published_path = workspace_dir / filename
+            try:
+                _sync(directory_fd)
+                # Cover an entry created by another exporter whose root sync is pending.
+                _sync(root_fd)
+            except OSError as exc:
+                raise NotebookDurabilityError(published_path) from exc
+            # Both directory syncs completed. Retirement is best effort.
+            return published_path
 
 
 def export_template(slug: str) -> dict[str, Any]:

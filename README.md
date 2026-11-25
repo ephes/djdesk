@@ -491,9 +491,13 @@ A retry creates another filename. A power loss before a successful directory syn
 lose the new name. Creation,
 publication and cleanup use the same opened workspace directory, even if its pathname
 is replaced. A renamed directory may therefore contain the export while it is unavailable
-at its former path. Ordinary failures clean up only this attempt's staging inode.
-A killed process may leave a hidden `.notebook-*.tmp` file; it is never listed or reused.
-With exporters stopped, inspect and remove those leftovers manually. Platforms without
+at its former path. Cleanup only removes this attempt's staging inode. If staging
+removal or descriptor close fails after both directory syncs, the API still returns
+HTTP 201 with the published notebook. The server logs a warning with the affected
+path. If a write or sync already failed, its outcome is preserved.
+A cleanup failure or a killed process may leave a hidden `.notebook-*.tmp` file.
+The listing ignores these files. With exporters stopped, inspect and remove those
+leftovers manually. Platforms without
 directory-relative, no-follow opens and hard-link publication (including Windows) refuse
 exports with HTTP 400 before writing; existing notebooks remain readable through the
 portable reader. The export filesystem must support hard links; filesystem failures during

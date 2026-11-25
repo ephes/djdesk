@@ -95,7 +95,10 @@ exports in the same server process wait for that sync. If it fails, the export f
 with nothing published and the next export retries the sync. Success follows file fsync,
 hard-link publication, fsync of the opened workspace directory and fsync of the opened
 export root to persist the workspace directory entry. On macOS these syncs also issue
-``F_FULLFSYNC`` to flush the drive cache where supported.
+``F_FULLFSYNC`` to flush the drive cache where supported. After both directory
+syncs succeed, staging cleanup and descriptor close failures leave the HTTP 201
+receipt intact. The server logs a warning with the affected path. A hidden staging
+file may remain. Cleanup failures preserve any earlier write or sync failure.
 If a directory sync after publication fails, the HTTP 500 JSON response names the
 complete published file and reports uncertain durability even if server logging fails.
 The export remains visible. Inspect the export directory before exporting again.

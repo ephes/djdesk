@@ -249,8 +249,10 @@ Inspect the directory before exporting again; retrying creates another file, and
 loss before a successful directory sync may lose the new name.
 All export operations use the same opened workspace directory, so a directory rename
 cannot redirect writing or cleanup. The renamed directory may retain the export.
-Ordinary failures remove owned staging; a killed process can leave hidden temporary
-files that can be inspected and removed manually with exporters stopped.
+After both directory syncs succeed, staging cleanup or descriptor close failures
+still return the notebook's HTTP 201 receipt and log the affected path on the server.
+Cleanup failures and interrupted exports can leave hidden temporary files. Inspect
+and remove leftovers manually with exporters stopped.
 Systems without directory-relative no-follow opens and hard-link publication (including
 Windows) refuse exports before writing, with HTTP 400. The filesystem must support
 hard links; the portable reader remains available for existing notebooks. Filesystem

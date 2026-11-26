@@ -21,6 +21,14 @@ logger = logging.getLogger(__name__)
 _UNEXPECTED_ERROR_CHARS = 2000
 
 
+def _confirmed_command(run: WorkspaceTaskRun) -> str:
+    return run.confirmed_command or run.preset.command
+
+
+def _confirmed_path(run: WorkspaceTaskRun) -> str:
+    return run.confirmed_workspace_path or run.workspace.project_path
+
+
 def _fail_run(
     run: WorkspaceTaskRun,
     message: str,
@@ -30,8 +38,8 @@ def _fail_run(
     run.append_log(message)
     run.flush_log_buffer()
     payload: dict[str, Any] = {
-        "raw": run.preset.command,
-        "workspace_path": run.workspace.project_path,
+        "raw": _confirmed_command(run),
+        "workspace_path": _confirmed_path(run),
         "error": message,
         "output_limited": run.log_truncated,
     }
@@ -43,8 +51,8 @@ def _fail_run(
 
 def _success_payload(run: WorkspaceTaskRun, result: CommandResult) -> dict[str, Any]:
     return {
-        "raw": run.preset.command,
-        "workspace_path": run.workspace.project_path,
+        "raw": _confirmed_command(run),
+        "workspace_path": _confirmed_path(run),
         "safe_prefix": result.safe_prefix,
         "exit_code": result.exit_code,
         "duration_seconds": result.duration,
@@ -96,8 +104,8 @@ def _record_unexpected_failure(run: WorkspaceTaskRun, error: BaseException | Non
         message = f"Command execution failed unexpectedly: {diagnostic}"
         log = _fallback_log(run, message)
         command = {
-            "raw": run.preset.command,
-            "workspace_path": run.workspace.project_path,
+            "raw": _confirmed_command(run),
+            "workspace_path": _confirmed_path(run),
             "error": message,
         }
         WorkspaceTaskRun.objects.using(run._state.db).filter(
@@ -141,7 +149,24 @@ def execute_workspace_task(task_run_id: int, database: str = DEFAULT_DB_ALIAS) -
 
 
 def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
-    command = (run.preset.command or "").strip()
+    command = run.confirmed_command
+    workspace_path = run.confirmed_workspace_path
+    if not command or not workspace_path:
+        # Queued before confirmed inputs were recorded: the current preset and workspace
+        # may differ from what was confirmed, so nothing is executed.
+        return _fail_run(
+            run,
+            "Task request has no confirmed command receipt. Command not started; "
+            "request the task again.",
+        )
+    if (run.preset.command or "").strip() != command or (
+        run.workspace.project_path != workspace_path
+    ):
+        return _fail_run(
+            run,
+            "Task preset or workspace changed after confirmation. Command not started; "
+            "request the task again.",
+        )
     try:
         safe_prefix = validate_safe_command(command)
     except CommandExecutionError as exc:
@@ -149,7 +174,7 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
 
     run.progress = 5
     run.publish_fields("progress")
-    run.append_log(f"Executing `{command}` inside {run.workspace.project_path}")
+    run.append_log(f"Executing `{command}` inside {workspace_path}")
     run.flush_log_buffer()
     if run.log_truncated:
         # Output could not be recorded at all, and a silent command would never be stopped
@@ -171,7 +196,7 @@ def _execute_claimed_run(run: WorkspaceTaskRun) -> dict[str, Any]:
     try:
         result = run_command(
             command=command,
-            workspace_path=run.workspace.project_path,
+            workspace_path=workspace_path,
             timeout=settings.INSPECTOR_TASK_TIMEOUT,
             log_callback=log_output,
         )

@@ -53,6 +53,15 @@ class TaskDatabaseTests(TestCase):
         del connections[alias]
         del connections.databases[alias]
 
+    def test_run_created_by_id_records_inputs_from_its_database(self):
+        primary, selected = self.aliases
+        TaskPreset.objects.using(selected).filter(pk=1).update(
+            command="python manage.py showmigrations"
+        )
+        run = WorkspaceTaskRun.objects.using(selected).create(pk=2, workspace_id=1, preset_id=1)
+        self.assertEqual(run.confirmed_command, "python manage.py showmigrations")
+        self.assertEqual(run.confirmed_workspace_path, f"/synthetic/{selected}")
+
     def test_claim_stays_on_loaded_database(self):
         primary, selected = self.aliases
         run = WorkspaceTaskRun.objects.using(selected).get(pk=1)

@@ -221,6 +221,11 @@ progress in one ownership-checked update. Logs can appear earlier during executi
 Unexpected failures include a bounded diagnostic in the receipt and log. The worker
 records the exception category if its message cannot be formatted, and the original
 exception continues to the task backend.
+Each new run records the preset command and workspace path current when the
+confirmed request is saved. The worker executes those recorded values and refuses the run, without
+starting a command, if the preset command or workspace path changed meanwhile.
+Runs queued before migration 0007 have no recorded inputs and fail as never started;
+request them again after updating.
 Task dispatch carries the saved run's database alias through claim, logs, metadata,
 result ID and terminal writes. Programmatic callers use
 `execute_workspace_task.enqueue(run_id, database="alias")` (or `.call` for immediate
@@ -260,6 +265,9 @@ ticks while a status request is pending. Each request has 30 seconds for headers
 and the full body. Leaving the page cancels its poll and timer. Returning via the
 browser's back/forward cache starts a fresh poll. Late results from retired polls
 cannot change the dashboard or its connection indicator.
+A workspace deleted between the status lookup and its snapshot returns HTTP 404,
+like an unknown slug. The dashboard then renders as for an unknown `?workspace=`
+selection, without a selected workspace.
 Renderer status, severity and log-level classes use
 supported values with neutral defaults; labels remain escaped text.
 

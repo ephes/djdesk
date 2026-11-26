@@ -1,4 +1,5 @@
 import json
+from collections import Counter
 from tempfile import TemporaryDirectory
 from unittest import mock
 
@@ -71,6 +72,40 @@ class NotebookViewLimitTests(TestCase):
             self.assertContains(self.client.get(self.url), "&amp;")
         with mock.patch.object(data_lab, "NOTEBOOK_VIEW_HTML_BYTES", limit - 1):
             self.assert_refused_before_render([{"cell_type": "code", "source": "&"}])
+
+    def test_code_source_and_output_lines_are_encoded_once_during_admission(self):
+        encodings = Counter()
+
+        class TrackedLine(str):
+            def encode(self, encoding="utf-8", errors="strict"):
+                encodings[self] += 1
+                return super().encode(encoding, errors)
+
+        source = [TrackedLine(f"source {index} &é\n") for index in range(256)]
+        outputs = [
+            {"text": [TrackedLine(f"output {index}:{line} <é>\n") for line in range(64)]}
+            for index in range(4)
+        ]
+        data_lab._admit_notebook_view(
+            {"cells": [{"cell_type": "code", "source": source, "outputs": outputs}]}
+        )
+
+        self.assertEqual(len(encodings), 512)
+        self.assertEqual(set(encodings.values()), {1})
+
+    def test_malformed_text_in_an_oversized_field_is_still_a_shape_error(self):
+        for text in (["é", "\ud800"], ["é", 1]):
+            for cell, message in (
+                ({"cell_type": "markdown", "source": text}, "Notebook cell source"),
+                ({"cell_type": "code", "source": text}, "Notebook cell source"),
+                ({"cell_type": "code", "outputs": [{"text": text}]}, "Notebook outputs"),
+            ):
+                with (
+                    self.subTest(cell=cell),
+                    mock.patch.object(data_lab, "NOTEBOOK_VIEW_TEXT_BYTES", 1),
+                    self.assertRaisesRegex(data_lab.InvalidNotebookError, message),
+                ):
+                    data_lab._admit_notebook_view({"cells": [cell]})
 
     def test_markdown_line_endings_render_and_use_the_same_html_budget(self):
         normalized = "First line\ncontinues\n\nSecond & last"

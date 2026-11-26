@@ -416,8 +416,9 @@ source bytes, and code and output text preserve their line endings.
 Viewer admission allows at most 8 MiB of notebook JSON, 500 cells, 50 outputs per code
 cell and 1 MiB of aggregate UTF-8 source/output text. Before constructing HTML, it also
 checks a conservative 2 MiB fragment budget including escaped text, cell/output wrappers
-and paragraph markup (even empty/stripped paragraphs count). Exceeding any limit returns
-a whole-view HTTP 422 size refusal; reduce the notebook in your editor and reload.
+and paragraph markup (even empty/stripped paragraphs count). The viewer validates UTF-8
+and counts bytes using a single encoding of each source or output string. Exceeding any
+limit returns a whole-view HTTP 422 size refusal; reduce the notebook in your editor and reload.
 Edit the original file and reload; the viewer preserves its bytes and escapes rendered text.
 The viewer reads bytes up to the opened file's initial size plus one, comparing descriptor
 size, nanosecond mtime and ctime before and after the read, before decoding UTF-8 or JSON.

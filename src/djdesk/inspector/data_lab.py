@@ -420,14 +420,15 @@ def _scan_export_names(
     # Bound enumeration itself, including hidden/unrelated entries, before sorting.
     with os.scandir(directory) as entries:
         window = list(islice(entries, EXPORT_SCAN_LIMIT + 1))
-    if _directory_generation(directory) != generation:
-        raise _GenerationChanged("Notebook directory changed during inventory.")
     names = sorted(
         entry.name
         for entry in window[:EXPORT_SCAN_LIMIT]
         if entry.name.endswith(".ipynb")
         and re.fullmatch(SlugConverter.regex, Path(entry.name).stem)
+        and entry.is_file(follow_symlinks=False)
     )
+    if _directory_generation(directory) != generation:
+        raise _GenerationChanged("Notebook directory changed during inventory.")
     incomplete = len(window) > EXPORT_SCAN_LIMIT or len(names) > EXPORT_RESULT_LIMIT
     return tuple(names[:EXPORT_RESULT_LIMIT]), incomplete
 

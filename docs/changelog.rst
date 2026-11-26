@@ -7,6 +7,7 @@ Unreleased
 Fixed
 ~~~~~
 
+- Count only regular notebook files toward the 50-result Data Lab inventory limit.
 - Preserve the Data Lab notebook receipt after staging cleanup or descriptor close
   fails. Log the affected path and keep any earlier write or sync failure.
 - Retry pending Data Lab directory syncs only for the active export root and its

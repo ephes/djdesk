@@ -7,6 +7,11 @@ Unreleased
 Fixed
 ~~~~~
 
+- Execute the command and workspace path recorded when a confirmed task request is saved. A queued run
+  whose preset command or workspace path changed meanwhile, or which was queued before
+  this release, fails without starting a command. Migration 0007 adds the recorded inputs.
+- Return HTTP 404 instead of an error when a workspace is deleted during a status poll,
+  and render the dashboard without a selection in the same case.
 - Verify the staged offline docs recovery intent and directory identities before
   moving the live bundle, preserving it on short writes or invalid readback.
 - Bound offline docs recovery receipt reads to 4 KiB and refuse receipts that

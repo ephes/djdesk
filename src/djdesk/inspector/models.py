@@ -299,6 +299,9 @@ class WorkspaceTaskRun(models.Model):
         on_delete=models.CASCADE,
     )
     requested_by = models.CharField(max_length=120, default="system")
+    # Inputs recorded when the confirmed run is saved; the worker runs these, not later edits.
+    confirmed_command = models.CharField(max_length=255, blank=True, editable=False)
+    confirmed_workspace_path = models.CharField(max_length=500, blank=True, editable=False)
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -322,6 +325,25 @@ class WorkspaceTaskRun(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - helper
         return f"{self.preset.label} ({self.get_status_display()})"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        if self._state.adding and not self.confirmed_command:
+            # Record the command and project current when this run is requested, reading
+            # uncached relations from the database the run is written to.
+            using = kwargs.get("using") or router.db_for_write(type(self), instance=self)
+            preset = (
+                self.preset
+                if WorkspaceTaskRun.preset.is_cached(self)
+                else TaskPreset.objects.using(using).get(pk=self.preset_id)
+            )
+            workspace = (
+                self.workspace
+                if WorkspaceTaskRun.workspace.is_cached(self)
+                else Workspace.objects.using(using).get(pk=self.workspace_id)
+            )
+            self.confirmed_command = (preset.command or "").strip()
+            self.confirmed_workspace_path = workspace.project_path
+        super().save(*args, **kwargs)
 
     def mark_running(self) -> bool:
         """Atomically claim a requested run without holding a command-time lock."""

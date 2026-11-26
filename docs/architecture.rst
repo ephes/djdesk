@@ -103,6 +103,11 @@ Renderer data flow
   graph instance, so retired graphs cannot affect the replacement.
 * ``django-tasks`` executes commands synchronously via ``ImmediateBackend``. Swapping in Celery/Redis later will not change the REST payload or UI contract because the ``TaskPreset`` + ``WorkspaceTaskRun`` models stay stable.
 
+  Each run records the preset command and workspace path current when its
+  confirmed request is saved. The worker executes those values and fails the run as never started if
+  the preset command or workspace path changed while it was queued, or if the run
+  predates these records (migration 0007).
+
   Command output framing scans each decoded chunk once and joins each completed
   or final partial line once. Long newline-free output therefore takes linear
   framing work within the existing command byte budget. Incremental decoding,

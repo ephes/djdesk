@@ -70,7 +70,11 @@ class DashboardView(TemplateView):
 
         scans, tasks = [], []
         if workspace:
-            workspace, scans, tasks = workspace_snapshot(workspace)
+            try:
+                workspace, scans, tasks = workspace_snapshot(workspace)
+            except Workspace.DoesNotExist:
+                # Deleted after selection: render like an unknown ``?workspace=`` slug.
+                workspace = None
         status_url = ""
         if workspace and workspace.slug:
             status_url = reverse("inspector:workspace-status", kwargs={"slug": workspace.slug})
@@ -222,7 +226,11 @@ class TaskRunCreateView(View):
 @require_GET
 def workspace_status_api(request: HttpRequest, slug: str) -> JsonResponse:
     workspace = get_object_or_404(Workspace, slug=slug)
-    payload = workspace_status_payload(workspace)
+    try:
+        payload = workspace_status_payload(workspace)
+    except Workspace.DoesNotExist as exc:
+        # Deleted between the lookup and the authoritative snapshot.
+        raise Http404("Workspace not found.") from exc
     return JsonResponse(payload)
 
 

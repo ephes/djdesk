@@ -157,6 +157,7 @@ class NotebookReadTests(TestCase):
         self.assertContains(response, "Notebook needs repair", status_code=422)
         render.assert_not_called()
         self.assertEqual(self.path.read_bytes(), content)
+        return response
 
     def test_notebook_requires_an_explicit_cells_list(self):
         for content in (b'{"name":"export manifest"}', b'{"cells":null}', b'{"cells":{}}'):
@@ -178,11 +179,40 @@ class NotebookReadTests(TestCase):
             with self.subTest(content=content):
                 self.assert_repairable(content)
 
+    def test_raw_cell_displays_label_and_escaped_source(self):
+        text = '\n  <tag> & "quote"\nsecond line'
+        for source in (text, text.splitlines(keepends=True)):
+            with self.subTest(source=source):
+                content = json.dumps({"cells": [{"cell_type": "raw", "source": source}]}).encode()
+                self.path.write_bytes(content)
+                response = self.client.get(self.url)
+                self.assertContains(response, "<header>Raw</header>")
+                self.assertContains(
+                    response, "\n  &lt;tag&gt; &amp; &quot;quote&quot;\nsecond line"
+                )
+                self.assertNotContains(response, "<tag>")
+                self.assertEqual(self.path.read_bytes(), content)
+
+    def test_unsupported_cell_refuses_the_whole_preview(self):
+        for cell in (
+            {"cell_type": "markdwon", "source": "unsupported cell"},
+            {"cell_type": ["raw"]},
+            {"source": "missing cell type"},
+        ):
+            with self.subTest(cell=cell):
+                content = json.dumps(
+                    {"cells": [{"cell_type": "markdown", "source": "partial preview"}, cell]}
+                ).encode()
+                response = self.assert_repairable(content)
+                self.assertContains(response, "unsupported cell type", status_code=422)
+                self.assertNotContains(response, "partial preview", status_code=422)
+
     def test_lone_surrogates_in_consumed_text_are_repairable(self):
         for source in ("\ud800", ["ordinary", "\udfff"]):
             for cell in (
                 {"cell_type": "markdown", "source": source},
                 {"cell_type": "code", "source": source},
+                {"cell_type": "raw", "source": source},
                 {"cell_type": "code", "source": [], "outputs": [{"text": source}]},
             ):
                 with self.subTest(cell=cell):

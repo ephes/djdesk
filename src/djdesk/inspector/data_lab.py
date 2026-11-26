@@ -121,6 +121,10 @@ NOTEBOOK_VIEW_CELLS = 500
 NOTEBOOK_VIEW_OUTPUTS_PER_CELL = 50
 NOTEBOOK_VIEW_TEXT_BYTES = 1024 * 1024
 NOTEBOOK_VIEW_HTML_BYTES = 2 * 1024 * 1024
+_RAW_CELL_HTML = (
+    "<section class='nb-cell nb-cell--raw'><header>Raw</header><pre><span>{}</span></pre></section>"
+)
+_RAW_CELL_WRAPPER_BYTES = len(_RAW_CELL_HTML.format(""))
 # Directory timestamps can be coarse (jiffies on Linux, 1-2 s on HFS+/FAT/SMB), so a
 # change in the same tick as a scan keeps the generation unchanged. Like Git's racy-clean
 # rule, a window is cached only once the directory timestamps are clearly in the past.
@@ -507,6 +511,10 @@ class NotebookSizeError(InvalidNotebookError):
     """The complete view exceeds its supported work envelope."""
 
 
+class UnsupportedNotebookCellError(InvalidNotebookError):
+    """A cell has no supported preview renderer."""
+
+
 def _unique_notebook_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result = {}
     for key, value in pairs:
@@ -596,6 +604,8 @@ def _admit_notebook_view(notebook: dict[str, Any]) -> None:
         if not isinstance(cell, dict):
             raise InvalidNotebookError(invalid_source)
         cell_type = cell.get("cell_type")
+        if not isinstance(cell_type, str) or cell_type not in _NOTEBOOK_CELL_RENDERERS:
+            raise UnsupportedNotebookCellError("Notebook contains an unsupported cell type.")
         charge_text(cell.get("source", []), invalid_source, markdown=cell_type == "markdown")
         if cell_type == "code":
             html_bytes += len(
@@ -613,17 +623,14 @@ def _admit_notebook_view(notebook: dict[str, Any]) -> None:
                     raise InvalidNotebookError(invalid_output)
                 charge_text(output.get("text", []), invalid_output)
                 html_bytes += len("<pre></pre>")
+        elif cell_type == "raw":
+            html_bytes += _RAW_CELL_WRAPPER_BYTES
         check_budget()
 
 
 def render_notebook_html(notebook: dict[str, Any]) -> str:
-    """Convert a subset of notebook JSON into styled HTML blocks."""
-    parts: list[str] = []
-    for cell in notebook["cells"]:
-        if cell.get("cell_type") == "markdown":
-            parts.append(_render_markdown_cell(cell))
-        elif cell.get("cell_type") == "code":
-            parts.append(_render_code_cell(cell))
+    """Render all cells of an admitted notebook."""
+    parts = [_NOTEBOOK_CELL_RENDERERS[cell["cell_type"]](cell) for cell in notebook["cells"]]
     return mark_safe("".join(parts))
 
 
@@ -658,3 +665,14 @@ def _render_code_cell(cell: dict[str, Any]) -> str:
         f"{outputs_html}"
         "</section>"
     )
+
+
+def _render_raw_cell(cell: dict[str, Any]) -> str:
+    return _RAW_CELL_HTML.format(escape("".join(cell.get("source", []))))
+
+
+_NOTEBOOK_CELL_RENDERERS = {
+    "markdown": _render_markdown_cell,
+    "code": _render_code_cell,
+    "raw": _render_raw_cell,
+}

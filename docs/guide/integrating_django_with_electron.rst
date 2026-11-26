@@ -266,6 +266,9 @@ The inventory scans up to 512 directory entries plus one lookahead and lists up 
 regular notebooks in filename order within that window. Directories and symlinks count
 toward the scan bound.
 The notebook must contain a ``cells`` list. An empty list is valid.
+Supported cell types are ``markdown``, ``code`` and ``raw``. Raw cells display escaped,
+preformatted source with a **Raw** label. A missing or unsupported cell type returns
+the HTTP 422 repair page for the entire preview.
 Malformed UTF-8, JSON, cells or text outputs produce an HTTP 422 repair page with no notebook
 content or parser traceback. Repair the export in your editor and reload. The preview does
 not rewrite or execute it, and rendered source and output text remain HTML-escaped.

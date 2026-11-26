@@ -632,6 +632,8 @@ class InspectorUI {
 
   updateTasks(tasks) {
     if (!this.taskHistory) return;
+    const previousStatuses = this.previousTaskStatuses;
+    this.previousTaskStatuses = new Map(tasks.map((task) => [task.id, task.status]));
     if (!tasks.length) {
       this.taskHistory.innerHTML = this.renderTaskSkeleton();
       return;
@@ -654,12 +656,11 @@ class InspectorUI {
       .join('');
 
     tasks.forEach((task) => {
-      const previousStatus = this.previousTaskStatuses.get(task.id);
+      const previousStatus = previousStatuses.get(task.id);
       if (previousStatus && previousStatus !== task.status && ['succeeded', 'failed'].includes(task.status)) {
         this.pushNotification(task.label, `Task ${task.status}`);
         this.showToast(`${task.label} ${task.status}`, task.status === 'succeeded' ? 'success' : 'danger');
       }
-      this.previousTaskStatuses.set(task.id, task.status);
     });
   }
 

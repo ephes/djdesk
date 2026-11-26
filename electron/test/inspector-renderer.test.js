@@ -216,6 +216,30 @@ test('each task submission clears the previous receipt, ignores resubmits while 
   assert.equal(posts.length, 4);
 });
 
+test('task notifications remember only the current poll window and announce a transition once', () => {
+  const ui = uiFixture();
+  const notifications = [];
+  const toasts = [];
+  ui.pushNotification = (...args) => notifications.push(args);
+  ui.showToast = (...args) => toasts.push(args);
+
+  for (let start = 0; start < 100; start += 5) {
+    ui.updateTasks(Array.from({ length: 5 }, (_, offset) => ({
+      id: start + offset, label: 'Synthetic task', status: 'running',
+    })));
+    assert.deepEqual([...ui.previousTaskStatuses.keys()], [start, start + 1, start + 2, start + 3, start + 4]);
+  }
+
+  const task = { id: 99, label: 'Synthetic task', status: 'succeeded' };
+  ui.updateTasks([task]);
+  ui.updateTasks([task]);
+  ui.updateTasks([]);
+  assert.equal(ui.previousTaskStatuses.size, 0);
+  ui.updateTasks([task]);
+  assert.deepEqual(notifications, [['Synthetic task', 'Task succeeded']]);
+  assert.deepEqual(toasts, [['Synthetic task succeeded', 'success']]);
+});
+
 test('metadata cannot create renderer elements or attributes', () => {
   const ui = uiFixture();
   ui.updateScans([{ status: hostile, kind: hostile, kind_label: hostile,

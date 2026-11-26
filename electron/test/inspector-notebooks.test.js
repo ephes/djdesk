@@ -210,6 +210,7 @@ test('reexport opens the newly selected notebook while retaining the old listing
 
 test('an exported notebook outside the window opens directly and older polls retain it', () => {
   const ui = Object.create(InspectorUI.prototype);
+  ui.dataLabNotebooks = new Map();
   ui.activeNotebookSlug = 'log-study';
   ui.updateTemplateOptions = () => {};
   ui.renderDataLabList = () => {};
@@ -222,6 +223,35 @@ test('an exported notebook outside the window opens directly and older polls ret
   ui.updateDataLab({ notebooks: [{ slug: 'old', viewer_url: '/old' }] });
   ui.updateDataLab({ notebooks: [] });
   assert.equal(ui.activeNotebookSlug, 'schema-audit-9');
+});
+
+test('incomplete inventory polls keep known notebooks until a complete inventory confirms removal', () => {
+  const ui = Object.create(InspectorUI.prototype);
+  ui.dataLabIncomplete = { hidden: true };
+  ui.renderDataLabList = (notebooks) => { ui.visible = Array.from(notebooks); };
+  ui.highlightNotebook = () => {};
+  ui.openNotebook = (url, slug) => { ui.activeNotebookSlug = slug; };
+  const known = { slug: 'known', title: 'Known', viewer_url: '/known' };
+  const removed = { slug: 'removed', title: 'Removed', viewer_url: '/removed' };
+  const added = { slug: 'added', title: 'Added', viewer_url: '/added' };
+  const updated = { ...known, title: 'Updated' };
+
+  ui.updateDataLab({ notebooks: [known, removed], notebooks_incomplete: false });
+  ui.updateDataLab({ notebooks: [], notebooks_incomplete: true });
+  assert.deepEqual(ui.visible, [known, removed]);
+  assert.equal(ui.dataLabIncomplete.hidden, false);
+
+  ui.updateDataLab({ notebooks: [added, updated], notebooks_incomplete: true });
+  assert.deepEqual(ui.visible, [updated, removed, added]);
+  ui.updateDataLab({ notebooks: [], notebooks_incomplete: true });
+  assert.deepEqual(ui.visible, [updated, removed, added]);
+
+  ui.updateDataLab({ notebooks: [added, updated], notebooks_incomplete: false });
+  assert.deepEqual(ui.visible, [added, updated]);
+  assert.equal(ui.dataLabIncomplete.hidden, true);
+  ui.updateDataLab({ notebooks: [], notebooks_incomplete: false });
+  assert.deepEqual(ui.visible, []);
+  assert.equal(ui.activeNotebookSlug, 'known', 'inventory updates keep the open viewer');
 });
 
 test('a minimal committed receipt opens its file and retains optional inventory state', () => {

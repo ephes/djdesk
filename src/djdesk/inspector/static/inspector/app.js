@@ -87,6 +87,16 @@ class InspectorUI {
     this.docsBaseUrl = root?.dataset.docsBaseUrl || '';
     this.dataLabForm = root?.querySelector('[data-data-lab-form]');
     this.dataLabList = root?.querySelector('[data-data-lab-list]');
+    this.dataLabNotebooks = new Map();
+    for (const button of this.dataLabList?.querySelectorAll('[data-notebook-slug]') ?? []) {
+      const { notebookSlug, notebookUrl } = button.dataset;
+      this.dataLabNotebooks.set(notebookSlug, {
+        slug: notebookSlug,
+        viewer_url: notebookUrl,
+        title: button.querySelector('strong').textContent,
+        file: button.querySelector('small').textContent,
+      });
+    }
     this.dataLabViewer = root?.querySelector('[data-data-lab-viewer]');
     this.dataLabFrame = root?.querySelector('[data-data-lab-frame]');
     this.dataLabEmpty = root?.querySelector('[data-data-lab-empty]');
@@ -632,6 +642,8 @@ class InspectorUI {
 
   updateTasks(tasks) {
     if (!this.taskHistory) return;
+    const previousStatuses = this.previousTaskStatuses;
+    this.previousTaskStatuses = new Map(tasks.map((task) => [task.id, task.status]));
     if (!tasks.length) {
       this.taskHistory.innerHTML = this.renderTaskSkeleton();
       return;
@@ -654,12 +666,11 @@ class InspectorUI {
       .join('');
 
     tasks.forEach((task) => {
-      const previousStatus = this.previousTaskStatuses.get(task.id);
+      const previousStatus = previousStatuses.get(task.id);
       if (previousStatus && previousStatus !== task.status && ['succeeded', 'failed'].includes(task.status)) {
         this.pushNotification(task.label, `Task ${task.status}`);
         this.showToast(`${task.label} ${task.status}`, task.status === 'succeeded' ? 'success' : 'danger');
       }
-      this.previousTaskStatuses.set(task.id, task.status);
     });
   }
 
@@ -914,25 +925,19 @@ class InspectorUI {
     }
     // A committed export receipt can omit the optional inventory. Polling refreshes it.
     if (!('notebooks' in data)) return;
-    if (!data.notebooks?.length) {
-      if (this.activeNotebookSlug) {
-        this.renderDataLabList([]);
-        return;
-      }
-      this.activeNotebookSlug = '';
-      this.renderDataLabList([]);
-      if (this.dataLabViewer) {
-        this.dataLabViewer.setAttribute('hidden', 'hidden');
-      }
-      return;
+    // Only complete inventories can confirm the removal of a previously seen file.
+    if (!data.notebooks_incomplete) this.dataLabNotebooks = new Map();
+    for (const notebook of data.notebooks || []) {
+      this.dataLabNotebooks.set(notebook.slug, notebook);
     }
-    this.renderDataLabList(data.notebooks || []);
-    const existing = data.notebooks.find((nb) => nb.slug === this.activeNotebookSlug);
-    if (existing || this.activeNotebookSlug) {
-      this.highlightNotebook();
-    } else {
-      const first = data.notebooks[0];
+    const notebooks = [...this.dataLabNotebooks.values()];
+    this.renderDataLabList(notebooks);
+    if (this.activeNotebookSlug) return;
+    if (notebooks.length) {
+      const first = notebooks[0];
       this.openNotebook(first.viewer_url, first.slug);
+    } else {
+      this.dataLabViewer?.setAttribute('hidden', 'hidden');
     }
   }
 

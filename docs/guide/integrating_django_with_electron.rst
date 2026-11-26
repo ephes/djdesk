@@ -265,6 +265,8 @@ is bound to the opened descriptors. The portable fallback checks file identity a
 The inventory scans up to 512 directory entries plus one lookahead and lists up to 50
 regular notebooks in filename order within that window. Directories and symlinks count
 toward the scan bound.
+The drawer shows a notice for an incomplete inventory and merges the available entries
+into its current list. A complete refresh replaces the list and removes absent entries.
 The notebook must contain a ``cells`` list. An empty list is valid.
 Supported cell types are ``markdown``, ``code`` and ``raw``. Raw cells display escaped,
 preformatted source with a **Raw** label. A missing or unsupported cell type returns

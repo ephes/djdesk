@@ -265,6 +265,7 @@ is bound to the opened descriptors. The portable fallback checks file identity a
 The inventory scans up to 512 directory entries plus one lookahead and lists up to 50
 regular notebooks in filename order within that window. Directories and symlinks count
 toward the scan bound.
+The notebook must contain a ``cells`` list. An empty list is valid.
 Malformed UTF-8, JSON, cells or text outputs produce an HTTP 422 repair page with no notebook
 content or parser traceback. Repair the export in your editor and reload. The preview does
 not rewrite or execute it, and rendered source and output text remain HTML-escaped.

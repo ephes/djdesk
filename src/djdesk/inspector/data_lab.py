@@ -541,7 +541,7 @@ def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
         raise
     except (ValueError, RecursionError) as exc:
         raise InvalidNotebookError("Notebook is not valid UTF-8 JSON.") from exc
-    if not isinstance(notebook, dict) or not isinstance(notebook.get("cells", []), list):
+    if not isinstance(notebook, dict) or not isinstance(notebook.get("cells"), list):
         raise InvalidNotebookError("Notebook cells must be a list.")
     _admit_notebook_view(notebook)
     return notebook
@@ -549,7 +549,8 @@ def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
 
 def _admit_notebook_view(notebook: dict[str, Any]) -> None:
     """Check the complete view before allocating any HTML fragments."""
-    if len(notebook.get("cells", [])) > NOTEBOOK_VIEW_CELLS:
+    cells = notebook["cells"]
+    if len(cells) > NOTEBOOK_VIEW_CELLS:
         raise NotebookSizeError("Too many notebook cells.")
     text_bytes = 0
     html_bytes = 0
@@ -591,7 +592,7 @@ def _admit_notebook_view(notebook: dict[str, Any]) -> None:
 
     invalid_source = "Notebook cell source must be text or a list of text."
     invalid_output = "Notebook outputs must contain text objects."
-    for cell in notebook.get("cells", []):
+    for cell in cells:
         if not isinstance(cell, dict):
             raise InvalidNotebookError(invalid_source)
         cell_type = cell.get("cell_type")
@@ -618,7 +619,7 @@ def _admit_notebook_view(notebook: dict[str, Any]) -> None:
 def render_notebook_html(notebook: dict[str, Any]) -> str:
     """Convert a subset of notebook JSON into styled HTML blocks."""
     parts: list[str] = []
-    for cell in notebook.get("cells", []):
+    for cell in notebook["cells"]:
         if cell.get("cell_type") == "markdown":
             parts.append(_render_markdown_cell(cell))
         elif cell.get("cell_type") == "code":

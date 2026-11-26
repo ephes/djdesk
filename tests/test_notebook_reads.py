@@ -158,6 +158,16 @@ class NotebookReadTests(TestCase):
         render.assert_not_called()
         self.assertEqual(self.path.read_bytes(), content)
 
+    def test_notebook_requires_an_explicit_cells_list(self):
+        for content in (b'{"name":"export manifest"}', b'{"cells":null}', b'{"cells":{}}'):
+            with self.subTest(content=content):
+                self.assert_repairable(content)
+
+        content = b'{"cells":[]}'
+        self.path.write_bytes(content)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+        self.assertEqual(self.path.read_bytes(), content)
+
     def test_duplicate_json_members_are_refused_before_rendering(self):
         for content in (
             b'{"cells":[],"cells":[{"cell_type":"markdown","source":"ambiguous"}]}',

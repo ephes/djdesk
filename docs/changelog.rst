@@ -7,6 +7,7 @@ Unreleased
 Fixed
 ~~~~~
 
+- Require an explicit ``cells`` list for Data Lab notebook previews. An empty list is valid.
 - Count only regular notebook files toward the 50-result Data Lab inventory limit.
 - Validate and count Data Lab notebook text with one UTF-8 encoding per source or
   output string, preserving the existing preview limits.

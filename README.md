@@ -408,6 +408,11 @@ Invalid UTF-8, ambiguous JSON (duplicate members at any nesting level), or inval
 viewer cell/output shapes return a bounded HTTP 422 repair page. Consumed sources and
 output text must contain Unicode scalar values; escaped lone surrogates are refused.
 Ordinary Unicode, including emoji, combining characters and newlines, is preserved.
+The notebook must contain a `cells` list. An explicitly empty list opens as an empty preview.
+Each cell must declare a supported `cell_type` (`markdown`, `code` or `raw`).
+Raw cells display escaped, preformatted text with a **Raw** label. Code output
+previews display text. A missing or unsupported cell type returns a whole-preview
+HTTP 422 repair page.
 Built-in exports use notebook format 4.5 with stable, unique cell IDs within
 each notebook. The viewer also opens older notebooks whose cells lack IDs.
 Markdown preview normalizes LF, CRLF and standalone CR to the same line breaks

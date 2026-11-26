@@ -73,6 +73,18 @@ class NotebookViewLimitTests(TestCase):
         with mock.patch.object(data_lab, "NOTEBOOK_VIEW_HTML_BYTES", limit - 1):
             self.assert_refused_before_render([{"cell_type": "code", "source": "&"}])
 
+    def test_raw_cell_label_and_wrapper_count_toward_html_budget(self):
+        cells = [{"cell_type": "raw", "source": "&"}]
+        self.write_cells(cells)
+        fragment = (
+            "<section class='nb-cell nb-cell--raw'><header>Raw</header>"
+            "<pre><span>&amp;</span></pre></section>"
+        )
+        with mock.patch.object(data_lab, "NOTEBOOK_VIEW_HTML_BYTES", len(fragment) - 1):
+            self.assert_refused_before_render(cells)
+        with mock.patch.object(data_lab, "NOTEBOOK_VIEW_HTML_BYTES", len(fragment)):
+            self.assertContains(self.client.get(self.url), fragment)
+
     def test_code_source_and_output_lines_are_encoded_once_during_admission(self):
         encodings = Counter()
 

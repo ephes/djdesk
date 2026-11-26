@@ -305,13 +305,22 @@ class DataLabNotebookView(TemplateView):
         try:
             return super().get(request, *args, **kwargs)
         except data_lab.InvalidNotebookError as exc:
-            message = (
-                "This export exceeds the supported viewer size. Reduce cells, outputs or "
-                "text in your editor and reload. Your file has not been changed."
-                if isinstance(exc, data_lab.NotebookSizeError)
-                else "This export is not valid notebook JSON. Repair the file in your "
-                "editor and reload. Your file has not been changed."
-            )
+            if isinstance(exc, data_lab.NotebookSizeError):
+                message = (
+                    "This export exceeds the supported viewer size. Reduce cells, outputs or "
+                    "text in your editor and reload. Your file has not been changed."
+                )
+            elif isinstance(exc, data_lab.UnsupportedNotebookCellError):
+                message = (
+                    "This export contains an unsupported cell type. The viewer supports Markdown, "
+                    "code and raw cells. Repair the file in your editor and reload. "
+                    "Your file has not been changed."
+                )
+            else:
+                message = (
+                    "This export is not valid notebook JSON. Repair the file in your "
+                    "editor and reload. Your file has not been changed."
+                )
             return self.render_to_response(
                 {
                     "notebook_title": "Notebook needs repair",

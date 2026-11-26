@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Display escaped, labeled raw cells in Data Lab previews and include their markup in
+  the HTML budget. Refuse previews with missing or unsupported cell types.
+- Require an explicit ``cells`` list for Data Lab notebook previews. An empty list is valid.
 - Count only regular notebook files toward the 50-result Data Lab inventory limit.
 - Validate and count Data Lab notebook text with one UTF-8 encoding per source or
   output string, preserving the existing preview limits.

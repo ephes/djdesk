@@ -416,8 +416,9 @@ source bytes, and code and output text preserve their line endings.
 Viewer admission allows at most 8 MiB of notebook JSON, 500 cells, 50 outputs per code
 cell and 1 MiB of aggregate UTF-8 source/output text. Before constructing HTML, it also
 checks a conservative 2 MiB fragment budget including escaped text, cell/output wrappers
-and paragraph markup (even empty/stripped paragraphs count). Exceeding any limit returns
-a whole-view HTTP 422 size refusal; reduce the notebook in your editor and reload.
+and paragraph markup (even empty/stripped paragraphs count). The viewer validates UTF-8
+and counts bytes using a single encoding of each source or output string. Exceeding any
+limit returns a whole-view HTTP 422 size refusal; reduce the notebook in your editor and reload.
 Edit the original file and reload; the viewer preserves its bytes and escapes rendered text.
 The viewer reads bytes up to the opened file's initial size plus one, comparing descriptor
 size, nanosecond mtime and ctime before and after the read, before decoding UTF-8 or JSON.
@@ -434,8 +435,9 @@ stem to view them in DJDesk.
 
 Each inventory checks at most 512 directory entries (plus one lookahead), including
 hidden or unrelated entries, and offers at most 50 notebooks sorted by filename.
-The window uses the filesystem's enumeration order, then chooses its alphabetically
-first 50 supported names. This is a partial inventory, not the globally first 50 files.
+The window uses the filesystem's enumeration order. Only regular files with supported
+names count toward the 50-result limit, so notebook-named directories and symlinks
+cannot crowd out exports. An exceeded scan or result limit marks the inventory incomplete.
 Up to 32 directory generations (path, device/inode, mtime and ctime) are cached per
 backend process, so unchanged polls reuse the same window without enumerating history.
 A generation is cached only once its timestamps are more than three seconds old, because

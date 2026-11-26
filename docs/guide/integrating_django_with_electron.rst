@@ -262,9 +262,15 @@ Listings and previews accept regular notebook files directly inside the workspac
 directory. Notebook symlinks, even internal ones, and symlinked workspace export directories
 are refused. On systems supporting directory-relative opens and no-follow flags, validation
 is bound to the opened descriptors. The portable fallback checks file identity around opening.
+The inventory scans up to 512 directory entries plus one lookahead and lists up to 50
+regular notebooks in filename order within that window. Directories and symlinks count
+toward the scan bound.
 Malformed UTF-8, JSON, cells or text outputs produce an HTTP 422 repair page with no notebook
 content or parser traceback. Repair the export in your editor and reload. The preview does
 not rewrite or execute it, and rendered source and output text remain HTML-escaped.
+The preview validates each source/output string and measures its byte cost with a single
+UTF-8 encoding. For Markdown, the text limit counts original line endings and the HTML
+limit uses normalized line breaks.
 Each preview reads at most the opened file's initial byte size plus one and compares
 descriptor size, nanosecond mtime and ctime around the read before decoding. Changed
 generations are reopened, with three attempts at most; continued in-place editing returns

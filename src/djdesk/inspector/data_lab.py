@@ -420,14 +420,15 @@ def _scan_export_names(
     # Bound enumeration itself, including hidden/unrelated entries, before sorting.
     with os.scandir(directory) as entries:
         window = list(islice(entries, EXPORT_SCAN_LIMIT + 1))
-    if _directory_generation(directory) != generation:
-        raise _GenerationChanged("Notebook directory changed during inventory.")
     names = sorted(
         entry.name
         for entry in window[:EXPORT_SCAN_LIMIT]
         if entry.name.endswith(".ipynb")
         and re.fullmatch(SlugConverter.regex, Path(entry.name).stem)
+        and entry.is_file(follow_symlinks=False)
     )
+    if _directory_generation(directory) != generation:
+        raise _GenerationChanged("Notebook directory changed during inventory.")
     incomplete = len(window) > EXPORT_SCAN_LIMIT or len(names) > EXPORT_RESULT_LIMIT
     return tuple(names[:EXPORT_RESULT_LIMIT]), incomplete
 
@@ -515,18 +516,6 @@ def _unique_notebook_members(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def _is_notebook_text(value: Any) -> bool:
-    lines = [value] if isinstance(value, str) else value
-    if not isinstance(lines, list) or not all(isinstance(line, str) for line in lines):
-        return False
-    try:
-        for line in lines:
-            line.encode("utf-8")
-    except UnicodeEncodeError:
-        return False
-    return True
-
-
 def load_notebook(workspace: Workspace, slug: str) -> dict[str, Any]:
     try:
         for _attempt in range(NOTEBOOK_READ_ATTEMPTS):
@@ -565,53 +554,63 @@ def _admit_notebook_view(notebook: dict[str, Any]) -> None:
     text_bytes = 0
     html_bytes = 0
 
-    def charge_text(value: Any) -> None:
+    def charge_text(value: Any, invalid_text: str, *, markdown: bool = False) -> None:
         nonlocal text_bytes, html_bytes
-        for line in [value] if isinstance(value, str) else value:
-            size = len(line.encode("utf-8"))
+        lines = [value] if isinstance(value, str) else value
+        if not isinstance(lines, list):
+            raise InvalidNotebookError(invalid_text)
+        for line in lines:
+            if not isinstance(line, str):
+                raise InvalidNotebookError(invalid_text)
+            try:
+                size = len(line.encode("utf-8"))
+            except UnicodeEncodeError as exc:
+                raise InvalidNotebookError(invalid_text) from exc
             text_bytes += size
             # Exact escaped byte count, without constructing escaped text.
             html_bytes += size + sum(
                 line.count(char) * extra
                 for char, extra in (("&", 4), ("<", 3), (">", 3), ('"', 5), ("'", 5))
             )
+        if markdown:
+            raw = "".join(lines)
+            normalized = _normalize_markdown_newlines(raw)
+            # Charge original text bytes, but count CRLF as one byte in HTML.
+            html_bytes -= len(raw) - len(normalized)
+            # Conservatively include stripped/empty paragraphs and every newline.
+            html_bytes += len("<section class='nb-cell nb-cell--markdown'></section>")
+            html_bytes += (normalized.count("\n") + 1) * len("<p></p>")
+        # A malformed line takes precedence over an oversized field. Empty lists
+        # leave wrapper accounting to the end of the cell.
+        if lines or markdown:
             check_budget()
 
     def check_budget() -> None:
         if text_bytes > NOTEBOOK_VIEW_TEXT_BYTES or html_bytes > NOTEBOOK_VIEW_HTML_BYTES:
             raise NotebookSizeError("Notebook text or HTML exceeds the supported viewer size.")
 
+    invalid_source = "Notebook cell source must be text or a list of text."
+    invalid_output = "Notebook outputs must contain text objects."
     for cell in notebook.get("cells", []):
-        if not isinstance(cell, dict) or not _is_notebook_text(cell.get("source", [])):
-            raise InvalidNotebookError("Notebook cell source must be text or a list of text.")
-        source = cell.get("source", [])
+        if not isinstance(cell, dict):
+            raise InvalidNotebookError(invalid_source)
         cell_type = cell.get("cell_type")
-        if cell_type == "markdown":
-            raw = "".join(source)
-            normalized = _normalize_markdown_newlines(raw)
-            # CRLF normalization removes one byte from the HTML for each CRLF pair.
-            text_bytes += len(raw) - len(normalized)
-            charge_text(normalized)
-            # Conservatively include stripped/empty paragraphs and every newline.
-            html_bytes += len("<section class='nb-cell nb-cell--markdown'></section>")
-            html_bytes += (normalized.count("\n") + 1) * len("<p></p>")
-        else:
-            charge_text(source)
+        charge_text(cell.get("source", []), invalid_source, markdown=cell_type == "markdown")
         if cell_type == "code":
             html_bytes += len(
                 "<section class='nb-cell nb-cell--code'><pre><code></code></pre></section>"
             )
             outputs = cell.get("outputs", [])
             if not isinstance(outputs, list):
-                raise InvalidNotebookError("Notebook outputs must contain text objects.")
+                raise InvalidNotebookError(invalid_output)
             if len(outputs) > NOTEBOOK_VIEW_OUTPUTS_PER_CELL:
                 raise NotebookSizeError("Too many notebook outputs in one cell.")
             if outputs:
                 html_bytes += len("<div class='nb-output'><header>Output</header></div>")
             for output in outputs:
-                if not isinstance(output, dict) or not _is_notebook_text(output.get("text", [])):
-                    raise InvalidNotebookError("Notebook outputs must contain text objects.")
-                charge_text(output.get("text", []))
+                if not isinstance(output, dict):
+                    raise InvalidNotebookError(invalid_output)
+                charge_text(output.get("text", []), invalid_output)
                 html_bytes += len("<pre></pre>")
         check_budget()
 

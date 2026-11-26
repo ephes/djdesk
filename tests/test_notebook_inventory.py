@@ -144,6 +144,22 @@ class NotebookInventoryTests(TestCase):
         self.assertEqual(payload["notebooks"], [])
         self.assertTrue(payload["notebooks_incomplete"])
 
+    def test_nonregular_notebook_names_do_not_consume_the_result_budget(self):
+        for slug in ("z-last", "m-first", "s-middle"):
+            (self.directory / f"{slug}.ipynb").write_text('{"cells": []}')
+        for index in range(data_lab.EXPORT_RESULT_LIMIT + 1):
+            path = self.directory / f"aaa-{index:04}.ipynb"
+            if index % 2:
+                path.symlink_to("z-last.ipynb")
+            else:
+                path.mkdir()
+
+        payload = workspace_data_lab_payload(self.workspace)
+        self.assertEqual(
+            [entry["slug"] for entry in payload["notebooks"]], ["m-first", "s-middle", "z-last"]
+        )
+        self.assertFalse(payload["notebooks_incomplete"])
+
     def test_export_response_selects_new_notebook_outside_the_inventory_window(self):
         for index in range(55):
             (self.directory / f"aaa-{index:04}.ipynb").write_text('{"cells": []}')

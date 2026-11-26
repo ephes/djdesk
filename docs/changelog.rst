@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Verify the staged offline docs recovery intent and directory identities before
+  moving the live bundle, preserving it on short writes or invalid readback.
 - Bound offline docs recovery receipt reads to 4 KiB and refuse receipts that
   change before recovery can use them.
 - Preserve known Data Lab notebooks during incomplete inventory refreshes and remove

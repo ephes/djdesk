@@ -176,9 +176,16 @@ def _prepare_destination(source: Path, dest: Path) -> None:
             old = _directory_identity(dest)
             if old is not None:
                 intent = work / "recovery.json"
-                intent.write_text(
-                    json.dumps([work.name, old, _directory_identity(staging)]), encoding="utf-8"
+                expected = (work.name, old, _directory_identity(staging))
+                payload = json.dumps(expected)
+                if intent.write_text(payload, encoding="utf-8") != len(payload):
+                    raise ValueError("Incomplete recovery intent write")
+                work_name, recorded_old, recorded_new, generation = _read_recovery_receipt(
+                    dest, intent
                 )
+                if (work_name, recorded_old, recorded_new) != expected:
+                    raise ValueError("Staged recovery intent does not match publication identities")
+                _check_receipt_generation(intent, generation)
                 try:
                     os.rename(intent, receipt)
                     recovery_pending = True

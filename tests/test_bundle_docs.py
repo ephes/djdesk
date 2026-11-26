@@ -207,6 +207,44 @@ bundle_docs._prepare_destination(*map(Path, sys.argv[1:3]))
         for path in legacy:
             self.assertEqual((path / "sentinel").read_text(encoding="utf-8"), "keep")
 
+    def test_invalid_intent_writes_never_move_live_bundle(self):
+        receipt = self.root / ".bundle.recovery.json"
+        old_inode = self.dest.stat().st_ino
+        write_text = Path.write_text
+
+        for failure in ("short count", "truncated receipt", "wrong identity"):
+            with self.subTest(failure=failure):
+
+                def write_intent(path, data, *args, **kwargs):
+                    if path.name != "recovery.json":
+                        return write_text(path, data, *args, **kwargs)
+                    if failure == "short count":
+                        return write_text(path, data[:-1], *args, **kwargs)
+                    if failure == "truncated receipt":
+                        write_text(path, data[:-1], *args, **kwargs)
+                        return len(data)
+                    payload = json.loads(data)
+                    payload[2][1] ^= 1
+                    return write_text(path, json.dumps(payload), *args, **kwargs)
+
+                with (
+                    mock.patch.object(Path, "write_text", autospec=True, side_effect=write_intent),
+                    mock.patch.object(bundle_docs.os, "replace", wraps=os.replace) as replace,
+                    self.assertRaisesRegex(ValueError, "recovery (intent|receipt)"),
+                ):
+                    self._run_main()
+
+                replace.assert_not_called()
+                self.assert_old()
+                self.assertEqual(self.dest.stat().st_ino, old_inode)
+                self.assertFalse(receipt.exists())
+                self.assert_no_staging()
+
+        self._run_main()
+        self.assertEqual((self.dest / "index.html").read_text(), "new")
+        self.assertFalse(receipt.exists())
+        self.assert_no_staging()
+
     def test_swap_failures_restore_old_or_report_recovery(self):
         for failures in ({1}, {2}, {2, 3}):
             with self.subTest(failures=failures):

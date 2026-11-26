@@ -131,8 +131,12 @@ Offline docs publishers copy into unique sibling staging directories and wait up
 seconds for a same-destination writer lock. A failed promotion restores the previous bundle.
 Before retiring the current bundle, the publisher records its directory identity,
 the replacement identity and the workspace in a sibling `.docs_bundle.recovery.json`
-receipt. The next invocation reconciles it under the same lock before checking the
-build input. If the public name is absent, it restores the recorded, complete backup.
+receipt. The publisher checks the staged write count and reads the receipt back to
+verify the workspace and both directory identities before publishing the receipt
+or moving the live bundle. If verification fails, the live bundle stays in place
+and a retry can publish normally. The next invocation reconciles a published receipt
+under the same lock before checking the build input. If the public name is absent,
+it restores the recorded, complete backup.
 If the replacement is already installed, it keeps that generation. Recovered staging
 and backup copies are retained at the reported path. An invalid receipt, incomplete
 backup or unexpected directory identity stops publication for manual inspection.

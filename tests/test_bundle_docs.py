@@ -129,6 +129,44 @@ bundle_docs._prepare_destination(*map(Path, sys.argv[1:3]))
         self.assertEqual(len(list(self.root.glob(".bundle-publish-*"))), 1)
         self.assertFalse((self.root / ".bundle.recovery.json").exists())
 
+    def test_retry_refuses_oversized_receipt(self):
+        self._interrupt_publication("backup")
+        receipt = self.root / ".bundle.recovery.json"
+        original = receipt.read_bytes()
+        receipt.write_bytes(original + b" " * 8192)
+
+        with self.assertRaisesRegex(ValueError, "Recovery receipt exceeds") as caught:
+            self._run_main()
+
+        self.assertLess(len(str(caught.exception)), 200)
+        self.assertFalse(self.dest.exists())
+        backup = next(self.root.glob(".bundle-publish-*/backup"))
+        self.assertEqual((backup / "index.html").read_text(), "old")
+        self.assertEqual(receipt.read_bytes(), original + b" " * 8192)
+
+    def test_retry_refuses_receipt_replaced_during_read(self):
+        self._interrupt_publication("backup")
+        receipt = self.root / ".bundle.recovery.json"
+        replacement = self.root / "replacement.json"
+        replacement.write_bytes(receipt.read_bytes())
+        replacement_inode = replacement.stat().st_ino
+        read = os.read
+
+        def exchange_after_read(fd, count):
+            data = read(fd, count)
+            os.replace(replacement, receipt)
+            return data
+
+        with mock.patch.object(bundle_docs.os, "read", side_effect=exchange_after_read):
+            with self.assertRaisesRegex(ValueError, "Recovery receipt changed") as caught:
+                self._run_main()
+
+        self.assertLess(len(str(caught.exception)), 200)
+        self.assertFalse(self.dest.exists())
+        backup = next(self.root.glob(".bundle-publish-*/backup"))
+        self.assertEqual((backup / "index.html").read_text(), "old")
+        self.assertEqual(receipt.stat().st_ino, replacement_inode)
+
     def test_retry_keeps_promoted_bundle_and_backup_after_interruption(self):
         self._interrupt_publication(self.dest.name)
         (self.source / "index.html").unlink()

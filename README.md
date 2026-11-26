@@ -136,6 +136,8 @@ build input. If the public name is absent, it restores the recorded, complete ba
 If the replacement is already installed, it keeps that generation. Recovered staging
 and backup copies are retained at the reported path. An invalid receipt, incomplete
 backup or unexpected directory identity stops publication for manual inspection.
+Recovery admits one regular, non-symlink UTF-8 JSON receipt up to 4 KiB. If the
+receipt changes while it is read or checked, recovery stops and retains the copies.
 If immediate rollback fails, the error reports the retained backup and receipt.
 Stop publishers before inspecting retained paths and keep the lock file in place.
 Copying happens outside the lock. Successful publications are serialized, with the

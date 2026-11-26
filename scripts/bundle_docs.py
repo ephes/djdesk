@@ -17,6 +17,8 @@ from filelock import FileLock
 
 from djdesk.docs_bundle import REQUIRED_HTML_FILES
 
+MAX_RECOVERY_RECEIPT_BYTES = 4096
+
 
 def _contains_directory(tree: Path, path: Path) -> bool:
     return any(ancestor.exists() and tree.samefile(ancestor) for ancestor in (path, *path.parents))
@@ -40,26 +42,80 @@ def _directory_identity(path: Path) -> list[int] | None:
     return [info.st_dev, info.st_ino]
 
 
+def _receipt_generation(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_mode,
+        info.st_dev,
+        info.st_ino,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
+
+
+def _check_receipt_generation(receipt: Path, expected: tuple[int, ...]) -> None:
+    try:
+        current = receipt.lstat()
+    except FileNotFoundError:
+        raise ValueError("Recovery receipt changed") from None
+    if _receipt_generation(current) != expected:
+        raise ValueError("Recovery receipt changed")
+
+
+def _read_recovery_receipt(
+    dest: Path, receipt: Path
+) -> tuple[str, list[int], list[int], tuple[int, ...]]:
+    initial = receipt.lstat()
+    if not stat.S_ISREG(initial.st_mode):
+        raise ValueError("Recovery receipt must be a regular file")
+
+    flags = os.O_RDONLY
+    for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_BINARY"):
+        flags |= getattr(os, flag, 0)
+    fd = os.open(receipt, flags)
+    try:
+        opened = os.fstat(fd)
+        generation = _receipt_generation(opened)
+        if generation != _receipt_generation(initial):
+            raise ValueError("Recovery receipt changed while opening")
+        if opened.st_size > MAX_RECOVERY_RECEIPT_BYTES:
+            raise ValueError(f"Recovery receipt exceeds {MAX_RECOVERY_RECEIPT_BYTES} bytes")
+        data = os.read(fd, opened.st_size + 1)
+        if len(data) != opened.st_size or _receipt_generation(os.fstat(fd)) != generation:
+            raise ValueError("Recovery receipt changed or could not be read completely")
+        _check_receipt_generation(receipt, generation)
+    finally:
+        os.close(fd)
+
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except (ValueError, RecursionError):
+        raise ValueError("Invalid recovery receipt") from None
+    if not isinstance(payload, list) or len(payload) != 3:
+        raise ValueError("Invalid recovery receipt")
+    work_name, old, new = payload
+    if (
+        not isinstance(work_name, str)
+        or "\0" in work_name
+        or Path(work_name).name != work_name
+        or not work_name.casefold().startswith(f".{dest.name}-publish-".casefold())
+        or not all(
+            isinstance(identity, list)
+            and len(identity) == 2
+            and all(type(part) is int for part in identity)
+            for identity in (old, new)
+        )
+        or old == new
+    ):
+        raise ValueError("Invalid recovery receipt")
+    return work_name, old, new, generation
+
+
 def _recover_destination(dest: Path, receipt: Path) -> None:
     if not os.path.lexists(receipt):
         return
     try:
-        if not stat.S_ISREG(receipt.lstat().st_mode):
-            raise ValueError("Recovery receipt must be a regular file")
-        work_name, old, new = json.loads(receipt.read_text(encoding="utf-8"))
-        if (
-            not isinstance(work_name, str)
-            or Path(work_name).name != work_name
-            or not work_name.casefold().startswith(f".{dest.name}-publish-".casefold())
-            or not all(
-                isinstance(identity, list)
-                and len(identity) == 2
-                and all(type(part) is int for part in identity)
-                for identity in (old, new)
-            )
-            or old == new
-        ):
-            raise ValueError("Invalid recovery receipt")
+        work_name, old, new, generation = _read_recovery_receipt(dest, receipt)
         work = dest.parent / work_name
         if _directory_identity(work) is None:
             raise ValueError(f"Missing publication workspace {work}")
@@ -69,11 +125,13 @@ def _recover_destination(dest: Path, receipt: Path) -> None:
         if live is None and saved == old:
             if missing := _missing_html_member(backup):
                 raise ValueError(f"Recovery copy {backup} is missing a nonempty {missing}")
+            _check_receipt_generation(receipt, generation)
             os.replace(backup, dest)
         elif (live, saved) not in ((old, None), (new, old)):
             raise ValueError(f"Unexpected bundle or backup in {work}")
+        _check_receipt_generation(receipt, generation)
         receipt.unlink()
-    except (OSError, ValueError, TypeError) as error:
+    except (OSError, ValueError) as error:
         error.add_note(f"Inspect {receipt} and its publication workspace with publishers stopped.")
         raise
     print(

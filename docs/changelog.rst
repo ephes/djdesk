@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Bound offline docs recovery receipt reads to 4 KiB and refuse receipts that
+  change before recovery can use them.
 - Preserve known Data Lab notebooks during incomplete inventory refreshes and remove
   absent entries when a complete inventory arrives.
 - Limit task notification status tracking to the current dashboard poll window.

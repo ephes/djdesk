@@ -103,6 +103,9 @@ async function main() {
     await page.evaluate(() => ui.updateDataLab({ notebooks: [], notebooks_incomplete: true }));
     assert.equal(await page.evaluate(() => ui.activeNotebookSlug), 'schema-audit-9', 'limited polls retain the current viewer');
     assert.equal(await page.locator('[data-data-lab-incomplete]').isVisible(), true);
+    assert.deepEqual(await page.locator('[data-notebook-slug]').evaluateAll(
+      (buttons) => buttons.map((button) => button.dataset.notebookSlug)), ['log-study', 'schema-audit'],
+    'the first incomplete refresh retains server-rendered notebooks');
     console.log('Notebook drawer DOM passed: owned POST, manual choice, retry, truncated inventory');
 
     // Feed the real API receipt produced after publication and a failed inventory read.

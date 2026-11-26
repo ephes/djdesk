@@ -7,6 +7,8 @@ Unreleased
 Fixed
 ~~~~~
 
+- Preserve known Data Lab notebooks during incomplete inventory refreshes and remove
+  absent entries when a complete inventory arrives.
 - Limit task notification status tracking to the current dashboard poll window.
 - Display escaped, labeled raw cells in Data Lab previews and include their markup in
   the HTML budget. Refuse previews with missing or unsupported cell types.

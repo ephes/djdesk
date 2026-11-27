@@ -275,7 +275,7 @@ Dynamic inspector pages and JSON (including error responses) carry Django's priv
 no-store cache policy. Offline documentation assets keep an independent cache policy.
 
 Task requests dispatch only after the transaction saving the run commits; rollback
-starts no command. A response inside an outer transaction reports `requested`.
+starts no command. A default response inside an outer transaction reports `requested`.
 In autocommit, an enqueue error before any worker claimed the run returns HTTP 400.
 The immediate backend executes after commit and can return a finished outcome;
 the database backend queues the committed ID for workers. An enqueue error marks
@@ -297,8 +297,8 @@ receipt, and the submit button stays disabled until the reply has been handled.
 A submission with no complete reply within 30 seconds is aborted, re-enables the
 form and asks you to check task history before retrying.
 If the backend accepts the enqueue but saving its result ID fails, the server logs
-a warning with the run ID. The receipt still reports the saved run's state and
-dispatch is attempted only once.
+a warning with the run ID. The default receipt still reports the saved run's state,
+the compact receipt still returns its ID, and dispatch is attempted only once.
 
 After a worker crash, stop all workers owning the selected runs and terminate/check
 their command process trees before recovery. Age alone does not establish abandonment.

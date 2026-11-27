@@ -207,6 +207,9 @@ class TaskRunCreateView(View):
             errors = exc.message_dict or {"__all__": exc.messages}
             return JsonResponse({"errors": errors}, status=400)
 
+        if request.headers.get("X-DJDesk-Task-Response") == "receipt":
+            return JsonResponse({"task_run": {"id": run.pk}}, status=201)
+
         receipt = {
             "id": run.pk,
             "status": run.status,

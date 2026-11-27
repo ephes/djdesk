@@ -271,6 +271,7 @@ class InspectorUI {
           headers: {
             'X-Requested-With': 'XMLHttpRequest',
             'X-CSRFToken': this.getCsrfToken(),
+            'X-DJDesk-Task-Response': 'receipt',
           },
         });
         if (controller.signal.aborted) {

@@ -411,7 +411,12 @@ class InspectorAPIViewTests(TestCase):
         }
         response = client.post(reverse("inspector:task-run-create"), data=payload)
         self.assertEqual(response.status_code, 201)
-        self.assertIn("task_run", response.json())
+        full_response = response.json()
+        self.assertEqual(full_response["workspace"], self.workspace.slug)
+        self.assertIn("data_lab", full_response)
+        receipt = full_response["task_run"]
+        self.assertEqual(set(receipt), {"id", "status", "progress", "log"})
+        self.assertEqual(full_response["tasks"][0]["id"], receipt["id"])
 
 
 class DashboardViewTests(TestCase):

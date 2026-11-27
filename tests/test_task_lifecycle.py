@@ -2,18 +2,20 @@ from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 from unittest import mock
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.db import DatabaseError, OperationalError, connections, transaction
 from django.db.models import QuerySet
 from django.db.models.deletion import ProtectedError
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, override_settings
 from django.urls import reverse
 
 from djdesk.inspector.command_runner import CommandExecutionError, CommandResult
 from djdesk.inspector.forms import TaskRunForm
 from djdesk.inspector.models import TaskPreset, TaskRunRetired, Workspace, WorkspaceTaskRun
+from djdesk.inspector.services import workspace_status_payload
 from djdesk.inspector.tasks import execute_workspace_task
 
 
@@ -432,6 +434,39 @@ class TaskLifecycleTests(TransactionTestCase):
                 task.enqueue.assert_not_called()
             task.enqueue.assert_called_once_with(run.pk, database="default")
         self.assertEqual(WorkspaceTaskRun.objects.get(pk=run.pk).result_id, "queued-result")
+
+    @override_settings(INSPECTOR_RESPONSE_BYTES=256)
+    def test_create_compact_receipt_skips_oversized_workspace_status(self):
+        self.workspace.metadata = {"log_excerpt": [{"message": "synthetic log " * 100}]}
+        self.workspace.save(update_fields=["metadata"])
+        endpoint = reverse("inspector:task-run-create")
+        fields = {"workspace": self.workspace.slug, "preset": self.preset.key}
+        headers = {"X-DJDesk-Task-Response": "receipt"}
+
+        with (
+            mock.patch("djdesk.inspector.forms.execute_workspace_task") as task,
+            mock.patch(
+                "djdesk.inspector.views.workspace_status_payload", wraps=workspace_status_payload
+            ) as snapshot,
+        ):
+            refused = self.client.post(endpoint, fields, headers=headers)
+            self.assertEqual(refused.status_code, 400)
+            self.assertIn("confirm_safe", refused.json()["errors"])
+            task.enqueue.assert_not_called()
+
+            task.enqueue.return_value.id = "queued-result"
+            response = self.client.post(endpoint, {**fields, "confirm_safe": "on"}, headers=headers)
+            run = WorkspaceTaskRun.objects.get(workspace=self.workspace)
+            task.enqueue.assert_called_once_with(run.pk, database="default")
+            self.assertEqual(response.status_code, 201)
+            self.assertLessEqual(len(response.content), settings.INSPECTOR_RESPONSE_BYTES)
+            self.assertEqual(response.json(), {"task_run": {"id": run.pk}})
+            snapshot.assert_not_called()
+
+        poll = self.client.get(reverse("inspector:workspace-status", args=[self.workspace.slug]))
+        self.assertEqual(poll.status_code, 200)
+        self.assertGreater(len(poll.content), settings.INSPECTOR_RESPONSE_BYTES)
+        self.assertEqual(poll.json()["tasks"][0]["id"], run.pk)
 
     def test_create_returns_receipt_when_optional_status_refresh_fails(self):
         dashboard = self.client.get(

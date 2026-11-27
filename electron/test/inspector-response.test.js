@@ -257,6 +257,40 @@ test('a delayed task receipt keeps newer task history and queues a status refres
   assert.match(ui.taskHistory.innerHTML, /width:75%/);
 });
 
+test('a compact submission receipt survives an oversized workspace status poll', async () => {
+  const requests = [];
+  const toasts = [];
+  const receipt = { replaceChildren(...children) { this.children = children; } };
+  const snapshot = { log_excerpt: [{ message: 'synthetic log '.repeat(20) }] };
+  const { ui, connection, updates } = statusPolling(async (url, options) => {
+    requests.push([url, options.method ?? 'GET']);
+    if (options.method === 'POST') {
+      const taskRun = { id: 42 };
+      const payload = options.headers['X-DJDesk-Task-Response'] === 'receipt'
+        ? { task_run: taskRun }
+        : { ...snapshot, task_run: taskRun };
+      return new Response(JSON.stringify(payload), { status: 201 });
+    }
+    return new Response(JSON.stringify(snapshot));
+  }, {
+    FormData: class {},
+    document: { addEventListener() {}, createElement: () => ({ addEventListener() {} }) },
+  });
+  ui.taskEndpoint = '/tasks';
+  ui.workspacePoll = { url: ui.statusUrl };
+  ui.responseBytes = 64;
+  ui.getCsrfToken = () => '';
+  ui.showToast = (...args) => toasts.push(args);
+
+  await ui.submitTaskForm({ reset() {} }, receipt);
+  await settled();
+  assert.equal(receipt.children[0], 'Task #42 submitted. ');
+  assert.deepEqual(requests, [['/tasks', 'POST'], ['/alpha/status', 'GET']]);
+  assert.deepEqual(toasts, []);
+  assert.deepEqual(connection, [false]);
+  assert.deepEqual(updates, []);
+});
+
 test('task submissions cancel oversized success and error replies before parsing', async () => {
   for (const status of [201, 400]) {
     const fixture = response([new Uint8Array(16), new Uint8Array(17)], '1', status);

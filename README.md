@@ -281,16 +281,17 @@ The immediate backend executes after commit and can return a finished outcome;
 the database backend queues the committed ID for workers. An enqueue error marks
 only an unclaimed request failed, preserving a worker's running or completed outcome.
 Poll task status for the final outcome, including deferred enqueue failures.
-HTTP 201 includes a `task_run` receipt with the saved ID and last known state. If
-reading the run after dispatch fails, the receipt uses its initial `requested`
-state. Open the run by ID or poll status to see whether it has finished. If the
-optional workspace snapshot or its serialization fails, the response contains
-only the receipt, even if reporting the refresh failure to the server log also
-fails. The task form confirms the saved ID and offers **View task log**
-for that run even when the snapshot is missing. The Inspector refreshes the
-dashboard through the workspace poller after accepting the receipt. If a poll is
-already running, the refresh starts when it settles. The POST snapshot is
-ignored so a delayed receipt cannot roll back displayed task progress.
+The Inspector sends `X-DJDesk-Task-Response: receipt` to request HTTP 201 with just
+the saved `task_run.id`. The task form confirms the ID and offers **View task log**,
+then refreshes the dashboard through the workspace poller. If a poll is already
+running, the refresh starts when it settles. A poll failure leaves the submission
+confirmation visible.
+By default, API clients receive the workspace snapshot and a `task_run` receipt
+with the saved ID and last known state. If reading the run after dispatch fails,
+the receipt uses its initial `requested` state. Open the run by ID or poll status
+to see whether it has finished. If building or serializing the snapshot fails, the
+response contains only the receipt, even if reporting the failure to the server
+log also fails.
 Each new submission clears the previous
 receipt, and the submit button stays disabled until the reply has been handled.
 A submission with no complete reply within 30 seconds is aborted, re-enables the

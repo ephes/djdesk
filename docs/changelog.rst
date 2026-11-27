@@ -7,6 +7,9 @@ Unreleased
 Fixed
 ~~~~~
 
+- Confirm Inspector task submissions with a compact task ID receipt before
+  polling for workspace status, even when the full status exceeds the renderer's
+  response limit.
 - Execute the command and workspace path recorded when a confirmed task request is saved. A queued run
   whose preset command or workspace path changed meanwhile, or which was queued before
   this release, fails without starting a command. Migration 0007 adds the recorded inputs.

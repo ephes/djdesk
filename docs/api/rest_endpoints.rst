@@ -141,15 +141,18 @@ Example ``curl`` request (assuming ``csrftoken`` is stored in ``TOKEN``):
          -d "confirm_safe=on" \
          https://localhost:8000/api/task-runs/
 
-Response payload mirrors ``GET /api/workspaces/<slug>/status/`` and includes an extra
+The default response mirrors ``GET /api/workspaces/<slug>/status/`` and includes an extra
 ``task_run`` object with the ID and last known status, progress, and log of the
 newly created run. If reading the run after dispatch fails, the receipt uses
 the initial ``requested`` state. Read ``GET /api/task-runs/<id>/`` or poll the
 workspace status for the current outcome.
 If the optional status refresh or its serialization fails, HTTP 201 contains only
 ``task_run``. The receipt is returned even if the server cannot log the refresh failure.
-The Inspector uses the receipt to confirm submission and request a fresh status
-poll. It ignores the optional snapshot in the POST response.
+Send the header ``X-DJDesk-Task-Response: receipt`` to receive HTTP 201 with just
+``{"task_run": {"id": 123}}`` (using the saved run ID). This skips building the
+workspace snapshot. Validation and dispatch errors use the same HTTP 400
+response as the default mode. The Inspector requests this compact receipt,
+displays the ID and refreshes workspace status through a separate GET.
 
 ``GET /api/task-runs/<id>/``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -19,9 +19,9 @@ Key endpoints
     schema.
 
 ``POST /api/task-runs/``
-    Queues a ``django-tasks`` job using the assistant drawer form data. Responds with
-    the same payload as the status endpoint so the renderer can refresh without
-    waiting for the poll interval.
+    Queues a ``django-tasks`` job using the assistant drawer form data. The drawer
+    requests a compact receipt with the saved task ID, then polls workspace status.
+    The default response includes the workspace snapshot alongside the receipt.
 
 ``GET /api/task-runs/<id>/``
     Lightweight endpoint for future explorers that want to fetch log output on demand.
